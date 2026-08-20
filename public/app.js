@@ -81,13 +81,13 @@ const PROVIDERS = [
     defaultKey: '', isFree: () => true,
   },
   {
-    id: 'github', name: 'GitHub Models', sub: 'github.com/marketplace/models',
-    logo: '/providers/github.ico',
-    accent: '#a371f7', glow: 'rgba(163,113,247,.18)',
+    id: 'orcarouter', name: 'OrcaRouter', sub: 'api.orcarouter.ai',
+    logo: '/providers/orcarouter.png',
+    accent: '#0d9488', glow: 'rgba(13,148,136,.18)',
     format: 'openai', claudeCode: false,
-    baseUrl: 'https://models.inference.ai.azure.com/',
-    desc: 'Free with a GitHub token — GPT-4o, Llama 405B, DeepSeek-R1.',
-    signup: 'https://github.com/settings/tokens',
+    baseUrl: 'https://api.orcarouter.ai/v1/',
+    desc: 'OpenAI-compatible router across 200+ models at provider cost — orcarouter/auto picks for you.',
+    signup: 'https://www.orcarouter.ai',
     defaultKey: '', isFree: () => true,
   },
   {
@@ -628,6 +628,12 @@ function createGatewayCard(provider) {
 
   const modelDisplay = (!needsKey && model) ? model : '';
 
+  const isCustom = !!provider.hasCustomUrl;
+  const statusClass = isCustom ? (model ? 'live' : 'pending') : (hasLiveModels ? 'live' : 'pending');
+  const statusText = isCustom
+    ? (model ? esc(model) : 'custom endpoint')
+    : (hasLiveModels ? modelCount + ' free · ' + totalCount + ' total' : (needsKey ? 'needs key' : 'loading…'));
+
   card.innerHTML = `
     <div class="card-top">
       <div class="card-ico">${logoHtml(provider)}</div>
@@ -640,15 +646,15 @@ function createGatewayCard(provider) {
         <div class="card-sub">${provider.sub}</div>
       </div>
       <div class="card-status">
-        <span class="status-indicator ${hasLiveModels ? 'live' : 'pending'}"></span>
-        <span class="sync-time">${hasLiveModels ? modelCount + ' free · ' + totalCount + ' total' : (needsKey ? 'needs key' : 'loading…')}</span>
+        <span class="status-indicator ${statusClass}"></span>
+        <span class="sync-time">${statusText}</span>
       </div>
     </div>
 
     <div class="badges">
       ${clients.map(c => `<span class="badge client" style="border-color:${CLIENT_META[c].color}33;background:${CLIENT_META[c].color}1a;color:${CLIENT_META[c].color}"><span class="fmt-dot" style="background:${CLIENT_META[c].color}"></span>${CLIENT_META[c].label}</span>`).join('')}
       ${ccBadge}
-      <span class="badge cnt">${modelCount} free · ${totalCount} total</span>
+      <span class="badge cnt">${isCustom ? 'custom model' : modelCount + ' free · ' + totalCount + ' total'}</span>
     </div>
 
     <div class="card-desc">${provider.desc}</div>

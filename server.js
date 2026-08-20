@@ -35,7 +35,7 @@ const PROVIDERS = [
   { id: 'groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false },
   { id: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false },
   { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false },
-  { id: 'github', baseUrl: 'https://models.inference.ai.azure.com/', format: 'openai', publicModels: false },
+  { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: false },
   { id: 'mistral', baseUrl: 'https://api.mistral.ai/v1/', format: 'openai', publicModels: false },
   { id: 'huggingface', baseUrl: 'https://router.huggingface.co/v1/', format: 'openai', publicModels: false },
   { id: 'chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false },
@@ -43,8 +43,7 @@ const PROVIDERS = [
 ];
 
 // Curated fallback model lists for providers whose list endpoint is unavailable
-// or requires a client allow-list (e.g. GitHub Models has no programmatic
-// model-listing endpoint; Agent/Token Router reject unknown clients).
+// or requires a client allow-list (e.g. Agent/Token Router reject unknown clients).
 const STATIC_MODELS = {
   agentrouter: [
     'claude-sonnet-4', 'claude-opus-4',
@@ -75,14 +74,15 @@ const STATIC_MODELS = {
     'Qwen/Qwen2.5-72B-Instruct', 'mistralai/Mistral-7B-Instruct-v0.3',
     { id: 'meta-llama/Llama-3.1-405B-Instruct', paid: true },
   ],
-  github: [
-    'gpt-4o-mini', 'o1-mini', 'o3-mini', 'deepseek-r1', 'llama-3.3-70b-instruct',
-    'llama-3.2-90b-vision-instruct', 'phi-3.5-mini-instruct', 'ministral-8b',
-    'qwen2.5-72b-instruct', 'qwen2.5-coder-32b-instruct', 'codestral-22b', 'jais-13b',
-    { id: 'gpt-4o', paid: true }, { id: 'o1', paid: true }, { id: 'phi-4', paid: true },
-    { id: 'mistral-large', paid: true }, { id: 'mistral-nemo', paid: true },
-    { id: 'ai21-jamba-1.5-mini', paid: true }, { id: 'cohere-command-r-plus', paid: true },
-    { id: 'llama-3.1-405b-instruct', paid: true },
+  orcarouter: [
+    'openai/gpt-4o-mini', 'google/gemini-2.5-flash', 'deepseek/deepseek-chat',
+    'anthropic/claude-haiku-4.5', 'orcarouter/auto',
+    { id: 'openai/gpt-4o', paid: true },
+    { id: 'anthropic/claude-sonnet-4.6', paid: true },
+    { id: 'anthropic/claude-opus-4.8', paid: true },
+    { id: 'google/gemini-2.5-pro', paid: true },
+    { id: 'grok/grok-4-fast-reasoning', paid: true },
+    { id: 'qwen/qwen3.6-plus', paid: true },
   ],
 };
 
@@ -191,8 +191,8 @@ const PROVIDER_SITES = {
   gemini: 'https://ai.google.dev/gemini-api/docs/models',
   mistral: 'https://docs.mistral.ai/getting-started/models/',
   cerebras: 'https://inference-docs.cerebras.ai/',
-  github: 'https://github.com/marketplace/models',
   agentrouter: 'https://agentrouter.org',
+  orcarouter: 'https://www.orcarouter.ai',
   tokenrouter: 'https://www.tokenrouter.com/models',
 };
 
@@ -368,7 +368,7 @@ app.get('/api/cached-models', (req, res) => {
         if (p.id === 'openrouter') {
           return m.id?.endsWith(':free') || (m.pricing && parseFloat(m.pricing.prompt || 0) === 0 && parseFloat(m.pricing.completion || 0) === 0);
         }
-        if (['nvidia', 'huggingface', 'chutes'].includes(p.id)) {
+        if (['nvidia', 'huggingface', 'chutes', 'orcarouter'].includes(p.id)) {
           return !/embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma/i.test(m.id || '');
         }
         return true;

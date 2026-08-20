@@ -4,7 +4,7 @@
 
 ### AI Coding Gateway Switcher
 
-**Browse live free models from 13+ AI providers, pick one, and apply it to Claude Code — or any OpenAI/Gemini client — in a single click.**
+**Browse live free models from 14 AI providers, pick one, and apply it to Claude Code — or any OpenAI/Gemini client — in a single click.**
 
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Express](https://img.shields.io/badge/Express-5.x-000000?logo=express&logoColor=white)](https://expressjs.com)
@@ -67,7 +67,7 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 | **NVIDIA NIM** | `integrate.api.nvidia.com` | OpenAI | Browse |
 | **Groq** | `api.groq.com` | OpenAI | Browse |
 | **Cerebras** | `api.cerebras.ai` | OpenAI | Browse |
-| **GitHub Models** | `models.inference.ai.azure.com` | OpenAI | Browse |
+| **OrcaRouter** | `api.orcarouter.ai/v1` | OpenAI | Browse |
 | **Mistral** | `api.mistral.ai` | OpenAI | Browse |
 | **Hugging Face** | `router.huggingface.co` | OpenAI | Browse |
 | **Chutes AI** | `llm.chutes.ai` | OpenAI | Browse |
@@ -93,9 +93,9 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 ## 🏗️ How It Works
 
 ```
-┌─────────────┐        ┌──────────────────────┐        ┌─────────────────┐
+┌─────────────┐        ┌───────────────────-───┐        ┌─────────────────┐
 │   Browser   │  HTTP  │   Express Server      │  fetch │  AI Providers   │
-│  (app.js)   │◄──────►│   (server.js)         │◄──────►│  (13 gateways)  │
+│  (app.js)   │◄──────►│  (server.js)         │◄──────►│  (14 gateways)  │
 │             │        │                       │        │                 │
 │ • Provider  │        │ • Model cache (30-min │        │ • /models       │
 │   cards     │        │   refresh)            │        │ • /chat, /msgs  │
@@ -103,8 +103,8 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 │   for keys  │        │ • Proxy (no CORS)     │
 └─────────────┘        │ • Reads/writes        │        ┌─────────────────┐
                        │   settings.json       │───────►│ ~/.claude/      │
-                       └──────────────────────┘         │  settings.json  │
-                                                         └─────────────────┘
+                       └────────────────────-──┘        │  settings.json  │
+                                                        └─────────────────┘
 ```
 
 **Model-fetching fallback chain** (per provider):
@@ -129,7 +129,7 @@ This layered strategy means the dashboard degrades gracefully and always shows _
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/nexference.git
+git clone https://github.com/CodeNexus404/Nexference.git
 cd nexference
 
 # Install dependencies (just Express)
