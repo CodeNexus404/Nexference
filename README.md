@@ -43,7 +43,7 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 ## ✨ Key Features
 
 - **🔄 Live model discovery** — Pulls up-to-date model lists directly from each provider's API on startup and every 30 minutes.
-- **🛡️ Resilient three-tier fallback** — If a provider's API is unavailable or requires a key, Nexference falls back to **scraping the provider's docs page**, then to a **curated static list** — so cards are never empty.
+- **🛡️ Resilient three-tier fallback** — If a provider's API is unavailable or requires a key, Nexference falls back to **scraping the provider's docs page**, then to a **curated static list** — so cards are never empty. Scraped models are merged with the curated list, so known models (including paid ones) are never dropped.
 - **🆓 Smart free-model filtering** — Automatically separates free models from paid ones and filters out non-chat models (embeddings, TTS, image, rerankers) so you only see what's useful for coding.
 - **⚙️ One-click apply** — Writes a valid `~/.claude/settings.json` for Anthropic-compatible gateways, or generates a copy-ready config for OpenAI/Gemini clients.
 - **🔌 Multi-format support** — Handles **Anthropic**, **OpenAI**, and **Gemini** API dialects transparently.
@@ -51,6 +51,7 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 - **🌐 CORS-free proxy** — A server-side proxy fetches provider data, sidestepping browser CORS restrictions.
 - **🎨 Polished, accessible UI** — Custom "graphite" dark design system, fully responsive, with `prefers-reduced-motion` support — no CSS framework.
 - **🧩 Custom gateway support** — Point at any Anthropic- or OpenAI-compatible base URL.
+- **💾 Remembered preferences** — Your selected model, API key, and **Paid** toggle persist in `localStorage`, so the dashboard restores your setup on every refresh.
 
 ---
 
@@ -218,7 +219,7 @@ The server prints the config path it manages on startup:
 
 1. **Browse** the provider cards — each shows a live count of free and total models.
 2. **Add an API key** (grab a free one via the card's "get key →" link). Models load automatically.
-3. **Pick a model** from the dropdown. Toggle **Paid** to reveal premium models.
+3. **Pick a model** from the dropdown. Toggle **Paid** to reveal premium models — your choice is remembered across refreshes.
 4. **Test Connection** to verify the key + model actually work.
 5. **Apply Config:**
    - **Anthropic-compatible providers** → written straight into `~/.claude/settings.json`. Restart Claude Code and you're on the new gateway.
