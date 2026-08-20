@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexference — AI Coding Gateway Switcher</title>
+  <meta name="description" content="Browse free models from multiple AI providers, pick one, and apply directly to Claude Code or any client.">
+  <meta name="theme-color" content="#0a0b0d">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b8def'/><path d='M30 72V28l40 44V28' stroke='%230a0b0d' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="hdr">
+      <div class="eyebrow"><span class="dot"></span> Gateway Switcher</div>
+      <h1>Nex<em>ference</em></h1>
+      <p>Pick a gateway → it pulls its <b>live free models</b> straight from the source → apply. Claude, GPT & open-source, always current.</p>
+    </header>
+
+    <div class="active-bar">
+      <div class="chip live" id="liveChip">
+        <span class="dot-sm"></span>
+        <span id="liveText">No gateway selected</span>
+      </div>
+      <div class="chip path-chip" id="pathChip" title="Open config folder" onclick="openConfigFolder()">
+        <span class="ic-path">📁</span>
+        <span id="pathText">~/.claude/settings.json</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="stat"><b id="statGw">0</b><span>gateways</span></div>
+      <div class="stat"><b id="statFree">0</b><span>free models</span></div>
+      <div class="stat configured-stat"><b id="statConfigured">0</b><span>configured</span></div>
+      <input id="globalSearch" class="gsearch" type="text" placeholder="Filter gateways…" oninput="filterGatewaysDebounced(this.value)">
+      <button class="btn-icon" id="refreshAllBtn" onclick="refreshAllModels()" title="Refresh all model lists from providers">
+        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </button>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="out-box" id="outBox">
+      <div class="out-hdr">
+        <h3 id="outTitle">settings.json preview</h3>
+        <div class="acts">
+          <button class="btn btn2" onclick="copyJSON()"><span>Copy</span></button>
+        </div>
+      </div>
+      <div class="code" id="jsonOut"></div>
+    </div>
+
+    <div class="term">
+      <div class="term-bar">
+        <div class="term-dots"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span></div>
+        <span class="term-title" id="termTitle">activity — nexference</span>
+        <button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button>
+      </div>
+      <div class="term-body" id="termOut"></div>
+    </div>
+
+    <div class="security-note">
+      <span class="lock">🔒</span> API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose.
+    </div>
+
+    <footer class="foot">
+      <span>Nexference — switch gateways, not vibes.</span>
+      <span style="display:flex;align-items:center;gap:16px">Open Source · <a href="https://github.com" target="_blank" rel="noopener">GitHub</a> · <button class="btn btn2" onclick="downloadProject()" style="font-size:10px;padding:4px 12px"><span>⬇ Download</span></button></span>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast">
+    <span class="toast-icon" id="toastIcon">•</span>
+    <span id="toastTxt"></span>
+  </div>
+
+  <div id="configModal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head">
+        <h3 id="configModalTitle">OpenAI client config</h3>
+        <button class="modal-x" onclick="closeConfigModal()" aria-label="Close">×</button>
+      </div>
+      <p class="modal-sub" id="configModalSub">Copy this into your client's config (or a <code>.env</code> file):</p>
+      <pre id="configText" class="config-code"></pre>
+      <div class="modal-actions">
+        <button class="btn btn-go" onclick="copyConfigText()">Copy config</button>
+        <button class="btn btn2" onclick="closeConfigModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  function downloadProject() {
+    fetch('/nexference.tar.gz').then(r=>r.blob()).then(b=>{
+      const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nexference.tar.gz';a.click();
+    }).catch(()=>alert('Download failed — try opening in a new tab and visiting /nexference.tar.gz'));
+  }
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>
