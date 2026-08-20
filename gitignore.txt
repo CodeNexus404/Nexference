@@ -1,6 +1,0 @@
-node_modules/
-dev.log
-.env
-.DS_Store
-upload/
-package-lock.json
