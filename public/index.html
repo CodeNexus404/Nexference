@@ -3,100 +3,186 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nexference — AI Coding Gateway Switcher</title>
-  <meta name="description" content="Browse free models from multiple AI providers, pick one, and apply directly to Claude Code or any client.">
+  <title>Nexference — Universal AI Provider & Runtime Workspace</title>
+  <meta name="description" content="Manage cloud AI providers, local runtimes, models, and client configuration for Claude Code and other AI coding clients.">
   <meta name="theme-color" content="#0a0b0d">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b8def'/><path d='M30 72V28l40 44V28' stroke='%230a0b0d' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
+  <script>
+    // Set the active page + sidebar state before first paint to avoid a flash.
+    (function () {
+      try {
+        var p = localStorage.getItem('nx_page') || 'workspace';
+        document.documentElement.setAttribute('data-page', p);
+        if (localStorage.getItem('nx_sidebar') === 'collapsed') {
+          document.documentElement.classList.add('sidebar-collapsed');
+        }
+      } catch (e) { document.documentElement.setAttribute('data-page', 'workspace'); }
+    })();
+  </script>
 </head>
-<body>
-  <div class="app">
-    <header class="hdr">
-      <div class="eyebrow"><span class="dot"></span> Gateway Switcher</div>
-      <h1>Nex<em>ference</em></h1>
-      <p>Pick a gateway → it pulls its <b>live free models</b> straight from the source → apply. Claude, GPT & open-source, always current.</p>
-    </header>
-
-    <div class="active-bar">
-      <div class="chip live" id="liveChip">
-        <span class="dot-sm"></span>
-        <span id="liveText">No gateway selected</span>
+<body data-page="workspace">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div class="brand-txt"><b>Nex<em>ference</em></b><span>Universal AI Workspace</span></div>
+        <button class="nav-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        </button>
       </div>
-      <div class="chip path-chip" id="pathChip" title="Open config folder" onclick="openConfigFolder()">
-        <span class="ic-path">📁</span>
-        <span id="pathText">~/.claude/settings.json</span>
+      <nav class="nav">
+        <a class="nav-item" data-page="workspace" onclick="navigate('workspace')" title="Workspace">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+          <span class="nav-label">Workspace</span>
+        </a>
+        <a class="nav-item" data-page="cloud-providers" onclick="navigate('cloud-providers')" title="Cloud Providers">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.5A3.5 3.5 0 0 1 17.5 18z"/></svg></span>
+          <span class="nav-label">Cloud Providers</span>
+        </a>
+        <a class="nav-item" data-page="localai" onclick="navigate('localai')" title="Local AI">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3"/></svg></span>
+          <span class="nav-label">Local AI</span>
+        </a>
+        <a class="nav-item" data-page="models" onclick="navigate('models')" title="Models">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>
+          <span class="nav-label">Models</span>
+        </a>
+        <a class="nav-item" data-page="clients" onclick="navigate('clients')" title="Clients">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></span>
+          <span class="nav-label">Clients</span>
+        </a>
+        <a class="nav-item" data-page="playground" onclick="navigate('playground')" title="Playground">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg></span>
+          <span class="nav-label">Playground</span>
+        </a>
+        <a class="nav-item" data-page="settings" onclick="navigate('settings')" title="Settings">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.8 2 2 0 0 1-2.8-2.83l.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51-1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+          <span class="nav-label">Settings</span>
+        </a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="ver">v0.3.0</div>
       </div>
-    </div>
+    </aside>
 
-    <div class="toolbar">
-      <div class="stat"><b id="statGw">0</b><span>gateways</span></div>
-      <div class="stat"><b id="statFree">0</b><span>free models</span></div>
-      <div class="stat configured-stat"><b id="statConfigured">0</b><span>configured</span></div>
-      <input id="globalSearch" class="gsearch" type="text" placeholder="Filter gateways…" oninput="filterGatewaysDebounced(this.value)">
-      <button class="btn-icon" id="refreshAllBtn" onclick="refreshAllModels()" title="Refresh all model lists from providers">
-        <svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-      </button>
-    </div>
-
-    <div class="grid" id="grid"></div>
-
-    <div class="out-box" id="outBox">
-      <div class="out-hdr">
-        <h3 id="outTitle">settings.json preview</h3>
-        <div class="acts">
-          <button class="btn btn2" onclick="copyJSON()"><span>Copy</span></button>
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-left">
+          <nav class="crumb" id="crumb" aria-label="Breadcrumb"></nav>
         </div>
-      </div>
-      <div class="code" id="jsonOut"></div>
-    </div>
+        <div class="topbar-right">
+          <div class="cfg-status" id="cfgStatus" title="Configuration status"></div>
+          <button class="icon-btn theme-toggle" id="themeToggle" onclick="cycleTheme()" title="Cycle theme" aria-label="Cycle theme">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <div class="app-ver" id="appVersion">v0.3.0</div>
+        </div>
+      </header>
 
-    <div class="term">
-      <div class="term-bar">
-        <div class="term-dots"><span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span></div>
-        <span class="term-title" id="termTitle">activity — nexference</span>
-        <button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button>
-      </div>
-      <div class="term-body" id="termOut"></div>
-    </div>
+      <!-- ───────── Workspace ───────── -->
+      <section class="page" id="page-workspace"></section>
 
-    <div class="security-note">
-      <span class="lock">🔒</span> API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose.
-    </div>
+      <!-- ───────── Cloud Providers ───────── -->
+      <section class="page" id="page-cloud-providers">
+        <div class="page-head">
+          <h1>Cloud Providers</h1>
+          <p>Connect AI providers and configure them for supported AI clients.</p>
+        </div>
+        <div class="toolbar cp-toolbar">
+          <input id="cpSearch" class="gsearch" type="text" placeholder="Search providers…" aria-label="Search providers" />
+          <div class="cp-filters" id="cpFilters"></div>
+        </div>
+        <div class="provider-grid" id="cpGrid"></div>
+      </section>
 
-    <footer class="foot">
-      <span>Nexference — switch gateways, not vibes.</span>
-      <span style="display:flex;align-items:center;gap:16px">Open Source · <a href="https://github.com" target="_blank" rel="noopener">GitHub</a> · <button class="btn btn2" onclick="downloadProject()" style="font-size:10px;padding:4px 12px"><span>⬇ Download</span></button></span>
-    </footer>
+      <!-- ───────── Local AI ───────── -->
+      <section class="page" id="page-localai">
+        <div class="page-head">
+          <h1>Local AI</h1>
+          <p>Local model runtimes, kept separate from cloud providers.</p>
+        </div>
+        <div class="rt-grid" id="rtGrid"></div>
+      </section>
+
+      <!-- ───────── Models ───────── -->
+      <section class="page" id="page-models">
+        <div class="page-head">
+          <h1>Models</h1>
+          <p>Browse and search the live model catalogue across every provider.</p>
+        </div>
+        <div class="toolbar">
+          <input id="modelSearch" class="gsearch" type="text" placeholder="Search models across providers…" aria-label="Search models" />
+        </div>
+        <div class="model-explorer" id="modelList"></div>
+      </section>
+
+      <!-- ───────── Clients ───────── -->
+      <section class="page" id="page-clients">
+        <div class="page-head">
+          <h1>Clients</h1>
+          <p>AI coding clients Nexference can target.</p>
+        </div>
+        <div class="client-grid" id="clientGrid"></div>
+      </section>
+
+      <!-- ───────── Playground ───────── -->
+      <section class="page" id="page-playground">
+        <div class="page-head">
+          <h1>Playground</h1>
+          <p>Try models and providers interactively.</p>
+        </div>
+        <div class="panel placeholder-panel">
+          <div class="placeholder-ico">⌨</div>
+          <h3>Playground coming soon</h3>
+          <p class="muted">The interactive playground is on the roadmap. For now, configure a provider and generate a client config from the Workspace or Cloud Providers pages.</p>
+          <button class="btn btn-go" onclick="openWorkflow()">Configure Claude Code</button>
+        </div>
+      </section>
+
+      <!-- ───────── Settings ───────── -->
+      <section class="page" id="page-settings">
+        <div class="page-head">
+          <h1>Settings</h1>
+          <p>Theme, configuration profiles, backups and security.</p>
+        </div>
+        <div class="settings-grid">
+          <div class="panel">
+            <h3>Appearance</h3>
+            <div class="seg" id="themeSeg"></div>
+          </div>
+          <div class="panel">
+            <h3>Configuration Profiles</h3>
+            <p class="muted">Profiles reference a provider &amp; model — they never store secrets.</p>
+            <div class="profile-list" id="profileList"></div>
+            <div class="profile-new">
+              <input id="profileName" class="inp" placeholder="Profile name (e.g. Work)">
+              <button class="btn btn-go" onclick="createProfile()">Save current as profile</button>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Backups</h3>
+            <p class="muted">Before each apply, the previous <code>~/.claude/settings.json</code> is copied to <code>~/.nexference/backups/</code> with a timestamp.</p>
+            <div id="backupList" class="backup-list"></div>
+          </div>
+          <div class="panel security-note">
+            <span class="lock">🔒</span> API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose. Config is written through the local server to <code>~/.claude/settings.json</code> after a backup is made.
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
-  <div class="toast" id="toast">
-    <span class="toast-icon" id="toastIcon">•</span>
-    <span id="toastTxt"></span>
-  </div>
-
-  <div id="configModal" class="modal-overlay" hidden>
-    <div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-head">
-        <h3 id="configModalTitle">OpenAI client config</h3>
-        <button class="modal-x" onclick="closeConfigModal()" aria-label="Close">×</button>
-      </div>
-      <p class="modal-sub" id="configModalSub">Copy this into your client's config (or a <code>.env</code> file):</p>
-      <pre id="configText" class="config-code"></pre>
-      <div class="modal-actions">
-        <button class="btn btn-go" onclick="copyConfigText()">Copy config</button>
-        <button class="btn btn2" onclick="closeConfigModal()">Close</button>
-      </div>
-    </div>
-  </div>
+  <div class="toasts" id="toasts" aria-live="polite" aria-label="Notifications"></div>
 
   <script>
   function downloadProject() {
-    fetch('/nexference.tar.gz').then(r=>r.blob()).then(b=>{
-      const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='nexference.tar.gz';a.click();
-    }).catch(()=>alert('Download failed — try opening in a new tab and visiting /nexference.tar.gz'));
+    fetch('/nexference.tar.gz').then(r => r.blob()).then(b => {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'nexference.tar.gz'; a.click();
+    }).catch(() => { if (window.notifyToast) window.notifyToast('Download failed — visit /nexference.tar.gz', 'error'); });
   }
   </script>
   <script type="module" src="/src/main.js"></script>

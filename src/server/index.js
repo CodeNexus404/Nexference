@@ -6,6 +6,7 @@ import { FETCH_INTERVAL } from './providers/modelCache.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerTestRoutes } from './routes/test.js';
 import { registerConfigRoutes } from './routes/config.js';
+import { registerLocalRoutes } from './routes/local.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +32,7 @@ export function createApp() {
   registerModelRoutes(app);
   registerTestRoutes(app);
   registerConfigRoutes(app);
+  registerLocalRoutes(app);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);

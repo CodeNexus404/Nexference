@@ -14,6 +14,15 @@ export function norm(u) {
   return u && u.endsWith('/') ? u : (u || '') + '/';
 }
 
+// Mask a secret for display (e.g. sk-ant-••••••••1234). Never used for storage
+// or transmission — only for UI text where a key may be shown.
+export function maskKey(key) {
+  if (!key) return '';
+  const s = String(key);
+  if (s.length <= 8) return '•'.repeat(s.length);
+  return s.slice(0, Math.min(6, s.length - 4)) + '••••••••' + s.slice(-4);
+}
+
 export function monoOf(p) {
   const parts = p.name.replace(/[^A-Za-z0-9 ]/g, '').trim().split(/\s+/);
   return parts.length > 1
@@ -35,4 +44,25 @@ export function logoHtml(p) {
     return `<img src="${p.logo}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`;
   }
   return `<span class="mono-fallback">${svgLogo(p)}</span>`;
+}
+
+// Lightweight JSON syntax highlighter for config previews. Returns HTML with
+// <span> wrappers — the input is JSON (already safe), and the preview path masks
+// secrets before this runs, so no raw key is ever emitted.
+export function highlightJSON(json) {
+  return json
+    .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+      let cls = 'b';
+      if (/^"/.test(match)) {
+        if (/:$/.test(match)) cls = 'k';
+        else cls = 's';
+      } else if (/true|false/.test(match)) {
+        cls = 'b';
+      } else if (/null/.test(match)) {
+        cls = 'b';
+      } else if (!isNaN(match)) {
+        cls = 's';
+      }
+      return `<span class="${cls}">${match}</span>`;
+    });
 }

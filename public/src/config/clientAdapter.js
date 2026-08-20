@@ -61,3 +61,34 @@ export function getClientAdapter(format) {
   if (format === 'openai') return new OpenAIClientAdapter();
   return new ClaudeCodeAdapter();
 }
+
+// ─── Client catalogue (v0.2.0) ───
+// Nexference supports multiple AI coding clients. Claude Code is fully supported
+// (detect + read + generate + validate + backup + write). Every other client is
+// reported honestly: detected/known, but its configuration support is "coming
+// soon" — we never pretend to generate a config we can't.
+export const CLIENTS = [
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    supported: true,
+    configPath: '~/.claude/settings.json',
+    note: 'Full support — generate, preview, validate, backup & apply.',
+  },
+  { id: 'opencode', name: 'OpenCode', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'codex', name: 'Codex CLI', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'gemini-cli', name: 'Gemini CLI', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'aider', name: 'Aider', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'cline', name: 'Cline', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'continue', name: 'Continue', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'roo', name: 'Roo Code', supported: false, note: 'Detected · configuration support coming soon' },
+  { id: 'cursor', name: 'Cursor', supported: false, note: 'Detected · configuration support coming soon' },
+];
+
+export function getClient(id) {
+  return CLIENTS.find((c) => c.id === id) || CLIENTS[0];
+}
+
+export function isClientSupported(id) {
+  return !!getClient(id).supported;
+}

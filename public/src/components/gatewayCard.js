@@ -1,5 +1,5 @@
 import { esc, norm, logoHtml, monoOf } from './util.js';
-import { workspace, getFreeModels, getModels } from '../core/state.js';
+import { workspace, getFreeModels, getModels, getModelSource, isFetching } from '../core/state.js';
 import { Storage } from '../core/storage.js';
 import { pick } from '../ui/app.js';
 
@@ -41,7 +41,8 @@ export function createGatewayCard(provider) {
   const modelCount = freeModels.length;
   const totalCount = allModels.length;
   const needsKey = !provider.publicModels && !provider.hasCustomUrl && !key;
-  const modelState = hasLiveModels ? 'ready' : (needsKey ? 'key' : 'loading');
+  const fetching = isFetching(provider.id);
+  const source = getModelSource(provider.id);
   const showPaid = Storage.getPaid(provider.id);
   const listModels = showPaid ? allModels : freeModels;
   const freeIds = new Set(freeModels.map(m => m.id));
@@ -50,9 +51,22 @@ export function createGatewayCard(provider) {
 
   const isCustom = !!provider.hasCustomUrl;
   const statusClass = isCustom ? (model ? 'live' : 'pending') : (hasLiveModels ? 'live' : 'pending');
-  const statusText = isCustom
-    ? (model ? esc(model) : 'custom endpoint')
-    : (hasLiveModels ? modelCount + ' free · ' + totalCount + ' total' : (needsKey ? 'needs key' : 'loading…'));
+
+  // Honest loading-state text so users know whether models are live, cached, or
+  // a fallback catalogue — never silently fail.
+  let statusText;
+  if (isCustom) {
+    statusText = model ? esc(model) : 'custom endpoint';
+  } else if (fetching) {
+    statusText = 'Fetching models…';
+  } else if (hasLiveModels) {
+    const tag = source === 'static' ? 'fallback catalogue' : 'live list';
+    statusText = `${modelCount} free · ${totalCount} total · ${tag}`;
+  } else if (needsKey) {
+    statusText = 'needs API key';
+  } else {
+    statusText = 'cached list';
+  }
 
   card.innerHTML = `
     <div class="card-top">

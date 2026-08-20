@@ -10,9 +10,55 @@ import { spawn } from 'child_process';
 //  POST merges the provided env/apiKeyHelper/model into a minimal gateway shape
 //  (preserving whatever ANTHROPIC_*/OPENAI_* env keys the config carries so both
 //  round-trip intact), and open-folder shells out to the OS file manager.
+//
+//  v0.3.0 backup hardening: before overwriting an EXISTING settings.json, a
+//  timestamped copy is written to ~/.nexference/backups/ (Nexference-owned,
+//  isolated from Claude's config). Backups are never overwritten (the filename
+//  carries a unique timestamp) and the original is never touched until the backup
+//  succeeds. If an existing file is present and the backup fails, the write is
+//  ABORTED with a clear error — unless there was no existing file to back up.
 // ═══════════════════════════════════════════════════════════════
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
+
+// Nexference-owned, isolated backup location (never inside ~/.claude so a bad
+// restore can't accidentally clobber other Claude state).
+export const BACKUP_DIR = join(homedir(), '.nexference', 'backups');
+
+function ts() {
+  const d = new Date();
+  const p = (n, l = 2) => String(n).padStart(l, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function backupFilename() {
+  let name = `claude-settings-${ts()}.json`;
+  let full = join(BACKUP_DIR, name);
+  let i = 1;
+  // Extremely unlikely, but never overwrite an existing backup.
+  while (existsSync(full)) {
+    name = `claude-settings-${ts()}-${i}.json`;
+    full = join(BACKUP_DIR, name);
+    i++;
+  }
+  return full;
+}
+
+// Backs up the current settings.json (if any) to the backup dir.
+// Returns the backup path written, or null if there was nothing to back up.
+// Throws if a backup that MUST be written fails.
+function backupExisting() {
+  if (!existsSync(SETTINGS_PATH)) return null;
+  if (!existsSync(BACKUP_DIR)) mkdirSync(BACKUP_DIR, { recursive: true });
+  const dest = backupFilename();
+  try {
+    console.log(`  💾 Backing up settings.json → ${dest}`);
+    writeFileSync(dest, readFileSync(SETTINGS_PATH, 'utf-8'), 'utf-8');
+    return dest;
+  } catch (err) {
+    throw new Error(`backup failed (${err.message}) — refusing to overwrite the live config`);
+  }
+}
 
 export function readSettings() {
   if (!existsSync(SETTINGS_PATH)) return null;
@@ -31,13 +77,11 @@ export function writeSettings(config) {
     mkdirSync(configDir, { recursive: true });
   }
 
-  let existing = {};
-  if (existsSync(SETTINGS_PATH)) {
-    try {
-      existing = JSON.parse(readFileSync(SETTINGS_PATH, 'utf-8'));
-    } catch {
-      existing = {}; // tolerate a malformed/hand-edited settings.json
-    }
+  // Back up the previous config BEFORE overwriting it. If an existing file is
+  // present and the backup fails, abort (don't touch the live config).
+  const hadExisting = existsSync(SETTINGS_PATH);
+  if (hadExisting) {
+    backupExisting(); // throws → propagates to the route → 500 with clear error
   }
 
   // Write the settings.json in the exact gateway format (env + apiKeyHelper + model).

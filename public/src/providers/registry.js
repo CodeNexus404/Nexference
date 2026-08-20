@@ -148,3 +148,34 @@ export const PROVIDERS = [
 export function getProvider(id) {
   return PROVIDERS.find((p) => p.id === id);
 }
+
+// Filter tags used by the Cloud Providers explorer (All / Popular / Free /
+// Anthropic Compatible / OpenAI Compatible / Google). Presentation-only.
+export const PROVIDER_TAGS = {
+  agentrouter: ['popular', 'anthropic', 'free'],
+  aerolink: ['anthropic', 'free'],
+  freemodel: ['anthropic', 'free'],
+  openrouter: ['popular', 'openai', 'free'],
+  nvidia: ['openai', 'free'],
+  groq: ['popular', 'openai', 'free'],
+  gemini: ['google', 'free'],
+  cerebras: ['openai', 'free'],
+  orcarouter: ['openai', 'free'],
+  mistral: ['openai', 'free'],
+  huggingface: ['openai', 'free'],
+  chutes: ['openai', 'free'],
+  tokenrouter: ['anthropic', 'free'],
+  custom: ['anthropic', 'openai'],
+};
+
+export function providerTags(id) {
+  return PROVIDER_TAGS[id] || [];
+}
+
+// Providers the Claude Code configuration workflow may target. Claude Code can
+// consume Anthropic-format gateways directly; OpenRouter is dual-compatible and
+// forced to Anthropic format by the engine. OpenAI/Gemini-only providers are
+// excluded (their configs are shown copyable, not written to settings.json).
+export function claudeCodeProviders() {
+  return PROVIDERS.filter((p) => p.claudeCode || p.id === 'openrouter');
+}

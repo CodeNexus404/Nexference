@@ -1,22 +1,51 @@
 import { Storage } from './storage.js';
 
-// Global Workspace state — the single mutable source of truth the UI reads from
-// and writes to. Replaces the scattered module-scope variables that previously
-// lived at the top of app.js (liveModels, selected/applied provider, filter
-// text, custom-gateway fields, in-flight fetch bookkeeping).
+// Central Nexference workspace state — the single mutable source of truth the UI
+// reads from and writes to. v0.2.0 distinguishes five concepts so the platform
+// stops treating them as one thing:
 //
-// Introduced for the v0.1.0 architecture milestone. Behaviour unchanged.
+//   Provider  — a cloud AI gateway (OpenRouter, Agent Router, …)
+//   Model     — a specific model id on a provider
+//   Client    — the AI coding client the config targets (Claude Code, …)
+//   Runtime   — a local AI runtime (Ollama, …)
+//   Profile   — a named saved selection of client+provider+model (no secrets)
+//
+// This replaces the scattered module-scope variables from app.js. Behaviour of
+// the Gateway Switcher itself is unchanged; the shape just makes the new pages
+// (Workspace / Providers / Configuration / Local AI / Clients / Settings) clean.
 export const workspace = {
+  // Page / navigation
+  currentPage: Storage.getPage() || 'workspace',
+
+  // Active selections (the "what is configured right now" answer)
+  activeProvider: null,        // provider id
+  activeModel: null,           // model id
+  activeClient: 'claude-code', // client id
+  activeRuntime: null,         // local runtime id
+
+  // Applied configuration metadata (non-secret). Persisted separately so the
+  // Workspace card + top-bar status can reflect the last applied config even
+  // before re-reading settings.json.
+  applied: Storage.getApplied(),
+
+  // Whether a generated config exists that hasn't been applied yet.
+  unsaved: false,
+
+  // Model cache (read-through to the server)
   liveModels: {},
-  selectedProviderId: null,
-  appliedProviderId: null,
+
+  // UI filters / transient
   filterText: '',
   customUrl: '',
   customModel: '',
   customFormat: Storage.getCustomFormat() || 'anthropic',
+
   _fetching: new Set(),
   _keyFetchTimers: {},
 };
+
+export function setActiveProvider(id) { workspace.activeProvider = id; }
+export function setActiveModel(id) { workspace.activeModel = id; }
 
 // ── Model selectors (read-through to the cached server model list) ──
 export function getFreeModels(providerId) {
@@ -33,4 +62,14 @@ export function getModels(providerId) {
 
 export function getAllModels(providerId) {
   return getModels(providerId);
+}
+
+// Provenance of a provider's cached model list, used to render honest
+// loading-state text ("live", "cached", "fallback catalogue", …).
+export function getModelSource(providerId) {
+  return workspace.liveModels[providerId]?.source || null;
+}
+
+export function isFetching(providerId) {
+  return workspace._fetching.has(providerId);
 }

@@ -1,4 +1,6 @@
 import { notify } from '../core/notifications.js';
+import { esc } from '../components/util.js';
+import { openModal } from '../components/modal.js';
 
 // Runtime Adapter interface — abstracts HOW a generated config is delivered to
 // the user. Two runtimes exist today (both preserved verbatim from app.js):
@@ -38,11 +40,14 @@ export class LocalSettingsRuntime extends RuntimeAdapter {
 export class CopyableRuntime extends RuntimeAdapter {
   static show(config, name) {
     const { title, sub } = configClientMeta(config);
-    document.getElementById('configText').textContent = JSON.stringify(config, null, 2);
-    document.getElementById('configModalTitle').textContent = `${name} — ${title}`;
-    const subEl = document.getElementById('configModalSub');
-    if (subEl) subEl.innerHTML = sub;
-    document.getElementById('configModal').hidden = false;
+    openModal({
+      title: `${name} — ${title}`,
+      size: 'wide',
+      bodyHTML:
+        `<p class="modal-card-sub">${sub}</p>` +
+        `<pre class="code config-code" id="configText">${esc(JSON.stringify(config, null, 2))}</pre>` +
+        `<div class="modal-actions"><button class="btn btn-go" onclick="copyConfigText()">Copy config</button></div>`,
+    });
   }
 }
 

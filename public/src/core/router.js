@@ -1,16 +1,21 @@
-// Router — a minimal client-side router for the single-view dashboard. v0.1.0
-// has exactly one route ('dashboard'); the router exists so future milestones can
-// add views (settings, provider detail, about) without restructuring the entry
-// point. It performs no navigation/UI changes today (milestone constraint).
+import { Storage } from './storage.js';
+
+// Router — a small client-side router for the multi-page Nexference shell.
+// v0.2.0 adds the real navigation (Workspace / Providers / Configuration /
+// Local AI / Clients / Settings). The router persists the active page and
+// notifies listeners so the shell can show the right view and render its
+// content. No framework, no history hacking — just a single mutable route.
+const PAGES = ['workspace', 'cloud-providers', 'localai', 'models', 'clients', 'playground', 'settings'];
+
 export class Router {
   constructor() {
     this.routes = new Map();
-    this.currentRoute = 'dashboard';
+    this.currentRoute = Storage.getPage() || 'workspace';
     this._listeners = new Set();
   }
 
-  register(name, handler) {
-    this.routes.set(name, handler);
+  register(name, render) {
+    this.routes.set(name, render);
     return this;
   }
 
@@ -19,10 +24,11 @@ export class Router {
   }
 
   navigate(name) {
-    if (!this.routes.has(name)) name = 'dashboard';
+    if (!PAGES.includes(name)) name = 'workspace';
     this.currentRoute = name;
-    const handler = this.routes.get(name);
-    if (handler) handler();
+    Storage.setPage(name);
+    const render = this.routes.get(name);
+    if (render) render();
     this._listeners.forEach((fn) => fn(name));
     return this;
   }
