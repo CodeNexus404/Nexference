@@ -1,7 +1,7 @@
 {
   "name": "nexference",
-  "version": "1.0.0",
-  "description": "Nexference — AI Coding Gateway Switcher. Browse free models, pick one, apply to Claude Code or any client.",
+  "version": "0.3.0",
+  "description": "Nexference — Universal AI provider & runtime workspace. Manage cloud providers, local runtimes, models, and client configuration.",
   "type": "module",
   "scripts": {
     "dev": "node --watch server.js",
