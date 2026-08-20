@@ -93,18 +93,19 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 ## 🏗️ How It Works
 
 ```
-┌─────────────┐        ┌───────────────────-───┐        ┌─────────────────┐
-│   Browser   │  HTTP  │   Express Server      │  fetch │  AI Providers   │
-│  (app.js)   │◄──────►│  (server.js)         │◄──────►│  (14 gateways)  │
-│             │        │                       │        │                 │
-│ • Provider  │        │ • Model cache (30-min │        │ • /models       │
-│   cards     │        │   refresh)            │        │ • /chat, /msgs  │
-│ • localStore│        │ • 3-tier fallback     │        └─────────────────┘
-│   for keys  │        │ • Proxy (no CORS)     │
-└─────────────┘        │ • Reads/writes        │        ┌─────────────────┐
-                       │   settings.json       │───────►│ ~/.claude/      │
-                       └────────────────────-──┘        │  settings.json  │
-                                                        └─────────────────┘
+┌─────────────┐        ┌───────────────────────┐        ┌─────────────────┐
+│   Browser   │  HTTP  │   Express Server        │  fetch │  AI Providers   │
+│ (public/src)│◄──────►│  (src/server services)  │◄──────►│  (14 gateways)  │
+│             │        │                         │        │                 │
+│ • Provider  │        │ • Model cache (30-min   │        │ • /models       │
+│   cards     │        │   refresh)              │        │ • /chat, /msgs  │
+│ • Workspace │        │ • 3-tier fallback       │        │                 │
+│   state     │        │ • Proxy (no CORS)       │        └─────────────────┘
+│ • localStorage        │ • Provider/Client/      │        ┌─────────────────┐
+│   for keys  │        │   Runtime adapters      │        │ ~/.claude/      │
+└─────────────┘        │ • Reads/writes          │───────►│  settings.json  │
+                        │   settings.json         │        └─────────────────┘
+                        └─────────────────────────┘
 ```
 
 **Model-fetching fallback chain** (per provider):
@@ -115,6 +116,60 @@ Live provider API  ──►  Scrape provider docs page  ──►  Curated stat
 ```
 
 This layered strategy means the dashboard degrades gracefully and always shows _something_ useful, even when a provider's API is down or gated behind a key or WAF.
+
+---
+
+## 🧱 Architecture
+
+Nexference is built as a small, modular monolith (no build step). The backend is split into services/adapters behind a thin Express composition root; the frontend is split into ES modules behind a single entry point. The Gateway Switcher behaviour is preserved exactly — these layers only wrap the existing logic behind named, swappable interfaces for future milestones.
+
+### Backend (`src/server/`, ESM)
+
+```
+src/server/
+├── index.js                 # createApp() + startServer() — composition root
+├── utils/index.js           # norm() URL normaliser
+├── providers/
+│   ├── registry.js          # PROVIDERS, STATIC_MODELS, scrape parsers
+│   ├── modelCache.js        # in-memory model cache + intervals
+│   ├── modelService.js      # fetchModelsForProvider / scrapeModelsForProvider / fetchAllModels
+│   └── providerAdapter.js    # Provider Adapter interface (Anthropic/OpenAI/Gemini) — fetch + test
+├── config/settingsStore.js  # ~/.claude/settings.json read/write/open-folder (storage layer)
+└── routes/                  # /api/cached-models, /api/refresh-models, /api/models, /api/test, /api/config
+```
+
+### Frontend (`public/src/`, ESM, no framework)
+
+```
+public/src/
+├── main.js                  # entry — wires managers, registers dashboard route, exposes handlers
+├── design/tokens.js         # Design System tokens (mirror of style.css :root)
+├── core/
+│   ├── theme.js             # Theme Manager (holds tokens; swap to a new theme later)
+│   ├── notifications.js     # Notification Manager — toast + activity-terminal log
+│   ├── storage.js           # Storage layer — typed localStorage wrapper
+│   ├── state.js             # global Workspace state + model selectors
+│   └── router.js            # minimal client Router (single 'dashboard' route today)
+├── providers/
+│   ├── registry.js          # PROVIDERS (UI metadata) + getProvider()
+│   └── adapter.js           # client Provider Adapter interface
+├── config/
+│   ├── engine.js            # Configuration Engine — wraps buildClaudeSettings
+│   ├── clientAdapter.js     # Client Adapter interface (Claude Code / OpenAI / Gemini)
+│   └── runtimeAdapter.js    # Runtime Adapter interface (LocalSettings / Copyable)
+├── components/
+│   ├── util.js              # esc / norm / logo helpers
+│   └── gatewayCard.js       # Gateway card component
+└── ui/app.js                # action layer (test, apply, refresh, render, load)
+```
+
+### Interfaces introduced
+
+- **Provider Adapter** — abstracts a gateway's server-side behaviour (model fetch + connection probe) by API dialect.
+- **Client Adapter** — abstracts the client-specific config shape (Claude Code vs OpenAI vs Gemini).
+- **Runtime Adapter** — abstracts how a generated config is delivered (write `~/.claude/settings.json` vs copyable modal).
+- **Configuration Engine** — turns a provider + credentials into a valid config (the original `buildClaudeSettings` logic, unchanged).
+- **Theme Manager / Notification Manager / Storage layer / Workspace state / Router** — infrastructure for future milestones.
 
 ---
 
@@ -191,11 +246,12 @@ Nexference exposes a small internal REST API (consumed by the frontend, but usab
 
 ```
 nexference/
-├── server.js              # Express server — routing, model cache, proxy, settings I/O
+├── server.js              # Thin entry → src/server/ (composition root)
+├── src/server/            # Backend services, adapters, routes (see Architecture)
 ├── package.json           # Metadata & scripts (single dep: express)
 └── public/
     ├── index.html         # Single-page app shell
-    ├── app.js             # Frontend logic — provider registry, cards, apply/test flows
+    ├── src/               # Frontend ES modules (see Architecture)
     ├── style.css          # "Graphite" dark design system
     └── providers/         # Provider logos/icons
 ```
@@ -226,8 +282,8 @@ nexference/
 
 Contributions are welcome! To add a new provider:
 
-1. Add its definition to the `PROVIDERS` array in both [`server.js`](server.js) and [`public/app.js`](public/app.js).
-2. Include the API `format` (`anthropic` / `openai` / `gemini`) and, if needed, a static fallback list.
+1. Add its definition to the `PROVIDERS` array in [`src/server/providers/registry.js`](src/server/providers/registry.js) **and** the UI metadata array in [`public/src/providers/registry.js`](public/src/providers/registry.js).
+2. Include the API `format` (`anthropic` / `openai` / `gemini`) and, if needed, a static fallback list in the server registry.
 3. Drop the provider logo into [`public/providers/`](public/providers/).
 
 Please open an issue to discuss larger changes before submitting a PR.
