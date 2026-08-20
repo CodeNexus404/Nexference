@@ -94,19 +94,22 @@ _A responsive, dark-themed dashboard of provider cards — each showing free/tot
 ## 🏗️ How It Works
 
 ```
-┌─────────────┐        ┌───────────────────────┐        ┌─────────────────┐
-│   Browser   │  HTTP  │   Express Server        │  fetch │  AI Providers   │
-│ (public/src)│◄──────►│  (src/server services)  │◄──────►│  (14 gateways)  │
-│             │        │                         │        │                 │
-│ • Provider  │        │ • Model cache (30-min   │        │ • /models       │
-│   cards     │        │   refresh)              │        │ • /chat, /msgs  │
-│ • Workspace │        │ • 3-tier fallback       │        │                 │
-│   state     │        │ • Proxy (no CORS)       │        └─────────────────┘
-│ • localStorage        │ • Provider/Client/      │        ┌─────────────────┐
-│   for keys  │        │   Runtime adapters      │        │ ~/.claude/      │
-└─────────────┘        │ • Reads/writes          │───────►│  settings.json  │
-                        │   settings.json         │        └─────────────────┘
-                        └─────────────────────────┘
+┌────────────────────────┐          ┌────────────────────────────────────┐          ┌────────────────────────────┐
+│Browser  (public/src)   │──HTTP──► │Express Server  (src/server)        │──fetch──►│AI Providers  (14 gateways) │
+│• Provider cards        │          │• Model cache (30-min refresh)      │          │• GET  /models              │
+│• Workspace state       │          │• 3-tier fallback                   │          │• POST /chat, /messages     │
+│• localStorage keys     │          │• CORS-free proxy                   │          └────────────────────────────┘
+└────────────────────────┘          │• Provider/Client/Runtime           │                                        
+                                    │• Reads/writes settings.json        │                                        
+                                    └────────────────────────────────────┘                                        
+                                                 │
+                                                 │ reads / writes
+                                                 ▼
+                                                 ┌────────────────────────────┐
+                                                 │~/.claude/settings.json     │
+                                                 │• Anthropic-compatible      │
+                                                 │• Applied to Claude Code    │
+                                                 └────────────────────────────┘
 ```
 
 **Model-fetching fallback chain** (per provider):
@@ -119,7 +122,6 @@ Live provider API  ──►  Scrape provider docs page  ──►  Curated stat
 This layered strategy means the dashboard degrades gracefully and always shows _something_ useful, even when a provider's API is down or gated behind a key or WAF.
 
 ---
-
 ## 🧱 Architecture
 
 Nexference is built as a small, modular monolith (no build step). The backend is split into services/adapters behind a thin Express composition root; the frontend is split into ES modules behind a single entry point. The Gateway Switcher behaviour is preserved exactly — these layers only wrap the existing logic behind named, swappable interfaces for future milestones.
