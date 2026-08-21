@@ -65,13 +65,17 @@
         </a>
       </nav>
       <div class="sidebar-foot">
-        <div class="ver">v0.3.0</div>
+        <div class="ver">v0.4.0</div>
       </div>
     </aside>
 
     <main class="content">
       <header class="topbar">
         <div class="topbar-left">
+          <button class="cmd-trigger" id="cmdTrigger" onclick="toggleCommandPalette()" title="Search or run a command (⌘K)" aria-label="Open command palette">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="cmd-k">⌘K</span>
+          </button>
           <nav class="crumb" id="crumb" aria-label="Breadcrumb"></nav>
         </div>
         <div class="topbar-right">
@@ -79,7 +83,7 @@
           <button class="icon-btn theme-toggle" id="themeToggle" onclick="cycleTheme()" title="Cycle theme" aria-label="Cycle theme">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
-          <div class="app-ver" id="appVersion">v0.3.0</div>
+          <div class="app-ver" id="appVersion">v0.4.0</div>
         </div>
       </header>
 

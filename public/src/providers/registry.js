@@ -179,3 +179,30 @@ export function providerTags(id) {
 export function claudeCodeProviders() {
   return PROVIDERS.filter((p) => p.claudeCode || p.id === 'openrouter');
 }
+
+// ─── Provider capabilities (v0.4.0) ───
+// Protocols a provider exposes. Derived from `format` so the existing provider
+// list keeps working; the compatibility resolver consumes these rather than
+// re-reading `format` everywhere. Do not treat every provider as interchangeable.
+export function providerProtocols(p) {
+  if (!p) return [];
+  if (p.format === 'anthropic') return ['anthropic'];
+  if (p.format === 'openai') return ['openai-compatible'];
+  if (p.format === 'gemini') return ['gemini'];
+  return [];
+}
+
+// Capability flags feed the compatibility resolver + model filtering. Defaults
+// are sensible; providers can override individual flags if needed.
+export function providerCapabilities(p) {
+  if (!p) return null;
+  return {
+    chat: true,
+    streaming: true,
+    vision: p.id === 'gemini' || !!p.vision,
+    reasoning: !!p.reasoning,
+    tools: true,
+    embeddings: !!p.embeddings,
+    protocols: providerProtocols(p),
+  };
+}

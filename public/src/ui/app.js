@@ -7,6 +7,9 @@ import { PROVIDERS, getProvider, providerTags } from '../providers/registry.js';
 import { configEngine } from '../config/engine.js';
 import { CopyableRuntime, LocalSettingsRuntime } from '../config/runtimeAdapter.js';
 import { CLIENTS, getClient, isClientSupported } from '../config/clientAdapter.js';
+import { resolveSelection } from '../compatibility/capabilityResolver.js';
+import { levelBadge, compatNoteList, connectionLabel } from '../compatibility/ui.js';
+import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
 import { esc, norm, maskKey, highlightJSON, logoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { openProviderConfig } from '../components/providerConfig.js';
@@ -462,7 +465,7 @@ let lastConfig = null;
 
 function setCrumb(name) {
   const c = document.getElementById('crumb');
-  if (c) c.textContent = name;
+  if (c) c.innerHTML = '';
 }
 
 export function renderWorkspace() {
@@ -474,7 +477,9 @@ export function renderWorkspace() {
   const activeId = (applied && applied.provider) || workspace.appliedProviderId || workspace.activeProvider;
   const activeProvider = activeId ? getProvider(activeId) : null;
   const activeModel = (applied && applied.model) || (activeId ? Storage.getModel(activeId) : '');
-  const client = getClient(applied ? applied.client : cfg.client);
+  const client = getClient(applied ? applied.client : 'claude-code');
+  const connType = applied ? (applied.connectionType || 'cloud') : 'cloud';
+  const activeRuntime = (applied && applied.runtime) ? getRuntime(applied.runtime) : null;
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -493,11 +498,13 @@ export function renderWorkspace() {
           <span class="badge ${statusCls}" id="wsConfigBadge">${esc(statusLabel)}</span>
         </div>
         <div class="ws-config-body">
-          <div class="kv"><span>Client</span><b>${esc(client.name)}</b></div>
+          <div class="kv"><span>Active Client</span><b>${esc(client.name)}</b></div>
+          <div class="kv"><span>Connection</span><b>${esc(connectionLabel(connType))}</b></div>
           <div class="kv"><span>Provider</span><b>${esc(activeProvider ? activeProvider.name : '—')}</b></div>
           <div class="kv"><span>Model</span><b class="mono">${esc(activeModel || '—')}</b></div>
+          <div class="kv"><span>Local Runtime</span><b id="wsRuntime">${esc(activeRuntime ? activeRuntime.name : '—')}</b></div>
           <div class="kv"><span>Status</span><b id="wsStatus">${esc(statusLabel)}</b></div>
-          <div class="kv"><span>Config path</span><b class="mono" id="pathText">~/.claude/settings.json</b></div>
+          <div class="kv"><span>Config path</span><b class="mono" id="pathText">${esc(client.configPath || '~/.claude/settings.json')}</b></div>
         </div>
         <div class="ws-actions-row">
           <button class="btn btn-go" onclick="openWorkflow()">View configuration</button>
@@ -522,6 +529,18 @@ export function renderWorkspace() {
         <div class="stat-row"><div class="stat"><b id="wsLocalCount">0</b><span>local runtimes</span></div><div class="stat"><b id="wsLocalRun">0</b><span>running</span></div></div>
       </div>
 
+      <div class="panel ws-profiles">
+        <h3>Profiles</h3>
+        <p class="muted">Saved configuration selections — never store secrets.</p>
+        <div id="wsProfiles" class="ws-profile-list"></div>
+        <button class="btn btn2" onclick="navigate('settings')">Manage profiles</button>
+      </div>
+
+      <div class="panel ws-next">
+        <h3>Recommended next</h3>
+        <div id="wsNext" class="ws-next-body"></div>
+      </div>
+
       <div class="panel ws-activity">
         <div class="panel-h"><h3>Activity</h3><button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button></div>
         <div class="term"><div class="term-body" id="termOut"></div></div>
@@ -539,12 +558,43 @@ export function renderWorkspace() {
     if (st && ollama && ollama.running && activeProvider) {
       st.textContent = 'Active · Local AI: Ollama running';
     }
+    const wsRuntime = document.getElementById('wsRuntime');
+    if (wsRuntime) {
+      if (activeRuntime && ollama) {
+        wsRuntime.textContent = activeRuntime.name + (ollama.running ? ' · running' : ' · not running');
+      } else if (activeRuntime) {
+        wsRuntime.textContent = activeRuntime.name;
+      }
+    }
   }).catch(() => {});
 
   let configured = 0;
   PROVIDERS.forEach(p => { if (Storage.getKey(p.id)) configured++; });
   const cc = document.getElementById('wsCloudCount'); if (cc) cc.textContent = PROVIDERS.length;
   const cf = document.getElementById('wsCloudConf'); if (cf) cf.textContent = configured;
+
+  // Profiles (references only, no secrets)
+  const wsProfiles = document.getElementById('wsProfiles');
+  if (wsProfiles) {
+    const profiles = Storage.listProfiles();
+    wsProfiles.innerHTML = profiles.length
+      ? profiles.map(p => {
+          const full = Storage.getProfile(p.id) || {};
+          const prov = full.provider ? (getProvider(full.provider)?.name || full.provider) : '—';
+          return `<div class="profile-row"><div><b>${esc(p.name)}</b> <span class="muted">${esc(prov)} · ${esc(full.model || '?')}</span></div><button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button></div>`;
+        }).join('')
+      : '<div class="muted">No profiles yet — save one from Settings.</div>';
+  }
+
+  // Recommended next action (honest, state-derived)
+  const wsNext = document.getElementById('wsNext');
+  if (wsNext) {
+    let next = 'Configure a client to get started.';
+    if (applied && applied.status === 'configured') next = 'Configuration active — explore models or connect a local runtime.';
+    else if (activeId) next = 'Review and apply your configuration to finish setup.';
+    wsNext.innerHTML = `<div class="ws-next-item">${esc(next)}</div>`;
+  }
+
   updateShellStatus();
 }
 
@@ -557,7 +607,7 @@ export function renderConfiguration() {
   setCrumb('Configuration');
   const steps = document.getElementById('cfgSteps');
   if (!steps) return;
-  const clientOpts = CLIENTS.map(c => `<option value="${c.id}" ${cfg.client === c.id ? 'selected' : ''}>${esc(c.name)}${c.supported ? '' : ' (soon)'}</option>`).join('');
+  const clientOpts = CLIENTS.map(c => `<option value="${c.id}" ${cfg.client === c.id ? 'selected' : ''}>${esc(c.name)}${c.support !== 'unsupported' ? '' : ' (soon)'}</option>`).join('');
   const provOpts = PROVIDERS.filter(p => p.id !== 'custom').map(p => `<option value="${p.id}" ${cfg.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   let modelOpts = '<option value="">— select model —</option>';
   if (cfg.provider) {
@@ -661,12 +711,30 @@ export function renderClients() {
   setCrumb('Clients');
   const grid = document.getElementById('clientGrid');
   if (!grid) return;
-  grid.innerHTML = CLIENTS.map(c => `
-    <div class="panel client-card ${c.supported ? 'live' : ''}">
-      <div class="client-top"><b>${esc(c.name)}</b><span class="badge ${c.supported ? 'live' : 'planned'}">${c.supported ? 'Supported' : 'Coming soon'}</span></div>
+  grid.innerHTML = CLIENTS.map(c => {
+    const supportLabel = c.support === 'verified' ? 'Verified' : c.support === 'manual' ? 'Manual setup' : 'Coming soon';
+    const conns = (c.connectionTypes || []).map(t => `<span class="chipx">${esc(connectionLabel(t))}</span>`).join('') || '<span class="muted">—</span>';
+    const configured = workspace.applied && workspace.applied.client === c.id;
+    const disabled = c.support === 'unsupported' ? 'disabled' : '';
+    return `
+    <div class="panel client-card ${c.support !== 'unsupported' ? 'live' : ''} ${configured ? 'sel' : ''}">
+      <div class="client-top">
+        <div class="client-logo" style="--cm:${esc(c.color || '#5b8def')}">${esc(c.monogram || c.name.slice(0, 2))}</div>
+        <div class="client-id">
+          <b>${esc(c.name)}</b>
+          <span class="badge ${c.support}">${esc(supportLabel)}</span>
+        </div>
+      </div>
       <div class="client-sub">${esc(c.note || '')}</div>
-      <div class="client-path">${c.supported ? esc(c.configPath || '') : 'Detected'}</div>
-    </div>`).join('');
+      <div class="client-meta">
+        <div class="kv"><span>Config</span><b class="mono">${esc(c.configPath || '—')}</b></div>
+        <div class="kv"><span>Connections</span><b>${conns}</b></div>
+      </div>
+      <div class="client-acts">
+        <button class="btn btn-go" onclick="openWorkflow({ initialClient: '${c.id}' })" ${disabled}>Configure</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 export function renderSettings() {
@@ -693,8 +761,11 @@ export function renderProfiles() {
   if (!profiles.length) { list.innerHTML = '<div class="muted">No profiles yet.</div>'; return; }
   list.innerHTML = profiles.map(p => {
     const full = Storage.getProfile(p.id) || {};
+    const clientName = full.client ? getClient(full.client).name : 'Claude Code';
+    const target = full.runtime ? (getRuntime(full.runtime)?.name || full.runtime) : (full.provider ? (getProvider(full.provider)?.name || full.provider) : '—');
+    const conn = full.connectionType ? connectionLabel(full.connectionType) : 'Cloud';
     return `<div class="profile-row">
-      <div><b>${esc(p.name)}</b><span class="muted"> ${esc(full.provider || '?')} · ${esc(full.model || '?')}</span></div>
+      <div><b>${esc(p.name)}</b><span class="muted"> ${esc(clientName)} · ${esc(conn)} · ${esc(target)} · ${esc(full.model || '?')}</span></div>
       <div class="profile-acts">
         <button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button>
         <button class="btn btn2" onclick="deleteProfile('${p.id}')">Delete</button>
@@ -705,11 +776,16 @@ export function renderProfiles() {
 export function createProfile() {
   const name = (document.getElementById('profileName')?.value || '').trim();
   if (!name) { notify.toast('Enter a profile name', 'warning'); return; }
-  const provider = workspace.appliedProviderId || workspace.activeProvider || cfg.provider;
-  const model = provider ? Storage.getModel(provider) : cfg.model;
-  if (!provider) { notify.toast('Select a provider first (Providers page)', 'warning'); return; }
+  const a = workspace.applied || {};
+  const client = a.client || workspace.activeClient || 'claude-code';
+  const connectionType = a.connectionType || 'cloud';
+  const provider = a.provider || workspace.appliedProviderId || workspace.activeProvider || cfg.provider;
+  const runtime = a.runtime || workspace.activeRuntime || null;
+  const model = a.model || (provider ? Storage.getModel(provider) : cfg.model);
+  if (!provider && !runtime) { notify.toast('Configure a provider or runtime first', 'warning'); return; }
   const id = 'p_' + Date.now().toString(36);
-  Storage.saveProfile({ id, name, client: cfg.client, provider, model });
+  // References only — never secrets.
+  Storage.saveProfile({ id, name, client, connectionType, provider, runtime, model });
   notify.toast(`Saved profile “${name}”`, 'success');
   const inp = document.getElementById('profileName'); if (inp) inp.value = '';
   renderProfiles();
@@ -718,13 +794,18 @@ export function createProfile() {
 export function applyProfile(id) {
   const p = Storage.getProfile(id);
   if (!p) return;
-  cfg.client = p.client || 'claude-code';
-  cfg.provider = p.provider || null;
-  cfg.model = p.model || null;
+  workspace.activeClient = p.client || 'claude-code';
   workspace.activeProvider = p.provider || null;
+  workspace.activeRuntime = p.runtime || null;
   if (p.provider && p.model) Storage.setModel(p.provider, p.model);
   notify.toast(`Activated profile “${p.name}”`, 'success');
-  router && router.navigate('providers');
+  // Invoke the relevant client adapter through the workflow (preselected).
+  openWorkflow({
+    initialClient: p.client,
+    initialConnectionType: p.connectionType,
+    initialProvider: p.provider,
+    initialRuntime: p.runtime,
+  });
 }
 
 export function deleteProfile(id) {
@@ -755,14 +836,10 @@ export function toggleSidebar() {
 export function updateCrumb(pageTitle, sub) {
   const c = document.getElementById('crumb');
   if (!c) return;
-  if (sub) {
-    c.innerHTML =
-      `<span class="crumb-home" onclick="navigate('cloud-providers')">Cloud Providers</span>` +
-      `<span class="crumb-sep">/</span>` +
-      `<span class="crumb-cur">${esc(sub)}</span>`;
-  } else {
-    c.innerHTML = `<span class="crumb-cur">${esc(pageTitle)}</span>`;
-  }
+  // The current-page (.crumb-cur) text is intentionally not shown — the sidebar
+  // already reflects the active page, and the top bar stays focused on search.
+  // The command-palette search trigger is unaffected.
+  c.innerHTML = '';
 }
 
 // Top-bar configuration status — reflects the real applied state.

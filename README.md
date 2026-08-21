@@ -17,13 +17,17 @@
 
 ## 📖 Overview
 
-**Nexference v0.3.0 — Workspace Foundation & Configuration Experience** is the beginning of a real product: a *Universal AI Provider and Runtime Workspace*. It treats five distinct concepts as first-class, separate ideas:
+**Nexference v0.4.0 — Multi-Client Architecture & Runtime Foundation** evolves the product from a Claude-specific gateway tool into a *universal AI workspace*. The milestone makes four concepts unambiguously distinct and introduces a real compatibility system:
 
-- **Provider** — a cloud AI gateway (OpenRouter, Agent Router, Groq, …).
-- **Model** — a specific model id on a provider.
-- **Client** — the AI coding client the config targets (Claude Code today; others planned).
-- **Runtime** — a local AI runtime (Ollama today; others planned).
-- **Profile** — a named, secret-free saved selection of client + provider + model.
+- **Provider** — where the AI/model comes from (Anthropic, OpenRouter, Google, OpenAI, Groq, …). A provider is *not* automatically a client.
+- **Model** — a specific model id on a provider (Claude, GPT, Gemini, Llama, …).
+- **Client** — the application that consumes the AI (Claude Code, OpenCode CLI, Codex CLI, Gemini CLI, Cursor, Cline, …).
+- **Runtime** — software that runs models locally (Ollama, LM Studio, llama.cpp, vLLM, …).
+- **Profile** — a named, secret-free saved selection of client + connection + provider/runtime + model.
+
+> ⚠️ **OpenCode clash resolved:** OpenCode the *application* is registered as the client `opencode-cli`. A provider-style OpenCode API endpoint would be a separate `opencode-api` id — clients and providers never share ids.
+
+Nexference fetches each provider's **current, live model catalogue**, highlights which models are **free**, and — for verified clients — applies a working configuration through a proper client adapter. The proven Claude Code generation path is unchanged and remains the reference implementation.
 
 Nexference fetches each provider's **current, live model catalogue**, highlights which models are **free**, and lets you apply a working configuration to `~/.claude/settings.json` with one click — no manual JSON editing.
 
@@ -41,7 +45,7 @@ The app is organised into focused pages (sidebar):
 | **Cloud Providers** | Browse & filter every provider (popular, free, Anthropic/OpenAI/Google), open a config panel, connect. |
 | **Local AI** | Local runtimes (Ollama detection; others listed as coming soon). |
 | **Models** | Search the live model catalogue across all providers, with free/paid badges and one-click use. |
-| **Clients** | AI coding clients Nexference can target (Claude Code supported; others planned). |
+| **Clients** | Client Manager — AI coding clients with per-client support level, config location, connection types, and one-click configuration. |
 | **Playground** | Interactive try-out space — on the roadmap (placeholder today). |
 | **Settings** | Theme, configuration profiles, timestamped backups, security notes. |
 
@@ -70,6 +74,13 @@ The active page is persisted across refreshes (no flash to the wrong view).
 - **🔔 Stacked notifications (v0.3.0)** — Toasts that stack, auto-dismiss, and can be closed manually — never a blocking `alert()`.
 - **📊 Top-bar configuration status (v0.3.0)** — Reflects the last applied config (Configured / Unsaved / Copyable / Needs setup) at a glance.
 - **🎨 Restrained design** — Graphite/charcoal/slate palette with blue accent; dark, light, and system themes; respects `prefers-reduced-motion`.
+- **🧩 Multi-Client architecture (v0.4.0)** — Provider / Client / Model / Runtime are cleanly separated. A central **compatibility resolver** answers "can this client use this provider/runtime, and how?" with structured results — never a bare true/false.
+- **🟢 Compatibility levels (v0.4.0)** — Every connection is labelled **Verified / Supported / Experimental / Manual setup / Not compatible**, with text + icons (not colour alone).
+- **🤖 Client adapters (v0.4.0)** — `ClaudeCodeAdapter` wraps the proven `buildClaudeSettings` (unchanged output); OpenCode CLI, Codex CLI, and Gemini CLI adapters are capability-aware and honest (manual guidance where auto-config isn't implemented).
+- **☁️/🖥️ Connection-type aware workflow (v0.4.0)** — The wizard is now Client → Connection (Cloud/Local) → Provider/Runtime → Model → Compatibility Review → Apply. Local runtimes are distinguished from cloud providers.
+- **🦙 Runtime adapters (v0.4.0)** — Ollama has a real adapter (detect/status/models); other runtimes are detection-only and never faked. Claude Code + Ollama is honestly marked **Experimental (requires an Anthropic-compatible proxy)**.
+- **🗂️ Profiles (v0.4.0)** — Save & apply configuration selections (client + connection + provider/runtime + model). Profiles store references only — **never API secrets**.
+- **🔌 `/api/clients` endpoint (v0.4.0)** — Surfaces the client catalogue to the UI and external tooling.
 
 ---
 
@@ -96,24 +107,37 @@ The active page is persisted across refreshes (no flash to the wrong view).
 
 ---
 
+## 🔌 Compatibility Levels (v0.4.0)
+
+Nexference never reports a bare "yes/no". Every client ↔ provider / client ↔ runtime combination carries an explicit support level:
+
+| Level | Meaning |
+|-------|---------|
+| **✓ Verified** | Nexference has a known, implemented configuration path (e.g. Claude Code + Anthropic/OpenRouter). |
+| **✓ Supported** | The architecture supports it and an adapter exists, but it may not be verified everywhere (e.g. OpenCode CLI + OpenAI provider). |
+| **◐ Experimental** | Possible through a compatibility layer but needs extra setup (e.g. Claude Code + Ollama — requires an Anthropic-compatible proxy). |
+| **✎ Manual setup** | Nexference can generate instructions but cannot safely auto-configure (e.g. Codex CLI, Gemini CLI). |
+| **✕ Not compatible** | The combination will not work; the workflow refuses to proceed as if it will. |
+
 ## 🚦 Support Matrix
 
 ### Supported Now
 - Cloud provider model discovery (API + website scrape + static fallback).
-- Claude Code configuration: generate, preview, validate, **backup**, and apply to `~/.claude/settings.json`.
-- Anthropic / OpenAI / Gemini config generation (OpenAI/Gemini shown as copyable).
+- **Claude Code** configuration: generate, preview, validate, **backup**, and apply to `~/.claude/settings.json` (proven, unchanged path).
+- OpenCode CLI / Codex CLI / Gemini CLI — registered, capability-aware adapters that provide honest manual guidance (no fake auto-apply).
 - Ollama **detection** (running status + model list) over `http://localhost:11434`.
 - Provider connection testing.
-- Profiles (reference provider + model; no secrets).
+- Profiles (reference client + connection + provider/runtime + model; **no secrets**).
 - Theme persistence (dark / light / system) and active-page persistence.
 
 ### Partially Supported
-- **Local AI** — Ollama detection only. Start/stop/model-management for local runtimes is not implemented.
+- **Local AI** — Ollama detection only; Claude Code + Ollama is **Experimental** (needs a proxy). Start/stop/model-management for local runtimes is not implemented.
 - **Other cloud gateways** — model lists for some providers come from website scrape or a curated static catalogue rather than a live API.
 
 ### Planned (not yet functional — not faked)
-- Configuration **apply** for non-Claude-Code clients (OpenCode, Codex CLI, Gemini CLI, Aider, Cline, Continue, Roo Code, Cursor) — currently shown as "detected / coming soon".
+- Automatic config **write** for non-Claude-Code clients (OpenCode, Codex CLI, Gemini CLI, Aider, Cline, Continue, Roo Code, Cursor) — currently honest manual guidance.
 - Local runtime management (LM Studio, llama.cpp, vLLM, SGLang, KoboldCpp, Jan).
+- Anthropic-compatible proxy / LiteLLM integration for local Claude Code use.
 - Latency / health indicators, config revert, multi-profile sync.
 
 ---
@@ -150,11 +174,14 @@ src/server/
 │   └── settingsStore.js     # ~/.claude/settings.json read / timestamped backup / write / open-folder
 ├── local/
 │   └── runtimes.js          # Local runtime adapters (Ollama detect; others planned)
+├── clients/
+│   └── registry.js          # AI client catalogue (mirror of frontend)
 └── routes/
     ├── models.js            # /api/cached-models, /api/refresh-models, /api/models
     ├── test.js              # /api/test
     ├── config.js            # /api/config, /api/open-folder, /api/backups
-    └── local.js             # /api/local-runtimes
+    ├── local.js             # /api/local-runtimes
+    └── clients.js           # /api/clients, /api/clients/:id
 ```
 
 ### Frontend (`public/src/`, ESM, no framework)
@@ -170,13 +197,33 @@ public/src/
 │   ├── theme.js             # Theme Manager (dark / light / system)
 │   └── notifications.js     # Notification Manager — stacked toasts + activity log
 ├── providers/
-│   ├── registry.js          # PROVIDERS, PROVIDER_TAGS, providerTags(), claudeCodeProviders(), getProvider()
+│   ├── registry.js          # PROVIDERS, PROVIDER_TAGS, providerTags(), claudeCodeProviders(), getProvider(), providerProtocols(), providerCapabilities()
 │   └── adapter.js           # client Provider Adapter interface
+├── compatibility/           # v0.4.0 — central compatibility source of truth
+│   ├── levels.js            # LEVELS (verified/supported/experimental/manual/unsupported)
+│   ├── result.js            # structured compatibility result factory
+│   ├── clientProviderCompatibility.js  # client ↔ provider rules
+│   ├── clientRuntimeCompatibility.js   # client ↔ runtime rules
+│   ├── capabilityResolver.js# orchestrates a full selection
+│   └── ui.js                # levelBadge() / compatNoteList() shared UI
+├── clients/                 # v0.4.0 — AI client adapters
+│   ├── registry.js          # CLIENTS catalogue (opencode-cli distinct from providers), getClient()
+│   ├── base.js              # ClientAdapter base (capability-declaring)
+│   ├── claudeCode.js        # ClaudeCodeAdapter — wraps buildClaudeSettings (unchanged)
+│   ├── opencodeCli.js       # OpenCode CLI adapter (manual/honest)
+│   ├── codexCli.js          # Codex CLI adapter (manual/honest)
+│   ├── geminiCli.js         # Gemini CLI adapter (manual/honest)
+│   └── index.js             # getClientAdapter(id)
+├── runtimes/                # v0.4.0 — local runtime adapters
+│   ├── registry.js          # RUNTIMES mirror + protocols()
+│   ├── base.js              # RuntimeAdapter base (detect/status/models via API)
+│   ├── ollama.js            # OllamaAdapter — full adapter
+│   └── index.js             # getRuntimeAdapter(id)
 ├── config/
 │   ├── engine.js            # Configuration Engine — wraps buildClaudeSettings
-│   ├── clientAdapter.js     # Client Adapter (Claude Code / OpenAI / Gemini) + CLIENTS registry
+│   ├── clientAdapter.js     # Format Client Adapter (Claude Code / OpenAI / Gemini) + re-exports CLIENTS
 │   ├── runtimeAdapter.js    # Runtime Adapter (LocalSettings / Copyable)
-│   └── workflow.js          # 5-step guided configuration wizard
+│   └── workflow.js          # Client-aware wizard: Client → Connection → Provider/Runtime → Model → Review → Apply
 ├── components/
 │   ├── util.js              # esc / norm / logo / maskKey / highlightJSON
 │   ├── gatewayCard.js       # Legacy provider card component (Providers page)
@@ -184,13 +231,14 @@ public/src/
 │   ├── modelPicker.js       # Searchable, free-marked model picker
 │   ├── providerConfig.js    # Per-provider config panel (key + model + test)
 │   └── commandPalette.js    # ⌘K command palette
-└── ui/app.js                # action layer (test, apply, pages, config workflow, profiles)
+└── ui/app.js                # action layer (test, apply, pages, config workflow, profiles, Client Manager)
 ```
 
 ### Key interfaces
 - **Provider Adapter** — a gateway's server-side behaviour (model fetch + connection probe) by API dialect.
-- **Client Adapter** — the client-specific config shape (Claude Code vs OpenAI vs Gemini). `buildClaudeSettings` lives here and is compatibility-critical.
-- **Runtime Adapter** — how a generated config is delivered (write `~/.claude/settings.json` vs copyable modal), and the local-runtime detection contract.
+- **Client Adapter** — the client-specific config shape and lifecycle (detect / compatibility / generate / backup / apply / launch). `ClaudeCodeAdapter` wraps the proven `buildClaudeSettings`; other clients are capability-aware and honest about manual setup.
+- **Runtime Adapter** — local-runtime detection/status (Ollama full; others detection-only) and the local-runtime detection contract.
+- **Compatibility resolver** — the single source of truth answering "can this client use this provider/runtime, and how?" with structured, level-bearing results.
 - **Configuration Engine** — turns a provider + credentials into a valid config via the Client Adapter.
 - **Theme / Router / Storage / Notification managers** — infrastructure for the shell and future milestones.
 

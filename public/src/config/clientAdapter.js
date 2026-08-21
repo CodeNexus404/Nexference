@@ -1,9 +1,10 @@
-// Client Adapter interface — abstracts the client-specific env/config shape each
-// gateway produces. The original app.js encoded this with format branches inside
-// buildClaudeSettings; here each branch becomes a named, swappable adapter so a
-// future client (e.g. a new SDK) is a new class, not a new if-branch.
+// Client Adapter (format branch) — abstracts the client-specific env/config
+// shape each gateway produces. This is the legacy format-keyed adapter used by
+// the Configuration Engine (buildClaudeSettings) to know which env vars a given
+// provider format needs. It is distinct from the v0.4.0 client catalogue in
+// ../clients/registry.js (which describes AI *applications*, not formats).
 //
-// Logic preserved exactly from buildClaudeSettings.
+// Logic preserved exactly from the original app.js.
 export class ClientAdapter {
   // Returns the config fragment this client expects: { env, apiKeyHelper?, model? }.
   buildConfig(/* provider, baseUrl, model, apiKey */) {
@@ -62,33 +63,14 @@ export function getClientAdapter(format) {
   return new ClaudeCodeAdapter();
 }
 
-// ─── Client catalogue (v0.2.0) ───
-// Nexference supports multiple AI coding clients. Claude Code is fully supported
-// (detect + read + generate + validate + backup + write). Every other client is
-// reported honestly: detected/known, but its configuration support is "coming
-// soon" — we never pretend to generate a config we can't.
-export const CLIENTS = [
-  {
-    id: 'claude-code',
-    name: 'Claude Code',
-    supported: true,
-    configPath: '~/.claude/settings.json',
-    note: 'Full support — generate, preview, validate, backup & apply.',
-  },
-  { id: 'opencode', name: 'OpenCode', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'codex', name: 'Codex CLI', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'gemini-cli', name: 'Gemini CLI', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'aider', name: 'Aider', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'cline', name: 'Cline', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'continue', name: 'Continue', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'roo', name: 'Roo Code', supported: false, note: 'Detected · configuration support coming soon' },
-  { id: 'cursor', name: 'Cursor', supported: false, note: 'Detected · configuration support coming soon' },
-];
-
-export function getClient(id) {
-  return CLIENTS.find((c) => c.id === id) || CLIENTS[0];
-}
-
-export function isClientSupported(id) {
-  return !!getClient(id).supported;
-}
+// ─── Re-export the v0.4.0 client catalogue so existing importers
+// (app.js, workflow.js) keep working without code changes. The catalogue itself
+// now lives in ../clients/registry.js. ───
+export {
+  CLIENTS,
+  getClient,
+  isClientSupported,
+  isClientAutoApply,
+  normalizeClientId,
+  clientsForConnectionType,
+} from '../clients/registry.js';
