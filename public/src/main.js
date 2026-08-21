@@ -96,6 +96,7 @@ const GLOBALS = {
   clearTerm: UI.clearTerm,
   // v0.2.0 pages / workflow
   renderWorkspace: UI.renderWorkspace,
+  refreshWorkspace: UI.refreshWorkspace,
   renderProviders: UI.renderProviders,
   renderConfiguration: UI.renderConfiguration,
   renderLocalAI: UI.renderLocalAI,

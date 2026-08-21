@@ -9,7 +9,7 @@
 //   and providers never share ids.
 export const CLIENTS = [
   {
-    id: 'claude-code', name: 'Claude Code', monogram: 'CC', color: '#d97757',
+    id: 'claude-code', name: 'Claude Code', monogram: 'CC', color: '#d97757', logo: '/clients/claude-code.png',
     configPath: '~/.claude/settings.json',
     support: 'verified',
     capabilities: { detect: true, generateConfig: true, applyConfig: true, backup: true, launch: true, openFolder: true },
@@ -18,7 +18,7 @@ export const CLIENTS = [
     note: 'Fully supported — generate, preview, validate, backup & apply.',
   },
   {
-    id: 'opencode-cli', name: 'OpenCode', monogram: 'OC', color: '#7c3aed',
+    id: 'opencode-cli', name: 'OpenCode', monogram: 'OC', color: '#7c3aed', logo: '/clients/opencode-cli.png',
     configPath: '~/.config/opencode/config.json',
     support: 'manual',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: true, openFolder: true },
@@ -27,7 +27,7 @@ export const CLIENTS = [
     note: 'OpenCode consumes OpenAI-compatible endpoints. Auto-configure support is not implemented — guidance only.',
   },
   {
-    id: 'codex', name: 'Codex CLI', monogram: 'CX', color: '#10a37f',
+    id: 'codex', name: 'Codex CLI', monogram: 'CX', color: '#10a37f', logo: '/clients/codex.svg',
     configPath: '~/.codex/config.json',
     support: 'manual',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: true, openFolder: true },
@@ -36,7 +36,7 @@ export const CLIENTS = [
     note: 'Codex CLI uses the OpenAI-compatible API. Auto-configure guidance only.',
   },
   {
-    id: 'gemini-cli', name: 'Gemini CLI', monogram: 'GC', color: '#4285f4',
+    id: 'gemini-cli', name: 'Gemini CLI', monogram: 'GC', color: '#4285f4', logo: '/clients/gemini-cli.svg',
     configPath: '~/.gemini/settings.json',
     support: 'manual',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: true, openFolder: true },
@@ -45,7 +45,7 @@ export const CLIENTS = [
     note: 'Gemini CLI uses the Gemini API. Auto-configure guidance only.',
   },
   {
-    id: 'aider', name: 'Aider', monogram: 'AI', color: '#f59e0b',
+    id: 'aider', name: 'Aider', monogram: 'AI', color: '#f59e0b', logo: '/clients/aider.png',
     configPath: '~/.aider.conf.yml',
     support: 'unsupported',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: true, openFolder: true },
@@ -54,7 +54,7 @@ export const CLIENTS = [
     note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'cline', name: 'Cline', monogram: 'CL', color: '#f97316',
+    id: 'cline', name: 'Cline', monogram: 'CL', color: '#f97316', logo: '/clients/cline.png',
     configPath: 'VS Code settings',
     support: 'unsupported',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: false, openFolder: true },
@@ -63,7 +63,7 @@ export const CLIENTS = [
     note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'continue', name: 'Continue', monogram: 'CO', color: '#0ea5e9',
+    id: 'continue', name: 'Continue', monogram: 'CO', color: '#0ea5e9', logo: '/clients/continue.png',
     configPath: '~/.continue/config.json',
     support: 'unsupported',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: false, openFolder: true },
@@ -72,7 +72,7 @@ export const CLIENTS = [
     note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'roo', name: 'Roo Code', monogram: 'RO', color: '#22c55e',
+    id: 'roo', name: 'Roo Code', monogram: 'RO', color: '#22c55e', logo: '/clients/roo.svg',
     configPath: 'VS Code settings',
     support: 'unsupported',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: false, openFolder: true },
@@ -81,7 +81,7 @@ export const CLIENTS = [
     note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'cursor', name: 'Cursor', monogram: 'CU', color: '#111827',
+    id: 'cursor', name: 'Cursor', monogram: 'CU', color: '#111827', logo: '/clients/cursor.svg',
     configPath: '~/.cursor/config.json',
     support: 'unsupported',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: false, openFolder: true },

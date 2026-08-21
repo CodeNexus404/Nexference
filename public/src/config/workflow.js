@@ -3,7 +3,7 @@ import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { recordActivity } from '../core/activityStore.js';
 import { openModal } from '../components/modal.js';
-import { esc, logoHtml, maskKey, highlightJSON } from '../components/util.js';
+import { esc, logoHtml, clientLogoHtml, maskKey, highlightJSON } from '../components/util.js';
 import { renderModelPicker } from '../components/modelPicker.js';
 import { configEngine } from './engine.js';
 import { LocalSettingsRuntime, CopyableRuntime } from './runtimeAdapter.js';
@@ -167,8 +167,11 @@ export function openWorkflow(opts = {}) {
     const grid = document.createElement('div');
     grid.className = 'client-grid';
     grid.innerHTML = CLIENTS.map((c) => `
-      <button class="panel client-card ${c.support !== 'unsupported' ? 'live' : ''} ${c.id === wf.client ? 'sel' : ''}" data-id="${c.id}" ${c.support === 'unsupported' ? 'disabled' : ''}>
-        <div class="client-top"><b>${esc(c.name)}</b><span class="badge ${c.support}">${esc(c.support === 'verified' ? 'Verified' : c.support === 'manual' ? 'Manual' : 'Coming soon')}</span></div>
+       <button class="panel client-card ${c.support !== 'unsupported' ? 'live' : ''} ${c.id === wf.client ? 'sel' : ''}" data-id="${c.id}" ${c.support === 'unsupported' ? 'disabled' : ''}>
+        <div class="client-top">
+          <div class="client-logo" style="--cm:${esc(c.color || '#5b8def')}">${clientLogoHtml(c)}</div>
+          <div class="client-id"><b>${esc(c.name)}</b><span class="badge ${c.support}">${esc(c.support === 'verified' ? 'Verified' : c.support === 'manual' ? 'Manual' : 'Coming soon')}</span></div>
+        </div>
         <div class="client-sub">${esc(c.note || '')}</div>
       </button>`).join('');
     grid.querySelectorAll('.client-card').forEach((b) => {
@@ -409,7 +412,7 @@ export function openWorkflow(opts = {}) {
     wf.actionsEl.querySelector('#wfSaveProfile').addEventListener('click', () => {
       const name = prompt('Profile name (references only — never stores secrets)', `${getClient(wf.client).name} · ${wf.model || 'config'}`);
       if (!name || !name.trim()) return;
-      Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name: name.trim(), client: wf.client, connectionType: wf.connectionType, provider: wf.provider || null, runtime: wf.runtime || null, model: wf.model });
+      Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name: name.trim(), client: wf.client, connectionType: wf.connectionType, sourceType: wf.connectionType, provider: wf.provider || null, runtime: wf.runtime || null, model: wf.model });
       notify.toast(`Saved profile “${name.trim()}”`, 'success');
     });
     wf.actionsEl.querySelector('#wfApply').addEventListener('click', () => doApply(canApply));

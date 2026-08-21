@@ -46,6 +46,22 @@ export function logoHtml(p) {
   return `<span class="mono-fallback">${svgLogo(p)}</span>`;
 }
 
+// Client logo renderer — mirrors logoHtml but uses the client fields
+// (logo / color / monogram). Shows the original logo when available, with a
+// graceful monogram fallback if the image fails to load.
+export function clientLogoHtml(c) {
+  const mono = esc(c.monogram || c.name || '?');
+  const a = c.color || '#5b8def';
+  const fallback = `<svg viewBox="0 0 48 48" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${esc(c.name || '')}">
+    <rect x="3" y="3" width="42" height="42" rx="13" fill="${a}16" stroke="${a}" stroke-opacity=".55" stroke-width="1.5"/>
+    <text x="24" y="25.5" dominant-baseline="central" text-anchor="middle" font-family="Sora, system-ui, sans-serif" font-weight="800" font-size="17" letter-spacing="-.5" fill="${a}">${mono}</text>
+  </svg>`;
+  if (c.logo) {
+    return `<img src="${c.logo}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${fallback}</span>`;
+  }
+  return `<span class="mono-fallback">${fallback}</span>`;
+}
+
 // Lightweight JSON syntax highlighter for config previews. Returns HTML with
 // <span> wrappers — the input is JSON (already safe), and the preview path masks
 // secrets before this runs, so no raw key is ever emitted.

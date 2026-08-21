@@ -75,16 +75,6 @@ export const PROVIDERS = [
     defaultKey: '', isFree: () => true,
   },
   {
-    id: 'opencode-api', name: 'OpenCode API', sub: 'localhost:4099',
-    logo: '/providers/opencode.png',
-    accent: '#7c3aed', glow: 'rgba(124,58,237,.18)',
-    format: 'openai', claudeCode: false,
-    baseUrl: 'http://localhost:4099/v1/',
-    desc: 'OpenCode’s local/model-serving API. A PROVIDER — distinct from the OpenCode CLIENT. Usable by OpenAI-compatible clients.',
-    signup: '', localOnly: true,
-    defaultKey: '', isFree: () => true,
-  },
-  {
     id: 'gemini', name: 'Google Gemini', sub: 'aistudio.google.com',
     logo: '/providers/gemini.ico',
     accent: '#4285f4', glow: 'rgba(66,133,244,.18)',

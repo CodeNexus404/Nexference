@@ -37,51 +37,51 @@ const CAP = {
 
 export const CLIENTS = [
   {
-    id: 'claude-code', name: 'Claude Code', support: 'verified', level: 1, adapter: 'claude-code',
+    id: 'claude-code', name: 'Claude Code', logo: '/clients/claude-code.png', support: 'verified', level: 1, adapter: 'claude-code',
     connectionTypes: ['cloud', 'local'], configPath: '~/.claude/settings.json',
     capabilities: CAP.claudeCodeFull,
     note: 'Fully supported — generate, preview, validate, backup & apply.',
   },
   {
-    id: 'opencode-cli', name: 'OpenCode', support: 'manual', level: 2, adapter: 'opencode-cli',
+    id: 'opencode-cli', name: 'OpenCode', logo: '/clients/opencode-cli.png', support: 'manual', level: 2, adapter: 'opencode-cli',
     connectionTypes: ['cloud', 'local'], configPath: '~/.config/opencode/config.json',
     capabilities: CAP.assisted,
     note: 'OpenCode consumes OpenAI-compatible endpoints. Auto-configure guidance only.',
   },
   {
-    id: 'codex', name: 'Codex CLI', support: 'manual', level: 2, adapter: 'codex',
+    id: 'codex', name: 'Codex CLI', logo: '/clients/codex.svg', support: 'manual', level: 2, adapter: 'codex',
     connectionTypes: ['cloud'], configPath: '~/.codex/config.json',
     capabilities: CAP.cloudOnly,
     note: 'Codex CLI uses the OpenAI-compatible API. Auto-configure guidance only.',
   },
   {
-    id: 'gemini-cli', name: 'Gemini CLI', support: 'manual', level: 2, adapter: 'gemini-cli',
+    id: 'gemini-cli', name: 'Gemini CLI', logo: '/clients/gemini-cli.svg', support: 'manual', level: 2, adapter: 'gemini-cli',
     connectionTypes: ['cloud', 'local'], configPath: '~/.gemini/settings.json',
     capabilities: CAP.assisted,
     note: 'Gemini CLI uses the Gemini API. Auto-configure guidance only.',
   },
   {
-    id: 'aider', name: 'Aider', support: 'unsupported', level: 3, adapter: null,
+    id: 'aider', name: 'Aider', logo: '/clients/aider.png', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: '~/.aider.conf.yml',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'cline', name: 'Cline', support: 'unsupported', level: 3, adapter: null,
+    id: 'cline', name: 'Cline', logo: '/clients/cline.png', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: 'VS Code settings',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'continue', name: 'Continue', support: 'unsupported', level: 3, adapter: null,
+    id: 'continue', name: 'Continue', logo: '/clients/continue.png', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: '~/.continue/config.json',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'roo', name: 'Roo Code', support: 'unsupported', level: 3, adapter: null,
+    id: 'roo', name: 'Roo Code', logo: '/clients/roo.svg', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: 'VS Code settings',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
   },
   {
-    id: 'cursor', name: 'Cursor', support: 'unsupported', level: 3, adapter: null,
+    id: 'cursor', name: 'Cursor', logo: '/clients/cursor.svg', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: '~/.cursor/config.json',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
   },

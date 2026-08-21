@@ -12,7 +12,7 @@ import { levelBadge, compatNoteList, connectionLabel } from '../compatibility/ui
 import { checkClientProvider } from '../compatibility/clientProviderCompatibility.js';
 import { checkClientRuntime } from '../compatibility/clientRuntimeCompatibility.js';
 import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
-import { esc, norm, maskKey, highlightJSON, logoHtml } from '../components/util.js';
+import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
@@ -478,129 +478,154 @@ export function renderWorkspace() {
   const section = document.getElementById('page-workspace');
   if (!section) return;
 
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+  section.innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>${greet}</h1>
+        <p>Nexference reads your environment — installed clients, local runtimes, models and hardware — and shows what you can safely configure.</p>
+      </div>
+      <button class="btn btn2" id="wsRefresh" onclick="refreshWorkspace()">Refresh environment</button>
+    </div>
+    <div id="wsBody" class="ws-grid">
+      <div class="skeleton-row" style="grid-column:1/-1">
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      </div>
+    </div>`;
+
+  fetchEnvironment();
+  updateShellStatus();
+}
+
+// Fetch the unified environment and render the workspace from it.
+export async function refreshWorkspace() {
+  const btn = document.getElementById('wsRefresh');
+  if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  try {
+    await fetchEnvironment(true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+  }
+}
+
+async function fetchEnvironment(force) {
+  const body = document.getElementById('wsBody');
+  if (!body) return;
+  try {
+    const res = await fetch('/api/environment' + (force ? '/refresh' : ''));
+    const env = await res.json();
+    renderWorkspaceFromEnv(env);
+  } catch {
+    body.innerHTML = '<div class="panel"><div class="muted">Could not load environment state.</div></div>';
+  }
+}
+
+function renderWorkspaceFromEnv(env) {
+  const body = document.getElementById('wsBody');
+  if (!body) return;
+  const health = env.health || {};
+  const cfg = env.configuration || {};
+  const hw = (env.hardware && env.hardware.capabilities) || {};
+  const models = env.models || [];
+  const runtimes = env.runtimes || [];
+  const clients = env.clients || [];
+
+  const runningRt = runtimes.filter((r) => r.running);
+  const installedClients = clients.filter((c) => c.installed);
+  const providersConfigured = PROVIDERS.filter((p) => Storage.getKey(p.id)).length;
+
   const applied = workspace.applied;
   const activeId = (applied && applied.provider) || workspace.appliedProviderId || workspace.activeProvider;
   const activeProvider = activeId ? getProvider(activeId) : null;
   const activeModel = (applied && applied.model) || (activeId ? Storage.getModel(activeId) : '');
+  const activeRuntime = (applied && applied.runtime) ? getRuntime(applied.runtime) : null;
   const client = getClient(applied ? applied.client : 'claude-code');
   const connType = applied ? (applied.connectionType || 'cloud') : 'cloud';
-  const activeRuntime = (applied && applied.runtime) ? getRuntime(applied.runtime) : null;
 
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const statusLabel = applied ? (applied.status === 'configured' ? 'Configured' : applied.status) : 'Not configured';
-  const statusCls = applied ? (applied.status === 'configured' ? 'live' : (applied.status === 'copyable' ? 'planned' : 'browse')) : 'browse';
+  const cfgValid = !!cfg.file?.valid;
+  const cfgModel = cfg.file?.model || activeModel || null;
+  const cfgSource = cfg.file?.baseUrl ? 'cloud' : 'unknown';
 
-  section.innerHTML = `
-    <div class="page-head">
-      <h1>${greet}</h1>
-      <p>Your AI workspace is ready. Manage providers, local runtimes, models and client configurations from one place.</p>
+  // ── Recommendations: only data-derived ──
+  const recs = [];
+  if (cfgValid && cfgModel) recs.push(`Configuration is valid (${esc(client.name)} · ${esc(cfgModel)}).`);
+  else if (cfgValid) recs.push('Configuration file is valid but no model is set — pick a model in the wizard.');
+  else recs.push('No valid configuration detected yet — run the Configuration Workspace to set one up.');
+  const ollama = runtimes.find((r) => r.id === 'ollama');
+  if (ollama && ollama.running) recs.push('Ollama is running — you can use local models.');
+  else if (ollama && ollama.error) recs.push('Ollama is installed but not currently reachable — start it to use local models.');
+  else if (!runningRt.length) recs.push('No local runtime is running — cloud providers are the simplest path.');
+  (hw.recommendations || []).forEach((r) => recs.push(r));
+  (hw.warnings || []).forEach((w) => recs.push(w));
+
+  body.innerHTML = `
+    <div class="panel ws-health ${health.status || 'neutral'}">
+      <div class="ws-health-head">
+        <span class="ws-eyebrow">Environment Health</span>
+        <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+      </div>
+      <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
+      <div class="health-factors">
+        ${(health.factors || []).map((f) => `<div class="health-factor ${f.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`).join('')}
+      </div>
     </div>
-    <div class="ws-grid">
-      <div class="panel ws-config">
-        <div class="ws-config-head">
-          <span class="ws-eyebrow">Current Configuration</span>
-          <span class="badge ${statusCls}" id="wsConfigBadge">${esc(statusLabel)}</span>
-        </div>
-        <div class="ws-config-body">
-          <div class="kv"><span>Active Client</span><b>${esc(client.name)}</b></div>
-          <div class="kv"><span>Connection</span><b>${esc(connectionLabel(connType))}</b></div>
-          <div class="kv"><span>Provider</span><b>${esc(activeProvider ? activeProvider.name : '—')}</b></div>
-          <div class="kv"><span>Model</span><b class="mono">${esc(activeModel || '—')}</b></div>
-          <div class="kv"><span>Local Runtime</span><b id="wsRuntime">${esc(activeRuntime ? activeRuntime.name : '—')}</b></div>
-          <div class="kv"><span>Status</span><b id="wsStatus">${esc(statusLabel)}</b></div>
-          <div class="kv"><span>Config path</span><b class="mono" id="pathText">${esc(client.configPath || '~/.claude/settings.json')}</b></div>
-        </div>
-        <div class="ws-actions-row">
-          <button class="btn btn-go" onclick="openWorkflow()">View configuration</button>
-          <button class="btn btn2" onclick="openWorkflow()">Change configuration</button>
-        </div>
-      </div>
 
-      <div class="panel ws-quick">
-        <h3>Quick actions</h3>
-        <div class="qa-grid">
-          <button class="qa" onclick="openWorkflow()"><b>Configure Claude Code</b><span>Guided client config</span></button>
-          <button class="qa" onclick="navigate('cloud-providers')"><b>Add Cloud Provider</b><span>Browse &amp; connect</span></button>
-          <button class="qa" onclick="navigate('models')"><b>Explore Models</b><span>Search the catalogue</span></button>
-          <button class="qa" onclick="navigate('localai')"><b>Check Local AI</b><span>Detect Ollama &amp; runtimes</span></button>
-          <button class="qa" onclick="navigate('playground')"><b>Open Playground</b><span>Try models</span></button>
-        </div>
+    <div class="panel ws-config">
+      <div class="ws-config-head">
+        <span class="ws-eyebrow">Current Workspace</span>
+        <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
       </div>
+      <div class="ws-config-body">
+        <div class="kv"><span>Active Client</span><b>${esc(client.name)}</b></div>
+        <div class="kv"><span>AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
+        <div class="kv"><span>Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
+        <div class="kv"><span>Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
+        <div class="kv"><span>Config path</span><b class="mono">${esc(client.configPath || '~/.claude/settings.json')}</b></div>
+      </div>
+      <div class="ws-actions-row">
+        <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
+        <button class="btn btn2" onclick="navigate('configuration')">Configuration</button>
+      </div>
+    </div>
 
-      <div class="panel ws-summary">
-        <h3>Provider summary</h3>
-        <div class="stat-row"><div class="stat"><b id="wsCloudCount">0</b><span>cloud providers</span></div><div class="stat"><b id="wsCloudConf">0</b><span>configured</span></div></div>
-        <div class="stat-row"><div class="stat"><b id="wsLocalCount">0</b><span>local runtimes</span></div><div class="stat"><b id="wsLocalRun">0</b><span>running</span></div></div>
-      </div>
+    <div class="panel ws-summary">
+      <h3>Environment Overview</h3>
+      <div class="stat-row"><div class="stat"><b>${installedClients.length}</b><span>clients detected</span></div><div class="stat"><b>${providersConfigured}</b><span>providers configured</span></div></div>
+      <div class="stat-row"><div class="stat"><b>${runningRt.length}</b><span>runtimes running</span></div><div class="stat"><b>${models.length}</b><span>local models</span></div></div>
+    </div>
 
-      <div class="panel ws-profiles">
-        <h3>Profiles</h3>
-        <p class="muted">Saved configuration selections — never store secrets.</p>
-        <div id="wsProfiles" class="ws-profile-list"></div>
-        <button class="btn btn2" onclick="navigate('settings')">Manage profiles</button>
-      </div>
+    <div class="panel ws-next">
+      <h3>Recommendations</h3>
+      <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
+    </div>
 
-      <div class="panel ws-next">
-        <h3>Recommended next</h3>
-        <div id="wsNext" class="ws-next-body"></div>
-      </div>
+    <div class="panel ws-profiles">
+      <h3>Profiles</h3>
+      <p class="muted">Saved configuration selections — never store secrets.</p>
+      <div id="wsProfiles" class="ws-profile-list"></div>
+      <button class="btn btn2" onclick="navigate('settings')">Manage profiles</button>
+    </div>
 
-      <div class="panel ws-activity">
-        <div class="panel-h"><h3>Activity</h3><button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button></div>
-        <div class="term"><div class="term-body" id="termOut"></div></div>
-      </div>
+    <div class="panel ws-activity">
+      <div class="panel-h"><h3>Activity</h3><button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button></div>
+      <div class="term"><div class="term-body" id="termOut"></div></div>
     </div>`;
-
-  fetch('/api/local-runtimes').then(r => r.json()).then(d => {
-    const list = d.runtimes || [];
-    const ollama = list.find(r => r.id === 'ollama');
-    const wsLocalRun = document.getElementById('wsLocalRun');
-    const wsLocalCount = document.getElementById('wsLocalCount');
-    if (wsLocalCount) wsLocalCount.textContent = list.length;
-    if (wsLocalRun) wsLocalRun.textContent = ollama && ollama.running ? '1' : '0';
-    const st = document.getElementById('wsStatus');
-    if (st && ollama && ollama.running && activeProvider) {
-      st.textContent = 'Active · Local AI: Ollama running';
-    }
-    const wsRuntime = document.getElementById('wsRuntime');
-    if (wsRuntime) {
-      if (activeRuntime && ollama) {
-        wsRuntime.textContent = activeRuntime.name + (ollama.running ? ' · running' : ' · not running');
-      } else if (activeRuntime) {
-        wsRuntime.textContent = activeRuntime.name;
-      }
-    }
-  }).catch(() => {});
-
-  let configured = 0;
-  PROVIDERS.forEach(p => { if (Storage.getKey(p.id)) configured++; });
-  const cc = document.getElementById('wsCloudCount'); if (cc) cc.textContent = PROVIDERS.length;
-  const cf = document.getElementById('wsCloudConf'); if (cf) cf.textContent = configured;
 
   // Profiles (references only, no secrets)
   const wsProfiles = document.getElementById('wsProfiles');
   if (wsProfiles) {
     const profiles = Storage.listProfiles();
     wsProfiles.innerHTML = profiles.length
-      ? profiles.map(p => {
+      ? profiles.map((p) => {
           const full = Storage.getProfile(p.id) || {};
           const prov = full.provider ? (getProvider(full.provider)?.name || full.provider) : '—';
           return `<div class="profile-row"><div><b>${esc(p.name)}</b> <span class="muted">${esc(prov)} · ${esc(full.model || '?')}</span></div><button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button></div>`;
         }).join('')
       : '<div class="muted">No profiles yet — save one from Settings.</div>';
   }
-
-  // Recommended next action (honest, state-derived)
-  const wsNext = document.getElementById('wsNext');
-  if (wsNext) {
-    let next = 'Configure a client to get started.';
-    if (applied && applied.status === 'configured') next = 'Configuration active — explore models or connect a local runtime.';
-    else if (activeId) next = 'Review and apply your configuration to finish setup.';
-    wsNext.innerHTML = `<div class="ws-next-item">${esc(next)}</div>`;
-  }
-
-  updateShellStatus();
 }
 
 export function renderProviders() {
@@ -730,7 +755,7 @@ export function saveCurrentAsProfileFromCfg() {
   const runtime = a.runtime || workspace.activeRuntime || null;
   const model = a.model || (provider ? Storage.getModel(provider) : cfg.model);
   if (!provider && !runtime) { notify.toast('Configure a provider or runtime first', 'warning'); return; }
-  Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name, client, connectionType, provider, runtime, model });
+  Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name, client, connectionType, sourceType: connectionType, provider, runtime, model });
   notify.toast(`Saved profile “${name}”`, 'success');
   const inp = document.getElementById('cfgProfileName'); if (inp) inp.value = '';
   renderCfgSubProfiles(document.getElementById('cfgSubview'));
@@ -1071,7 +1096,7 @@ export function renderClients() {
     return `
     <div class="panel client-card ${c.support !== 'unsupported' ? 'live' : ''} ${configured ? 'sel' : ''}">
       <div class="client-top">
-        <div class="client-logo" style="--cm:${esc(c.color || '#5b8def')}">${esc(c.monogram || c.name.slice(0, 2))}</div>
+        <div class="client-logo" style="--cm:${esc(c.color || '#5b8def')}">${clientLogoHtml(c)}</div>
         <div class="client-id">
           <b>${esc(c.name)}</b>
           <span class="badge ${c.support}">${esc(supportLabel)}</span>
@@ -1210,7 +1235,7 @@ export function createProfile() {
   if (!provider && !runtime) { notify.toast('Configure a provider or runtime first', 'warning'); return; }
   const id = 'p_' + Date.now().toString(36);
   // References only — never secrets.
-  Storage.saveProfile({ id, name, client, connectionType, provider, runtime, model });
+  Storage.saveProfile({ id, name, client, connectionType, sourceType: connectionType, provider, runtime, model });
   notify.toast(`Saved profile “${name}”`, 'success');
   const inp = document.getElementById('profileName'); if (inp) inp.value = '';
   renderProfiles();
@@ -1327,7 +1352,9 @@ export function renderCloudProviders() {
   };
 
   const drawGrid = () => {
-    const list = PROVIDERS.filter(passes);
+    // Anthropic is the first-party API, not a third-party cloud gateway — keep it
+    // out of the Cloud Providers explorer (it still appears under Providers / compatibility).
+    const list = PROVIDERS.filter(p => p.id !== 'anthropic' && passes(p));
     if (!list.length) { grid.innerHTML = '<div class="muted">No providers match.</div>'; return; }
     grid.innerHTML = list.map(p => {
       const key = Storage.getKey(p.id);

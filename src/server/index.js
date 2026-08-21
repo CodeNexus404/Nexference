@@ -12,6 +12,8 @@ import { registerLocalRoutes } from './routes/local.js';
 import { registerClientRoutes } from './routes/clients.js';
 import { registerRuntimeRoutes } from './routes/runtimes.js';
 import { registerProfileRoutes } from './routes/profiles.js';
+import { registerEnvironmentRoutes } from './routes/environment.js';
+import { registerHardwareRoutes } from './routes/hardware.js';
 import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
@@ -44,6 +46,8 @@ export function createApp() {
   registerClientRoutes(app);
   registerRuntimeRoutes(app);
   registerProfileRoutes(app);
+  registerEnvironmentRoutes(app);
+  registerHardwareRoutes(app);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);
