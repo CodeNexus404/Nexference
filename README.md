@@ -17,7 +17,16 @@
 
 ## 📖 Overview
 
-**Nexference v0.5.0 — Real Configuration Management & Provider Intelligence** evolves the product from a Claude-specific gateway tool into a *universal AI workspace*. v0.4.0 separated Providers / Clients / Models / Runtimes with a real compatibility system; v0.5.0 makes configuration **real, safe, and observable**: a Configuration Workspace that reads the live config, previews the exact CURRENT → NEW diff, applies through an atomic+verified write with automatic backups, restores or deletes those backups safely, watches the file for external edits, and keeps an activity history. Provider connections can be tested independently and persist their last result.
+**Nexference v0.6.0 — Multi-Client Adapters & Local Runtime Integration** evolves the universal AI workspace with a first-class **client-adapter layer**, a richer **capability matrix**, a dedicated **local runtime integration**, a **Compatibility Explorer**, and portable, secret-free **profiles** (rename / duplicate / import / export). v0.5.0 made configuration real and safe; v0.6.0 extends that to every client and to local models:
+
+- **Multi-Client Adapters** — a server-side `ClientAdapter` interface (`detect`, `getCapabilities`, `supportsAutoConfig`, `buildConfig`, `validateConfig`, `applyConfig`, `readConfig`, `launch`) with a `ClaudeCodeAdapter` wrapping the proven, **unchanged**, byte-identical `buildClaudeSettings` path, plus capability-aware adapters for OpenCode CLI, Codex CLI, and Gemini CLI.
+- **Capability Matrix** — every client exposes `autoConfigure`, `supportsCloudProviders`, `supportsLocalRuntimes`, `supportsCustomBaseUrl`, `supportsEnvironmentVariables`, `supportsModelSelection`, `supportsLaunch`, `supportsReadConfig`, `supportsBackup`, and a `level` (1 = fully verified, 2 = assisted/manual, 3 = detection-only). The wizard and the compatibility engine both derive from it — never a disparate hardcode.
+- **Local Runtime Integration** — a `RuntimeAdapter` layer over `local/runtimes.js` adds protocol capabilities + per-runtime status/models helpers; Ollama is live, others are reported honestly as planned/detection-only. Wizard step + compatibility honour `supportsLocalRuntimes`.
+- **Compatibility Engine** (`/api/config/compatibility`) — single source of truth answering "can client X use provider Y / runtime Z, and how?" with `compatible`, `level`, `reasons`, `warnings`, `adapterMethod`. The frontend Compatibility Explorer renders the full client × provider/runtime matrix from the same rules.
+- **Portable Profiles** — a reusable, secret-free selection of client + connection + provider/runtime + model. Rename, duplicate, export/import as JSON, plus a `/api/profiles` store for programmatic access.
+- **OpenCode separation** — OpenCode the *application* stays `opencode-cli`; OpenCode's local/model-serving API is a distinct provider `opencode-api` (OpenAI-compatible). Clients and providers never share ids.
+
+Nexference v0.5.0 made configuration **real, safe, and observable**: a Configuration Workspace that reads the live config, previews the exact CURRENT → NEW diff, applies through an atomic+verified write with automatic backups, restores or deletes those backups safely, watches the file for external edits, and keeps an activity history. Provider connections can be tested independently and persist their last result.
 
 - **Provider** — where the AI/model comes from (Anthropic, OpenRouter, Google, OpenAI, Groq, …). A provider is *not* automatically a client.
 - **Model** — a specific model id on a provider (Claude, GPT, Gemini, Llama, …).
@@ -79,8 +88,15 @@ The active page is persisted across refreshes (no flash to the wrong view).
 - **🤖 Client adapters (v0.4.0)** — `ClaudeCodeAdapter` wraps the proven `buildClaudeSettings` (unchanged output); OpenCode CLI, Codex CLI, and Gemini CLI adapters are capability-aware and honest (manual guidance where auto-config isn't implemented).
 - **☁️/🖥️ Connection-type aware workflow (v0.4.0)** — The wizard is now Client → Connection (Cloud/Local) → Provider/Runtime → Model → Compatibility Review → Apply. Local runtimes are distinguished from cloud providers.
 - **🦙 Runtime adapters (v0.4.0)** — Ollama has a real adapter (detect/status/models); other runtimes are detection-only and never faked. Claude Code + Ollama is honestly marked **Experimental (requires an Anthropic-compatible proxy)**.
-- **🗂️ Profiles (v0.4.0)** — Save & apply configuration selections (client + connection + provider/runtime + model). Profiles store references only — **never API secrets**.
-- **🔌 `/api/clients` endpoint (v0.4.0)** — Surfaces the client catalogue to the UI and external tooling.
+ - **🗂️ Profiles (v0.4.0)** — Save & apply configuration selections (client + connection + provider/runtime + model). Profiles store references only — **never API secrets**.
+
+### v0.6.0 — Multi-Client Adapters & Local Runtime Integration
+ - **🧱 Client Adapter layer** — Server-side `ClientAdapter` interface (`detect`, `getCapabilities`, `supportsAutoConfig`, `buildConfig`, `validateConfig`, `applyConfig`, `readConfig`, `launch`). `ClaudeCodeAdapter` wraps the proven `buildClaudeSettings` (output unchanged, still the reference path); OpenCode CLI / Codex CLI / Gemini CLI adapters are capability-aware and honest.
+ - **📊 Capability Matrix** — Each client exposes `autoConfigure`, `supportsCloudProviders`, `supportsLocalRuntimes`, `supportsCustomBaseUrl`, `supportsEnvironmentVariables`, `supportsModelSelection`, `supportsLaunch`, `supportsReadConfig`, `supportsBackup`, and a `level` (1 verified / 2 assisted / 3 detection-only). The wizard + compatibility engine derive from it.
+ - **🖥️ Local Runtime Integration** — `RuntimeAdapter` over `local/runtimes.js` adds protocol capability + status/models helpers; Ollama is live, others reported honestly as planned/detection-only. Honours `supportsLocalRuntimes`.
+ - **🧭 Compatibility Engine + Explorer** — `/api/config/compatibility` is the single source of truth; the Configuration Workspace's **Compatibility** tab renders the full client × provider/runtime matrix from the same rules.
+ - **🗂️ Portable Profiles** — Rename, duplicate, export/import as JSON, plus a `/api/profiles` store. Secret-free by construction (the store rejects key fields).
+ - **🔌 New endpoints** — `/api/clients/:id/capabilities`, `/api/clients/:id/status`, `/api/runtimes`, `/api/runtimes/:id/status`, `/api/runtimes/:id/models`, `/api/local-models`, `/api/profiles`, `/api/config/compatibility`.
 
 ### v0.5.0 — Real Configuration Management & Provider Intelligence
 - **🛠️ Configuration Workspace** — A dedicated page showing the live `~/.claude/settings.json`: client, provider/base URL, model, validity, last-modified, and a **View JSON** modal (API key masked).

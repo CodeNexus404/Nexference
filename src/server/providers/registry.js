@@ -6,12 +6,14 @@
 // Behaviour preserved exactly from the previous single-file server.js.
 
 export const PROVIDERS = [
+  { id: 'anthropic', baseUrl: 'https://api.anthropic.com/', format: 'anthropic', publicModels: false },
   { id: 'agentrouter', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: false },
   { id: 'aerolink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: false },
   { id: 'freemodel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: false },
   { id: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1/', format: 'openai', publicModels: true },
   { id: 'nvidia', baseUrl: 'https://integrate.api.nvidia.com/v1/', format: 'openai', publicModels: false },
   { id: 'groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false },
+  { id: 'opencode-api', baseUrl: 'http://localhost:4099/v1/', format: 'openai', publicModels: false },
   { id: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false },
   { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false },
   { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: false },
@@ -64,6 +66,10 @@ export const STATIC_MODELS = {
     { id: 'qwen/qwen3.6-plus', paid: true },
   ],
 };
+
+export function getProvider(id) {
+  return PROVIDERS.find((p) => p.id === id) || null;
+}
 
 // Website-scraping fallback — visit the provider's site and pull the model list
 // when the API needs a key (or is unavailable).

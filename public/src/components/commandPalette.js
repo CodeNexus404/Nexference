@@ -3,6 +3,7 @@ import { theme } from '../core/theme.js';
 import { openModal, closeModal } from './modal.js';
 import { openWorkflow } from '../config/workflow.js';
 import { PROVIDERS } from '../providers/registry.js';
+import { CLIENTS, getClient } from '../clients/registry.js';
 import { esc } from './util.js';
 
 // Command Palette — a lightweight ⌘K / Ctrl+K launcher. Pure navigation/action
@@ -23,11 +24,22 @@ export function toggleCommandPalette() {
     { label: 'Go to Models', hint: 'Page', run: () => router.navigate('models') },
     { label: 'Go to Clients', hint: 'Page', run: () => router.navigate('clients') },
     { label: 'Go to Settings', hint: 'Page', run: () => router.navigate('settings') },
-    { label: 'Configure Claude Code', hint: 'Workflow', run: () => openWorkflow() },
+    { label: 'Configure a client', hint: 'Workflow', run: () => openWorkflow() },
+    { label: 'Open Configuration Workspace', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('config'); } },
+    { label: 'Open Profiles', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },
+    { label: 'Open Compatibility Explorer', hint: 'Page', run: () => { if (window.openCompatibilityExplorer) window.openCompatibilityExplorer(); } },
     { label: 'Open Playground', hint: 'Page', run: () => router.navigate('playground') },
     { label: 'Toggle Theme', hint: 'Appearance', run: () => { if (window.setTheme) window.setTheme(theme.current() === 'dark' ? 'light' : 'dark'); } },
     { label: 'Toggle Sidebar', hint: 'Appearance', run: () => { if (window.toggleSidebar) window.toggleSidebar(); } },
   ];
+  // Client quick-launch (start the wizard pre-selected to that client).
+  CLIENTS.filter((c) => c.support !== 'unsupported').forEach((c) => {
+    actions.push({
+      label: `Configure: ${c.name}`,
+      hint: 'Workflow',
+      run: () => openWorkflow({ initialClient: c.id }),
+    });
+  });
   // Provider quick-jumps (limited to keep the list scannable).
   PROVIDERS.slice(0, 8).forEach((p) => {
     actions.push({

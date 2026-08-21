@@ -599,10 +599,23 @@ body[data-page="configuration"] #page-configuration{display:block}
 .seg-btn{border:0;background:transparent;color:var(--text-2);padding:8px 16px;border-radius:999px;cursor:pointer;font-weight:600;font-size:13px}
 .seg-btn.on{background:var(--accent);color:#fff}
 .profile-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
-.profile-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm)}
-.profile-acts{display:flex;gap:6px}
-.profile-new{display:flex;gap:8px}
-.profile-new .inp{flex:1}
+.profile-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.profile-row-import{flex-wrap:wrap}
+.profile-acts{display:flex;gap:6px;flex-wrap:wrap}
+.profile-new{display:flex;gap:8px;flex-wrap:wrap}
+.profile-new .inp{flex:1;min-width:160px}
+/* Configuration Workspace tabs */
+.cfg-tabs{display:flex;gap:6px;margin:4px 0 16px;flex-wrap:wrap}
+.cfg-tab{background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);padding:8px 14px;border-radius:999px;font-size:13px;cursor:pointer;transition:var(--t-fast)}
+.cfg-tab:hover{border-color:var(--accent)}
+.cfg-tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.compat-scroll{overflow-x:auto;margin-top:10px}
+.compat-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}
+.compat-table th,.compat-table td{padding:7px 10px;border:1px solid var(--border);text-align:center;white-space:nowrap}
+.compat-table thead th{background:var(--surface-2);font-weight:600}
+.compat-table .cm-cell{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1}
+.compat-detail-box{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.compat-detail-box h4{margin:0 0 4px}
 
 /* Responsive */
 @media (max-width:880px){

@@ -4,6 +4,16 @@
 // need. This is the exact provider list from the original app.js.
 export const PROVIDERS = [
   {
+    id: 'anthropic', name: 'Anthropic', sub: 'api.anthropic.com',
+    logo: '/providers/anthropic.svg',
+    accent: '#d97757', glow: 'rgba(217,119,87,.18)',
+    format: 'anthropic', claudeCode: true,
+    baseUrl: 'https://api.anthropic.com/',
+    desc: 'First-party Claude. Use your own Anthropic key directly (not a gateway).',
+    signup: 'https://console.anthropic.com/',
+    defaultKey: '', isFree: () => false,
+  },
+  {
     id: 'agentrouter', name: 'Agent Router', sub: 'agentrouter.org',
     logo: '/providers/agent-router.png',
     accent: '#8b5cf6', glow: 'rgba(139,92,246,.18)',
@@ -62,6 +72,16 @@ export const PROVIDERS = [
     baseUrl: 'https://api.groq.com/openai/v1/',
     desc: 'Blazing-fast free inference — Llama, DeepSeek-R1 distill, Qwen.',
     signup: 'https://console.groq.com/keys',
+    defaultKey: '', isFree: () => true,
+  },
+  {
+    id: 'opencode-api', name: 'OpenCode API', sub: 'localhost:4099',
+    logo: '/providers/opencode.png',
+    accent: '#7c3aed', glow: 'rgba(124,58,237,.18)',
+    format: 'openai', claudeCode: false,
+    baseUrl: 'http://localhost:4099/v1/',
+    desc: 'OpenCode’s local/model-serving API. A PROVIDER — distinct from the OpenCode CLIENT. Usable by OpenAI-compatible clients.',
+    signup: '', localOnly: true,
     defaultKey: '', isFree: () => true,
   },
   {

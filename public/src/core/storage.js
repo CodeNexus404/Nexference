@@ -92,6 +92,38 @@ export const Storage = {
     localStorage.setItem(PROFILES_INDEX, JSON.stringify(list));
     localStorage.removeItem(PROFILE(id));
   },
+  renameProfile(id, name) {
+    const full = this.getProfile(id);
+    if (!full) return null;
+    full.name = name;
+    this.saveProfile(full);
+    return full;
+  },
+  duplicateProfile(id) {
+    const full = this.getProfile(id);
+    if (!full) return null;
+    const copy = { ...full, id: 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name: full.name + ' (copy)' };
+    return this.saveProfile(copy);
+  },
+  // Export a single profile as a portable object (references only — never keys).
+  exportProfile(id) {
+    const full = this.getProfile(id);
+    if (!full) return null;
+    return { kind: 'nexference-profile', version: 1, profile: full };
+  },
+  // Export every profile at once (bulk backup).
+  exportAllProfiles() {
+    const list = this.listProfiles();
+    return { kind: 'nexference-profile-bundle', version: 1, profiles: list.map((p) => this.getProfile(p.id)).filter(Boolean) };
+  },
+  // Import a profile object. If no id is present, one is minted; name collisions
+  // are avoided by appending a suffix. Returns the stored profile.
+  importProfile(obj) {
+    const src = obj?.profile || obj;
+    if (!src || !src.name) return null;
+    let id = src.id && !this.getProfile(src.id) ? src.id : 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    return this.saveProfile({ ...src, id });
+  },
 
   // Applied configuration metadata (client/provider/model/appliedAt/status).
   // Deliberately stores NO secrets — only non-sensitive references.

@@ -9,6 +9,8 @@ import { CopyableRuntime, LocalSettingsRuntime } from '../config/runtimeAdapter.
 import { CLIENTS, getClient, isClientSupported } from '../config/clientAdapter.js';
 import { resolveSelection } from '../compatibility/capabilityResolver.js';
 import { levelBadge, compatNoteList, connectionLabel } from '../compatibility/ui.js';
+import { checkClientProvider } from '../compatibility/clientProviderCompatibility.js';
+import { checkClientRuntime } from '../compatibility/clientRuntimeCompatibility.js';
 import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
 import { esc, norm, maskKey, highlightJSON, logoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
@@ -621,15 +623,37 @@ let _ownWriteAt = 0;       // suppress "external change" right after our own wri
 let _extDismissedAt = 0;   // let the user dismiss the external-change banner
 let _activityBound = false;
 
+let _cfgTab = 'config';
+
+export function setCfgTab(t) {
+  _cfgTab = t;
+  renderConfiguration();
+}
+
 export function renderConfiguration() {
-  updateCrumb('Configuration');
+  updateCrumb('Configuration Workspace');
   const host = document.getElementById('page-configuration');
   if (!host) return;
   host.innerHTML = `
     <div class="page-head">
-      <h1>Configuration</h1>
-      <p>Your live <code>~/.claude/settings.json</code> — read, preview, back up, and safely apply from one place.</p>
+      <h1>Configuration Workspace</h1>
+      <p>One place to read the live <code>~/.claude/settings.json</code>, manage reusable profiles, and explore client/provider/runtime compatibility.</p>
     </div>
+    <div class="cfg-tabs">
+      <button class="cfg-tab ${_cfgTab === 'config' ? 'on' : ''}" onclick="setCfgTab('config')">Configuration</button>
+      <button class="cfg-tab ${_cfgTab === 'profiles' ? 'on' : ''}" onclick="setCfgTab('profiles')">Profiles</button>
+      <button class="cfg-tab ${_cfgTab === 'compatibility' ? 'on' : ''}" onclick="setCfgTab('compatibility')">Compatibility</button>
+    </div>
+    <div id="cfgSubview"></div>`;
+
+  const sub = host.querySelector('#cfgSubview');
+  if (_cfgTab === 'config') renderCfgSubConfig(sub);
+  else if (_cfgTab === 'profiles') renderCfgSubProfiles(sub);
+  else if (_cfgTab === 'compatibility') renderCompatibility(sub);
+}
+
+function renderCfgSubConfig(host) {
+  host.innerHTML = `
     <div id="draftBanner" class="draft-banner" hidden></div>
     <div id="extChangeBanner" class="ext-banner" hidden>
       <span class="ext-ico">⟳</span>
@@ -656,12 +680,125 @@ export function renderConfiguration() {
         <div class="activity-list" id="activityListCfg"></div>
       </div>
     </div>`;
-
   renderDraftBanner(host);
   refreshConfigStatus();
   loadBackups();
   loadActivityCfg();
   startConfigEvents();
+}
+
+function renderCfgSubProfiles(host) {
+  host.innerHTML = `
+    <div class="panel">
+      <h3>Configuration Profiles</h3>
+      <p class="muted">Reusable selections — a client, connection, provider/runtime and model. References only; they never store secrets. Rename, duplicate, or export/import them as portable JSON.</p>
+      <div id="cfgProfileList" class="profile-list"></div>
+      <div class="profile-new">
+        <input id="cfgProfileName" class="inp" placeholder="Profile name (e.g. Work / Local / OSS)" />
+        <button class="btn btn-go" onclick="saveCurrentAsProfileFromCfg()">Save current as profile</button>
+        <button class="btn btn2" onclick="exportAllProfiles()">Export all</button>
+        <label class="btn btn2">Import<input type="file" accept="application/json,.json" hidden onchange="importProfileFile(event)"></label>
+      </div>
+    </div>`;
+  const list = host.querySelector('#cfgProfileList');
+  const profiles = Storage.listProfiles();
+  if (!profiles.length) { list.innerHTML = '<div class="muted">No profiles yet.</div>'; return; }
+  list.innerHTML = profiles.map(p => {
+    const full = Storage.getProfile(p.id) || {};
+    const clientName = full.client ? getClient(full.client).name : 'Claude Code';
+    const target = full.runtime ? (getRuntime(full.runtime)?.name || full.runtime) : (full.provider ? (getProvider(full.provider)?.name || full.provider) : '—');
+    const conn = full.connectionType ? connectionLabel(full.connectionType) : 'Cloud';
+    return `<div class="profile-row">
+      <div><b>${esc(p.name)}</b><span class="muted"> ${esc(clientName)} · ${esc(conn)} · ${esc(target)} · ${esc(full.model || '?')}</span></div>
+      <div class="profile-acts">
+        <button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button>
+        <button class="btn btn2" onclick="renameProfilePrompt('${p.id}')">Rename</button>
+        <button class="btn btn2" onclick="duplicateProfile('${p.id}')">Duplicate</button>
+        <button class="btn btn2" onclick="exportProfile('${p.id}')">Export</button>
+        <button class="btn btn2 danger" onclick="deleteProfile('${p.id}')">Delete</button>
+      </div></div>`;
+  }).join('');
+}
+
+export function saveCurrentAsProfileFromCfg() {
+  const name = (document.getElementById('cfgProfileName')?.value || '').trim();
+  if (!name) { notify.toast('Enter a profile name', 'warning'); return; }
+  const a = workspace.applied || {};
+  const client = a.client || workspace.activeClient || 'claude-code';
+  const connectionType = a.connectionType || 'cloud';
+  const provider = a.provider || workspace.appliedProviderId || workspace.activeProvider || cfg.provider;
+  const runtime = a.runtime || workspace.activeRuntime || null;
+  const model = a.model || (provider ? Storage.getModel(provider) : cfg.model);
+  if (!provider && !runtime) { notify.toast('Configure a provider or runtime first', 'warning'); return; }
+  Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name, client, connectionType, provider, runtime, model });
+  notify.toast(`Saved profile “${name}”`, 'success');
+  const inp = document.getElementById('cfgProfileName'); if (inp) inp.value = '';
+  renderCfgSubProfiles(document.getElementById('cfgSubview'));
+}
+
+// ── Compatibility Explorer (v0.6.0) ──
+// A full client × provider / runtime matrix, computed honestly from the same
+// client-provider / client-runtime compatibility rules the wizard uses.
+export function renderCompatibility(host) {
+  if (host.id !== 'cfgSubview') host = document.getElementById('cfgSubview');
+  if (!host) return;
+  const cell = (ok, level) => `<span class="badge ${ok ? level : 'unsupported'}">${ok ? capShort(level) : '—'}</span>`;
+  const clientRows = CLIENTS.map((c) => {
+    const provCells = PROVIDERS.map((p) => {
+      const r = checkClientProvider(c.id, p.id);
+      return `<td title="${esc(p.name)}">${cell(r.compatible, r.level)}</td>`;
+    }).join('');
+    const rtCells = RUNTIMES.map((rt) => {
+      const r = checkClientRuntime(c.id, rt.id);
+      return `<td title="${esc(rt.name)}">${cell(r.compatible, r.level)}</td>`;
+    }).join('');
+    return `<tr><th class="cm-cell">${esc(c.name)}</th>${provCells}${rtCells}</tr>`;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="panel">
+      <h3>Compatibility Matrix</h3>
+      <p class="muted">Which clients can consume which providers (☁) and local runtimes (◉). Levels:
+        <span class="badge verified">verified</span>
+        <span class="badge supported">supported</span>
+        <span class="badge experimental">experimental</span>
+        <span class="badge unsupported">unsupported</span>. Manual levels are connection-compatible but not auto-applied.</p>
+      <div class="compat-scroll">
+        <table class="compat-table">
+          <thead><tr><th>Client \\ Target</th>${PROVIDERS.map((p) => `<th title="${esc(p.name)}">☁ ${esc(p.name.split(' ')[0])}</th>`).join('')}${RUNTIMES.map((rt) => `<th title="${esc(rt.name)}">◉ ${esc(rt.name.split(' ')[0])}</th>`).join('')}</tr></thead>
+          <tbody>${clientRows}</tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:12px">Detail view:</p>
+      <div id="compatDetail"></div>
+    </div>`;
+
+  // Interactive detail: click a target header to inspect every client against it.
+  const detail = host.querySelector('#compatDetail');
+  const headers = host.querySelectorAll('.compat-table thead th');
+  headers.forEach((h, i) => {
+    if (i === 0) return;
+    const isRuntime = i > PROVIDERS.length;
+    const idx = isRuntime ? i - 1 - PROVIDERS.length : i - 1;
+    const target = isRuntime ? RUNTIMES[idx] : PROVIDERS[idx];
+    h.style.cursor = 'pointer';
+    h.addEventListener('click', () => {
+      const rows = CLIENTS.map((c) => {
+        const r = isRuntime ? checkClientRuntime(c.id, target.id) : checkClientProvider(c.id, target.id);
+        return `<div class="profile-row"><div><b>${esc(c.name)}</b> <span class="muted">${esc(r.level)}</span></div><div>${compatNoteList(r).replace(/^<ul>|<\/ul>$/g, '')}</div></div>`;
+      }).join('');
+      detail.innerHTML = `<div class="compat-detail-box"><h4>${esc(target.name)}</h4>${rows}</div>`;
+    });
+  });
+}
+
+function capShort(level) {
+  return ({ verified: '✓ verified', supported: '✓ supported', experimental: '⚠ experimental', manual: 'manual', unsupported: '—' })[level] || level;
+}
+
+export function openCompatibilityExplorer() {
+  _cfgTab = 'compatibility';
+  if (window.navigate) window.navigate('configuration');
 }
 
 function renderDraftBanner(host) {
@@ -973,7 +1110,7 @@ export function renderProfiles() {
   const list = document.getElementById('profileList');
   if (!list) return;
   const profiles = Storage.listProfiles();
-  if (!profiles.length) { list.innerHTML = '<div class="muted">No profiles yet.</div>'; return; }
+  if (!profiles.length) { list.innerHTML = '<div class="muted">No profiles yet — save one from the Configuration page or the wizard.</div>'; return; }
   list.innerHTML = profiles.map(p => {
     const full = Storage.getProfile(p.id) || {};
     const clientName = full.client ? getClient(full.client).name : 'Claude Code';
@@ -983,9 +1120,82 @@ export function renderProfiles() {
       <div><b>${esc(p.name)}</b><span class="muted"> ${esc(clientName)} · ${esc(conn)} · ${esc(target)} · ${esc(full.model || '?')}</span></div>
       <div class="profile-acts">
         <button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button>
-        <button class="btn btn2" onclick="deleteProfile('${p.id}')">Delete</button>
+        <button class="btn btn2" onclick="renameProfilePrompt('${p.id}')">Rename</button>
+        <button class="btn btn2" onclick="duplicateProfile('${p.id}')">Duplicate</button>
+        <button class="btn btn2" onclick="exportProfile('${p.id}')">Export</button>
+        <button class="btn btn2 danger" onclick="deleteProfile('${p.id}')">Delete</button>
       </div></div>`;
-  }).join('');
+  }).join('') +
+  `<div class="profile-row profile-row-import">
+     <div class="muted">Import profiles from a JSON export:</div>
+     <div class="profile-acts">
+       <button class="btn btn2" onclick="exportAllProfiles()">Export all</button>
+       <label class="btn btn2">Import<input type="file" accept="application/json,.json" hidden onchange="importProfileFile(event)"></label>
+     </div>
+   </div>`;
+}
+
+export function renameProfilePrompt(id) {
+  const cur = Storage.getProfile(id);
+  const name = prompt('Rename profile', cur?.name || '');
+  if (!name || !name.trim()) return;
+  Storage.renameProfile(id, name.trim());
+  notify.toast('Profile renamed', 'success');
+  renderProfiles();
+  if (document.body.dataset.page === 'configuration') renderConfiguration();
+}
+
+export function duplicateProfile(id) {
+  Storage.duplicateProfile(id);
+  notify.toast('Profile duplicated', 'success');
+  renderProfiles();
+  if (document.body.dataset.page === 'configuration') renderConfiguration();
+}
+
+export function exportProfile(id) {
+  const obj = Storage.exportProfile(id);
+  if (!obj) return;
+  downloadJSON(obj, `nexference-profile-${id}.json`);
+  notify.toast('Profile exported', 'success');
+}
+
+export function exportAllProfiles() {
+  const obj = Storage.exportAllProfiles();
+  downloadJSON(obj, 'nexference-profiles.json');
+  notify.toast('All profiles exported', 'success');
+}
+
+export function importProfileFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (Array.isArray(data.profiles)) {
+        data.profiles.forEach((p) => Storage.importProfile(p));
+        notify.toast(`Imported ${data.profiles.length} profiles`, 'success');
+      } else {
+        Storage.importProfile(data);
+        notify.toast('Profile imported', 'success');
+      }
+      renderProfiles();
+      if (document.body.dataset.page === 'configuration') renderConfiguration();
+    } catch {
+      notify.toast('Invalid profile file', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 export function createProfile() {

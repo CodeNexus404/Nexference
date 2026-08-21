@@ -2,6 +2,7 @@ import { readSettings, readSettingsRaw, writeSettings, openFolder, SETTINGS_PATH
 import { getConfigStatus } from '../config/configService.js';
 import { subscribe } from '../config/configWatcher.js';
 import { diffConfigs } from '../config/configService.js';
+import { checkCompatibility } from '../clients/compatibilityService.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Config routes — read / status / preview / apply / open-folder / live events.
@@ -35,6 +36,17 @@ export function registerConfigRoutes(app) {
       if (!next || typeof next !== 'object') return res.status(400).json({ error: 'Missing next config' });
       const current = readSettings();
       res.json({ diff: diffConfigs(current, next) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── POST evaluate a proposed workspace selection (client + provider/runtime) ───
+  app.post('/api/config/compatibility', (req, res) => {
+    try {
+      const { clientId, providerId, runtimeId, model } = req.body || {};
+      if (!clientId) return res.status(400).json({ error: 'Missing clientId' });
+      res.json(checkCompatibility({ clientId, providerId: providerId || null, runtimeId: runtimeId || null, model: model || null }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

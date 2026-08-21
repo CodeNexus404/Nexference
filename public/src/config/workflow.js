@@ -404,8 +404,14 @@ export function openWorkflow(opts = {}) {
         .catch(() => { diffEl.innerHTML = ''; });
     }
 
-    wf.actionsEl.innerHTML = `<button class="btn btn2" id="wfBack">Back</button><button class="btn btn-go" id="wfApply">${canApply ? 'Apply Configuration' : 'Show manual steps'}</button>`;
+    wf.actionsEl.innerHTML = `<button class="btn btn2" id="wfBack">Back</button><button class="btn btn2" id="wfSaveProfile">Save profile</button><button class="btn btn-go" id="wfApply">${canApply ? 'Apply Configuration' : 'Show manual steps'}</button>`;
     wf.actionsEl.querySelector('#wfBack').addEventListener('click', () => { wf.step = 5; renderStep(); });
+    wf.actionsEl.querySelector('#wfSaveProfile').addEventListener('click', () => {
+      const name = prompt('Profile name (references only — never stores secrets)', `${getClient(wf.client).name} · ${wf.model || 'config'}`);
+      if (!name || !name.trim()) return;
+      Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name: name.trim(), client: wf.client, connectionType: wf.connectionType, provider: wf.provider || null, runtime: wf.runtime || null, model: wf.model });
+      notify.toast(`Saved profile “${name.trim()}”`, 'success');
+    });
     wf.actionsEl.querySelector('#wfApply').addEventListener('click', () => doApply(canApply));
   }
 
