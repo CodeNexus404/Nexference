@@ -1,6 +1,7 @@
 import { workspace } from '../core/state.js';
 import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
+import { recordActivity } from '../core/activityStore.js';
 import { openModal } from '../components/modal.js';
 import { esc, logoHtml, maskKey, highlightJSON } from '../components/util.js';
 import { renderModelPicker } from '../components/modelPicker.js';
@@ -15,6 +16,56 @@ import { checkClientProvider } from '../compatibility/clientProviderCompatibilit
 import { checkClientRuntime } from '../compatibility/clientRuntimeCompatibility.js';
 import { resolveSelection } from '../compatibility/capabilityResolver.js';
 import { levelBadge, compatNoteList, connectionLabel } from '../compatibility/ui.js';
+
+// v0.5.0 draft persistence — so an in-progress configuration survives a refresh
+// or a detour to another page. Only non-sensitive selection state + the generated
+// config are stored (no API keys; lastConfig already masks secrets in its display
+// path, and the live write path re-derives from the key + engine on apply).
+const DRAFT_KEY = 'nx_wf_draft';
+
+function saveDraft(wf) {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      client: wf.client,
+      connectionType: wf.connectionType,
+      provider: wf.provider,
+      runtime: wf.runtime,
+      model: wf.model,
+      step: wf.step,
+      generated: wf.generated,
+      lastConfig: wf.generated ? wf.lastConfig : null,
+    }));
+  } catch { /* ignore quota errors */ }
+}
+
+function loadDraftInto(wf) {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    if (d.client) wf.client = d.client;
+    if (d.connectionType) wf.connectionType = d.connectionType;
+    if (d.provider !== undefined) wf.provider = d.provider;
+    if (d.runtime !== undefined) wf.runtime = d.runtime;
+    if (d.model) wf.model = d.model;
+    if (d.step) wf.step = d.step;
+    wf.generated = !!d.generated;
+    wf.lastConfig = d.lastConfig || null;
+    return !!d.lastConfig;
+  } catch { return false; }
+}
+
+export function discardDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
+
+export function hasUsableDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return false;
+    return !!(JSON.parse(raw).lastConfig);
+  } catch { return false; }
+}
 
 // Configuration Workflow — the primary v0.4.0 config experience, now explicitly
 // CLIENT-AWARE. The flow is:
@@ -45,6 +96,11 @@ export function openWorkflow(opts = {}) {
   if (wf.provider) {
     const sm = Storage.getModel(wf.provider);
     if (sm) wf.model = sm;
+  }
+
+  // Resume an in-progress draft unless an explicit initial selection was given.
+  if (!opts.initialProvider && !opts.initialClient && !opts.initialRuntime) {
+    loadDraftInto(wf);
   }
 
   const { close } = openModal({
@@ -98,6 +154,7 @@ export function openWorkflow(opts = {}) {
       6: stepApply,
     };
     (map[wf.step] || stepClient)();
+    saveDraft(wf);
   }
 
   function el(cls) { const d = document.createElement('div'); d.className = cls; return d; }
@@ -319,8 +376,34 @@ export function openWorkflow(opts = {}) {
       <div class="apply-box">
         <div class="kv"><span>Target client</span><b>${esc(getClient(wf.client).name)}</b></div>
         <div class="kv"><span>Action</span><b>${canApply ? 'Backup + write' : 'Show manual steps'}</b></div>
-      </div>`;
+      </div>
+      <div id="wfDiff" class="wf-diff"></div>`;
     wf.bodyEl.appendChild(host);
+
+    // CURRENT → NEW preview (computed server-side so secrets stay masked).
+    if (canApply && wf.lastConfig) {
+      const diffEl = host.querySelector('#wfDiff');
+      diffEl.innerHTML = '<div class="muted">Computing configuration diff…</div>';
+      fetch('/api/config/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ next: wf.lastConfig }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          const diff = d.diff || { changed: false, fields: [] };
+          if (!diff.changed) { diffEl.innerHTML = '<div class="diff-note">No change — the new config matches the current one.</div>'; return; }
+          diffEl.innerHTML = '<div class="diff-head">CURRENT → NEW</div>' + diff.fields
+            .filter((f) => f.changed)
+            .map((f) => {
+              const from = f.sensitive ? (f.from === 'set' ? '••• set' : '—') : (f.from == null ? '—' : esc(String(f.from)));
+              const to = f.sensitive ? (f.to === 'set' ? '••• set' : '—') : (f.to == null ? '—' : esc(String(f.to)));
+              return `<div class="diff-row"><span class="diff-key mono">${esc(f.key)}</span><span class="diff-from mono">${from}</span><span class="diff-arrow">→</span><span class="diff-to mono">${to}</span></div>`;
+            }).join('');
+        })
+        .catch(() => { diffEl.innerHTML = ''; });
+    }
+
     wf.actionsEl.innerHTML = `<button class="btn btn2" id="wfBack">Back</button><button class="btn btn-go" id="wfApply">${canApply ? 'Apply Configuration' : 'Show manual steps'}</button>`;
     wf.actionsEl.querySelector('#wfBack').addEventListener('click', () => { wf.step = 5; renderStep(); });
     wf.actionsEl.querySelector('#wfApply').addEventListener('click', () => doApply(canApply));
@@ -335,7 +418,9 @@ export function openWorkflow(opts = {}) {
       try {
         const ok = await LocalSettingsRuntime.write(wf.lastConfig);
         if (ok) {
+          discardDraft();
           recordApplied(targetMeta, 'configured');
+          recordActivity('apply', `Applied ${targetMeta.name} · model ${wf.model} to ${getClient(wf.client).name}`);
           workspace.appliedProviderId = wf.provider;
           workspace.activeProvider = wf.provider;
           workspace.activeModel = wf.model;
@@ -365,6 +450,7 @@ export function openWorkflow(opts = {}) {
       });
     }
     recordApplied(targetMeta, 'manual');
+    recordActivity('apply', `Manual setup for ${getClient(wf.client).name} · ${targetMeta.name}`);
     workspace.activeClient = wf.client;
     workspace.activeRuntime = wf.runtime;
     if (window.renderWorkspace) window.renderWorkspace();

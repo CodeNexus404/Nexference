@@ -6,8 +6,11 @@ import { FETCH_INTERVAL } from './providers/modelCache.js';
 import { registerModelRoutes } from './routes/models.js';
 import { registerTestRoutes } from './routes/test.js';
 import { registerConfigRoutes } from './routes/config.js';
+import { registerBackupRoutes } from './routes/backups.js';
+import { registerProviderRoutes } from './routes/providers.js';
 import { registerLocalRoutes } from './routes/local.js';
 import { registerClientRoutes } from './routes/clients.js';
+import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +36,8 @@ export function createApp() {
   registerModelRoutes(app);
   registerTestRoutes(app);
   registerConfigRoutes(app);
+  registerBackupRoutes(app);
+  registerProviderRoutes(app);
   registerLocalRoutes(app);
   registerClientRoutes(app);
 
@@ -53,6 +58,8 @@ export function startServer() {
     console.log(`  📁 Config path: ${SETTINGS_PATH}`);
     console.log('');
 
+    // Watch for EXTERNAL edits to the config (hand-edit / other tools).
+    startWatcher();
     // Fetch models in background — don't block the server
     fetchAllModels('startup');
   });

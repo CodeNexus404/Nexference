@@ -24,6 +24,9 @@ export const Storage = {
   setKey(id, val) {
     localStorage.setItem(KEY(id), val);
   },
+  removeKey(id) {
+    localStorage.removeItem(KEY(id));
+  },
   getModel(id) {
     return localStorage.getItem(MODEL(id)) || '';
   },

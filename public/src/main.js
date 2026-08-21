@@ -21,6 +21,7 @@ router.register('cloud-providers', UI.renderCloudProviders);
 router.register('localai', UI.renderLocalAI);
 router.register('models', UI.renderModels);
 router.register('clients', UI.renderClients);
+router.register('configuration', UI.renderConfiguration);
 router.register('playground', UI.renderPlayground);
 router.register('settings', UI.renderSettings);
 
@@ -32,6 +33,7 @@ const PAGE_TITLES = {
   localai: 'Local AI',
   models: 'Models',
   clients: 'Clients',
+  configuration: 'Configuration',
   playground: 'Playground',
   settings: 'Settings',
 };
@@ -122,6 +124,14 @@ const GLOBALS = {
   openWorkflow: openWorkflow,
   updateShellStatus: UI.updateShellStatus,
   loadBackups: UI.loadBackups,
+  refreshConfigStatus: UI.refreshConfigStatus,
+  viewCurrentConfig: UI.viewCurrentConfig,
+  openBackupView: UI.openBackupView,
+  restoreBackupAction: UI.restoreBackupAction,
+  deleteBackupAction: UI.deleteBackupAction,
+  dismissExternalChange: UI.dismissExternalChange,
+  discardDraftAndRefresh: UI.discardDraftAndRefresh,
+  loadActivityCfg: UI.loadActivityCfg,
   notifyToast: (msg, type) => notify.toast(msg, type || 'error'),
 };
 Object.entries(GLOBALS).forEach(([name, fn]) => { window[name] = fn; });

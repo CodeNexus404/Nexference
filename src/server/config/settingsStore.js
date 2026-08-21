@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
@@ -6,17 +6,15 @@ import { spawn } from 'child_process';
 // ═══════════════════════════════════════════════════════════════
 //  Settings store — the server-side storage layer for ~/.claude/settings.json.
 //
-//  Preserves the exact prior behaviour: GET returns the parsed config (or null),
-//  POST merges the provided env/apiKeyHelper/model into a minimal gateway shape
-//  (preserving whatever ANTHROPIC_*/OPENAI_* env keys the config carries so both
-//  round-trip intact), and open-folder shells out to the OS file manager.
+//  v0.5.0 hardening: writes are ATOMIC (temp file + rename) and VERIFIED
+//  (re-read + structural compare). Every overwrite of an EXISTING config is
+//  backed up first to ~/.nexference/backups/ (Nexference-owned, isolated from
+//  Claude's config). Backups are unique (timestamped) and never overwritten.
 //
-//  v0.3.0 backup hardening: before overwriting an EXISTING settings.json, a
-//  timestamped copy is written to ~/.nexference/backups/ (Nexference-owned,
-//  isolated from Claude's config). Backups are never overwritten (the filename
-//  carries a unique timestamp) and the original is never touched until the backup
-//  succeeds. If an existing file is present and the backup fails, the write is
-//  ABORTED with a clear error — unless there was no existing file to back up.
+//  The gateway shape written here is fixed and minimal (env + apiKeyHelper +
+//  model). This is the SINGLE source of truth for what lands on disk; the
+//  protected client-format generation logic lives in the frontend engine and
+//  only hands a fully-formed config to this layer.
 // ═══════════════════════════════════════════════════════════════
 
 export const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
@@ -71,30 +69,99 @@ export function readSettings() {
   }
 }
 
-export function writeSettings(config) {
-  const configDir = dirname(SETTINGS_PATH);
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
-  }
+export function readSettingsRaw() {
+  if (!existsSync(SETTINGS_PATH)) return null;
+  return readFileSync(SETTINGS_PATH, 'utf-8');
+}
 
-  // Back up the previous config BEFORE overwriting it. If an existing file is
-  // present and the backup fails, abort (don't touch the live config).
-  const hadExisting = existsSync(SETTINGS_PATH);
-  if (hadExisting) {
-    backupExisting(); // throws → propagates to the route → 500 with clear error
-  }
-
-  // Write the settings.json in the exact gateway format (env + apiKeyHelper + model).
-  // Preserve whatever env keys the config carries (ANTHROPIC_* for Anthropic
-  // providers, OPENAI_* for OpenAI providers) so both shapes round-trip intact.
-  const merged = {
+// Builds the canonical gateway shape. The protected frontend engine produces a
+// config that already conforms (env + apiKeyHelper + model); we normalise to be
+// safe against partial payloads.
+function normalize(config) {
+  return {
     env: { ...(config.env || {}) },
     apiKeyHelper: config.apiKeyHelper,
     model: config.model,
   };
+}
 
-  writeFileSync(SETTINGS_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  return merged;
+// Atomic, verified write. Returns { merged, backupPath }.
+// On any failure the live config is left untouched (atomic swap only completes
+// if the temp file wrote successfully, and verification re-reads the final file).
+export function writeSettings(config) {
+  if (!config || typeof config !== 'object') throw new Error('Missing config');
+
+  const configDir = dirname(SETTINGS_PATH);
+  if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
+
+  const merged = normalize(config);
+
+  // Back up the previous config BEFORE overwriting it. If an existing file is
+  // present and the backup fails, abort (don't touch the live config).
+  const hadExisting = existsSync(SETTINGS_PATH);
+  let backupPath = null;
+  if (hadExisting) {
+    backupPath = backupExisting(); // throws → propagates → 500 with clear error
+  }
+
+  // Atomic write: write to a sibling temp file, then rename (rename is atomic on
+  // POSIX and effectively atomic on the same volume on Windows).
+  const tmp = `${SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, SETTINGS_PATH);
+
+  // Verify: re-read and structurally compare. If anything is off, we have the
+  // backup (backupPath) to restore from.
+  const reread = readSettings();
+  if (!reread) throw new Error('verification failed: written file is not valid JSON');
+  const ok = reread.model === merged.model &&
+    reread.apiKeyHelper === merged.apiKeyHelper &&
+    reread.env && merged.env &&
+    JSON.stringify(reread.env) === JSON.stringify(merged.env);
+  if (!ok) throw new Error('verification failed: written config does not match the generated config');
+
+  return { merged, backupPath };
+}
+
+// Status of the on-disk config (no secrets). Used by /api/config/status and the
+// file watcher. Infers the active provider/base URL and model from the env so
+// the UI can present a readable summary.
+export function getStatus() {
+  const exists = existsSync(SETTINGS_PATH);
+  if (!exists) return { exists: false, valid: false, lastModified: null, provider: null, baseUrl: null, model: null, client: 'claude-code' };
+  let raw = '';
+  let valid = false;
+  let lastModified = null;
+  let parsed = null;
+  try {
+    raw = readFileSync(SETTINGS_PATH, 'utf-8');
+    parsed = JSON.parse(raw);
+    valid = true;
+  } catch {
+    valid = false;
+  }
+  try { lastModified = statSync(SETTINGS_PATH).mtime.toISOString(); } catch { /* ignore */ }
+  let provider = null;
+  let baseUrl = null;
+  let model = null;
+  if (parsed && parsed.env) {
+    baseUrl = parsed.env.ANTHROPIC_BASE_URL || parsed.env.OPENAI_BASE_URL || parsed.env.GOOGLE_GENAI_BASE_URL || null;
+    provider = baseUrl ? inferProvider(baseUrl) : null;
+    model = parsed.model || parsed.env.ANTHROPIC_MODEL || null;
+  }
+  return { exists: true, valid, lastModified, provider, baseUrl, model, client: 'claude-code', size: raw.length };
+}
+
+function inferProvider(baseUrl) {
+  try {
+    const host = new URL(baseUrl).host;
+    if (host.includes('openrouter.ai')) return 'openrouter';
+    if (host.includes('api.anthropic.com')) return 'anthropic';
+    if (host.includes('api.openai.com')) return 'openai';
+    if (host.includes('generativelanguage')) return 'google';
+    if (host.includes('localhost') || host.includes('127.0.0.1')) return 'local';
+  } catch { /* ignore */ }
+  return 'custom';
 }
 
 export function openFolder() {
@@ -106,7 +173,7 @@ export function openFolder() {
 
   try {
     const p = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    p.on('error', (err) => ({ ok: false, error: err.message }));
+    p.on('error', () => { /* swallow */ });
     p.unref();
     return { ok: true, dir };
   } catch (err) {

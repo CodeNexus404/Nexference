@@ -14,7 +14,10 @@ import { esc, norm, maskKey, highlightJSON, logoHtml } from '../components/util.
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
-import { openWorkflow } from '../config/workflow.js';
+import { openModal } from '../components/modal.js';
+import { credentialsStore } from '../config/credentialsStore.js';
+import { recordActivity, getActivities } from '../core/activityStore.js';
+import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  UI action layer — the orchestration functions that were previously private
@@ -603,87 +606,299 @@ export function renderProviders() {
   renderGateways();
 }
 
+// ─────────────────────────────────────────────────────────────
+//  v0.5.0 Configuration Workspace
+//
+//  A single place to read the live ~/.claude/settings.json, preview the diff a
+//  new config would make, back up / restore, and watch for external changes.
+//  Apply itself is performed through the guided wizard (openWorkflow), whose
+//  final step shows the CURRENT → NEW diff and writes via the atomic, verified
+//  server endpoint.
+// ─────────────────────────────────────────────────────────────
+
+let _configES = null;
+let _ownWriteAt = 0;       // suppress "external change" right after our own writes
+let _extDismissedAt = 0;   // let the user dismiss the external-change banner
+let _activityBound = false;
+
 export function renderConfiguration() {
-  setCrumb('Configuration');
-  const steps = document.getElementById('cfgSteps');
-  if (!steps) return;
-  const clientOpts = CLIENTS.map(c => `<option value="${c.id}" ${cfg.client === c.id ? 'selected' : ''}>${esc(c.name)}${c.support !== 'unsupported' ? '' : ' (soon)'}</option>`).join('');
-  const provOpts = PROVIDERS.filter(p => p.id !== 'custom').map(p => `<option value="${p.id}" ${cfg.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
-  let modelOpts = '<option value="">— select model —</option>';
-  if (cfg.provider) {
-    const list = cfg.includePaid ? getModels(cfg.provider) : getFreeModels(cfg.provider);
-    if (list.length) modelOpts += list.map(m => `<option value="${esc(m.id)}" ${cfg.model === m.id ? 'selected' : ''}>${esc(m.name || m.id)}</option>`).join('');
-    else modelOpts += `<option value="" disabled>no models cached — add API key on Providers</option>`;
-  }
-  const supported = isClientSupported(cfg.client);
-  steps.innerHTML = `
-    <div class="step"><span class="step-n">1</span><div class="step-b"><label>Client</label>
-      <select class="inp" onchange="cfgSelectClient(this.value)">${clientOpts}</select>
-      <p class="muted">${esc(getClient(cfg.client).note)}</p></div></div>
-    <div class="step"><span class="step-n">2</span><div class="step-b"><label>Provider</label>
-      <select class="inp" onchange="cfgSelectProvider(this.value)">${provOpts}</select></div></div>
-    <div class="step"><span class="step-n">3</span><div class="step-b"><label>Model</label>
-      <select class="inp" onchange="cfgSelectModel(this.value)">${modelOpts}</select>
-      <label class="paid-toggle" style="margin-top:8px"><input type="checkbox" ${cfg.includePaid ? 'checked' : ''} onchange="cfgTogglePaid(this.checked)"><span class="paid-track"></span><span class="paid-text">Include paid</span></label></div></div>
-    <div class="step"><span class="step-n">4</span><div class="step-b"><label>Generate &amp; apply</label>
-      <div class="cfg-acts">
-        <button class="btn btn-go" onclick="cfgGenerate()">Generate config</button>
-        <button class="btn btn-go" id="cfgApplyBtn" onclick="cfgApply()" ${supported ? '' : 'disabled'}>Apply to settings.json</button>
+  updateCrumb('Configuration');
+  const host = document.getElementById('page-configuration');
+  if (!host) return;
+  host.innerHTML = `
+    <div class="page-head">
+      <h1>Configuration</h1>
+      <p>Your live <code>~/.claude/settings.json</code> — read, preview, back up, and safely apply from one place.</p>
+    </div>
+    <div id="draftBanner" class="draft-banner" hidden></div>
+    <div id="extChangeBanner" class="ext-banner" hidden>
+      <span class="ext-ico">⟳</span>
+      <div class="ext-txt">The configuration file changed outside Nexference <span id="extWhen" class="muted"></span>.
+        <button class="btn btn2" onclick="refreshConfigStatus()">Reload</button>
+        <button class="btn btn2" onclick="dismissExternalChange()">Dismiss</button></div>
+    </div>
+    <div class="cfg-ws-grid">
+      <div class="panel cfg-current" id="cfgCurrentCard">
+        <div class="panel-h"><h3>Current Configuration</h3><span id="cfgStateBadge" class="badge"></span></div>
+        <div class="cfg-current-body" id="cfgCurrentBody"><div class="muted">Loading…</div></div>
+        <div class="cfg-current-actions">
+          <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
+          <button class="btn btn2" onclick="viewCurrentConfig()">View JSON</button>
+          <button class="btn btn2" onclick="openConfigFolder()">Open folder</button>
+        </div>
       </div>
-      ${supported ? '' : '<p class="muted">Auto-apply for this client is coming soon — generate then copy the config manually.</p>'}</div></div>`;
-  // Refresh the preview if a config already exists
-  loadConfig();
+      <div class="panel cfg-backups" id="cfgBackupsPanel">
+        <div class="panel-h"><h3>Backups</h3><span class="muted" id="cfgBackupCount"></span></div>
+        <div class="backup-list" id="backupListCfg"></div>
+      </div>
+      <div class="panel cfg-activity" id="cfgActivityPanel">
+        <div class="panel-h"><h3>Activity</h3></div>
+        <div class="activity-list" id="activityListCfg"></div>
+      </div>
+    </div>`;
+
+  renderDraftBanner(host);
+  refreshConfigStatus();
+  loadBackups();
+  loadActivityCfg();
+  startConfigEvents();
 }
 
-export function cfgSelectClient(id) { cfg.client = id; renderConfiguration(); }
-export function cfgSelectProvider(id) { cfg.provider = id; if (cfg.model) cfg.model = null; renderConfiguration(); }
-export function cfgSelectModel(id) { cfg.model = id; }
-export function cfgTogglePaid(on) { cfg.includePaid = !!on; renderConfiguration(); }
-
-export function cfgGenerate() {
-  if (!cfg.provider) { notify.toast('Select a provider first', 'warning'); return; }
-  if (!cfg.model) { notify.toast('Select a model first', 'warning'); return; }
-  const provider = getProvider(cfg.provider);
-  const baseUrl = provider.baseUrl;
-  const key = Storage.getKey(cfg.provider) || '';
-  if (!key && !provider.publicModels) notify.toast('No API key stored — config will be generated without a key. Add one on the Providers page.', 'warning');
-
-  const config = configEngine.buildClaudeSettings(provider, baseUrl, cfg.model, key);
-  lastConfig = config;
-  const jsonEl = document.getElementById('jsonOut');
-  if (jsonEl) jsonEl.innerHTML = highlightJSON(JSON.stringify(config, null, 2));
-  notify.log(`Generated config · ${provider.name} · ${cfg.model}`, 't-ok');
-
-  if (config.env.OPENAI_BASE_URL || config.env.GOOGLE_API_KEY) {
-    CopyableRuntime.show(config, provider.name);
+function renderDraftBanner(host) {
+  const b = host.querySelector('#draftBanner');
+  if (!b) return;
+  if (hasUsableDraft()) {
+    b.hidden = false;
+    b.innerHTML = `<span class="ext-ico">✎</span>
+      <div class="ext-txt">You have an unsaved configuration ready.
+        <button class="btn btn-go" onclick="openWorkflow()">Resume setup</button>
+        <button class="btn btn2" onclick="discardDraftAndRefresh()">Discard</button></div>`;
+  } else {
+    b.hidden = true;
   }
 }
 
-export async function cfgApply() {
-  if (!isClientSupported(cfg.client)) { notify.toast(`Auto-apply for ${getClient(cfg.client).name} is coming soon`, 'info'); return; }
-  if (!lastConfig) { cfgGenerate(); if (!lastConfig) return; }
-  const provider = getProvider(cfg.provider);
-  // Preserve original behaviour: OpenAI/Gemini configs can't be consumed by
-  // Claude Code, so show them copyable rather than writing them to settings.json.
-  if (lastConfig.env.OPENAI_BASE_URL || lastConfig.env.GOOGLE_API_KEY) {
-    CopyableRuntime.show(lastConfig, provider.name);
-    return;
-  }
+export function discardDraftAndRefresh() {
+  discardDraft();
+  renderConfiguration();
+}
+
+export async function refreshConfigStatus() {
+  const body = document.getElementById('cfgCurrentBody');
+  const badgeEl = document.getElementById('cfgStateBadge');
+  const banner = document.getElementById('extChangeBanner');
+  if (!body) return;
   try {
-    const ok = await LocalSettingsRuntime.write(lastConfig);
-    if (ok) {
-      workspace.appliedProviderId = cfg.provider;
-      workspace.activeProvider = cfg.provider;
-      workspace.activeModel = cfg.model;
-      notify.toast(`Applied ${provider.name} to Claude Code!`, 'success');
-      notify.log(`Applied ${provider.name} · model ${cfg.model} (backup saved)`, 't-ok');
-      await loadConfig();
-      renderWorkspace();
+    const res = await fetch('/api/config/status');
+    const s = await res.json();
+    const f = s.file || {};
+    if (!f.exists) {
+      body.innerHTML = `<div class="kv"><span>Status</span><b>No settings.json yet</b></div><p class="muted">Run Configure to generate one — a backup is created automatically on every write.</p>`;
+      if (badgeEl) { badgeEl.className = 'badge needs'; badgeEl.textContent = 'Not configured'; }
+    } else {
+      const when = f.lastModified ? new Date(f.lastModified).toLocaleString() : '—';
+      body.innerHTML = `
+        <div class="kv"><span>Client</span><b>Claude Code</b></div>
+        <div class="kv"><span>Provider / base URL</span><b class="mono">${esc(f.baseUrl || '—')}</b></div>
+        <div class="kv"><span>Model</span><b class="mono">${esc(f.model || '—')}</b></div>
+        <div class="kv"><span>Valid</span><b>${f.valid ? 'Yes' : 'No — malformed'}</b></div>
+        <div class="kv"><span>Last modified</span><b>${esc(when)}</b></div>
+        <div class="kv"><span>Path</span><b class="mono">~/.claude/settings.json</b></div>`;
+      const configured = f.valid && !!f.model;
+      if (badgeEl) { badgeEl.className = 'badge ' + (configured ? 'configured' : 'needs'); badgeEl.textContent = configured ? 'Configured' : 'Incomplete'; }
     }
-  } catch (err) {
-    notify.toast(`Error: ${err.message}`, 'error');
+    if (banner) {
+      if (s.externalChange && new Date(s.externalChange.at).getTime() > _extDismissedAt) {
+        const w = document.getElementById('extWhen');
+        if (w) w.textContent = `(${new Date(s.externalChange.at).toLocaleString()})`;
+        banner.hidden = false;
+      } else {
+        banner.hidden = true;
+      }
+    }
+    // Keep the backups count fresh.
+    const cnt = document.getElementById('cfgBackupCount');
+    if (cnt && s.backups) cnt.textContent = s.backups.length ? `${s.backups.length} saved` : '';
+    loadBackups();
+  } catch {
+    body.innerHTML = '<div class="muted">Could not load configuration status.</div>';
   }
 }
+
+export function dismissExternalChange() {
+  _extDismissedAt = Date.now();
+  const banner = document.getElementById('extChangeBanner');
+  if (banner) banner.hidden = true;
+}
+
+export async function viewCurrentConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const { config } = await res.json();
+    const masked = maskConfigForView(config);
+    openModal({
+      title: 'Current settings.json',
+      subtitle: '~/.claude/settings.json · API key masked',
+      size: 'wide',
+      bodyHTML: `<pre class="code config-code">${highlightJSON(JSON.stringify(masked, null, 2))}</pre>`,
+    });
+  } catch { notify.toast('Could not load config', 'error'); }
+}
+
+function maskConfigForView(config) {
+  if (!config || typeof config !== 'object') return config;
+  const c = JSON.parse(JSON.stringify(config));
+  if (c.apiKeyHelper) c.apiKeyHelper = "echo '•••••••• (hidden)'";
+  if (c.env) {
+    for (const k of Object.keys(c.env)) {
+      if (/key|token|secret|helper/i.test(k)) c.env[k] = '•••••••• (hidden)';
+    }
+  }
+  return c;
+}
+
+// Shared backup list renderer — fills every known backup container.
+export async function loadBackups() {
+  const hosts = ['backupListCfg', 'backupList']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  if (!hosts.length) return;
+  try {
+    const res = await fetch('/api/backups');
+    const { backups } = await res.json();
+    const cnt = document.getElementById('cfgBackupCount');
+    if (cnt) cnt.textContent = backups && backups.length ? `${backups.length} saved` : '';
+    if (!backups || !backups.length) {
+      hosts.forEach((h) => { h.innerHTML = '<div class="muted">No backups yet — they’re created automatically when you apply a configuration.</div>'; });
+      return;
+    }
+    const html = backups.slice(0, 12).map((b) => `
+      <div class="backup-row">
+        <span class="backup-name mono">${esc(b.name)}</span>
+        <span class="backup-time muted">${esc(b.mtime ? new Date(b.mtime).toLocaleString() : '')}</span>
+        <span class="backup-acts">
+          <button class="btn btn2" onclick="openBackupView('${esc(b.id)}')">View</button>
+          <button class="btn btn2" onclick="restoreBackupAction('${esc(b.id)}')">Restore</button>
+          <button class="btn btn2 danger" onclick="deleteBackupAction('${esc(b.id)}')">Delete</button>
+        </span>
+      </div>`).join('');
+    hosts.forEach((h) => { h.innerHTML = html; });
+  } catch {
+    hosts.forEach((h) => { h.innerHTML = '<div class="muted">Could not load backups.</div>'; });
+  }
+}
+
+export async function openBackupView(id) {
+  try {
+    const res = await fetch(`/api/backups/${encodeURIComponent(id)}/content`);
+    const { config } = await res.json();
+    const masked = maskConfigForView(config);
+    openModal({
+      title: `Backup ${esc(id)}`,
+      subtitle: 'API key masked',
+      size: 'wide',
+      bodyHTML: `<pre class="code config-code">${highlightJSON(JSON.stringify(masked, null, 2))}</pre>`,
+    });
+  } catch { notify.toast('Could not load backup', 'error'); }
+}
+
+export async function restoreBackupAction(id) {
+  if (!confirm('Restore this backup? The current configuration will be backed up first (reversible).')) return;
+  try {
+    const res = await fetch(`/api/backups/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+    const d = await res.json();
+    if (!d.success) throw new Error(d.error || 'restore failed');
+    _ownWriteAt = Date.now();
+    recordActivity('restore', `Restored backup ${id}`);
+    notify.toast('Backup restored', 'success');
+    notify.log(`Restored backup ${id} (safety backup saved)`, 't-ok');
+    refreshConfigStatus();
+    loadBackups();
+  } catch (err) {
+    notify.toast(`Restore failed: ${err.message}`, 'error');
+  }
+}
+
+export async function deleteBackupAction(id) {
+  if (!confirm('Delete this backup permanently?')) return;
+  try {
+    const res = await fetch(`/api/backups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.success) throw new Error(d.error || 'delete failed');
+    recordActivity('delete', `Deleted backup ${id}`);
+    notify.toast('Backup deleted', 'info');
+    loadBackups();
+  } catch (err) {
+    notify.toast(`Delete failed: ${err.message}`, 'error');
+  }
+}
+
+export function loadActivityCfg() {
+  const host = document.getElementById('activityListCfg');
+  if (!host) return;
+  const acts = getActivities();
+  if (!acts.length) { host.innerHTML = '<div class="muted">No activity yet. Apply a config or restore a backup to see history.</div>'; return; }
+  host.innerHTML = acts.slice(0, 20).map((a) => `
+    <div class="activity-row activity-${esc(a.kind)}">
+      <span class="act-ico">${activityIcon(a.kind)}</span>
+      <span class="act-msg">${esc(a.message)}</span>
+      <span class="act-time muted">${esc(relTime(a.at))}</span>
+    </div>`).join('');
+}
+
+function activityIcon(kind) {
+  return ({
+    apply: '✓', restore: '↺', backup: '💾', delete: '🗑', test: '⚡', external: '⟳', info: 'ℹ',
+  })[kind] || '•';
+}
+
+function relTime(iso) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function startConfigEvents() {
+  if (_configES) return;
+  if (typeof EventSource === 'undefined') return;
+  try {
+    _configES = new EventSource('/api/config/events');
+    _configES.onmessage = (e) => {
+      try {
+        const change = JSON.parse(e.data);
+        // Ignore changes we caused ourselves (apply / restore).
+        if (Date.now() - _ownWriteAt < 2000) return;
+        const banner = document.getElementById('extChangeBanner');
+        if (banner) {
+          const w = document.getElementById('extWhen');
+          if (w) w.textContent = `(${new Date(change.at).toLocaleString()})`;
+          banner.hidden = false;
+        }
+        recordActivity('external', 'Configuration changed outside Nexference');
+        refreshConfigStatus();
+        loadBackups();
+      } catch { /* ignore */ }
+    };
+  } catch { /* EventSource unsupported */ }
+}
+
+// Keep the activity feed live on the Configuration page.
+if (!_activityBound) {
+  _activityBound = true;
+  document.addEventListener('nx-activity', () => {
+    if (document.body.dataset.page === 'configuration') loadActivityCfg();
+  });
+}
+
+// ── Legacy single-page config handlers (delegated to the wizard) ──
+export function cfgSelectClient() { openWorkflow(); }
+export function cfgSelectProvider() { openWorkflow(); }
+export function cfgSelectModel() { /* handled in wizard */ }
+export function cfgTogglePaid() { openWorkflow(); }
+export function cfgGenerate() { openWorkflow(); }
+export async function cfgApply() { openWorkflow(); }
 
 export async function renderLocalAI() {
   setCrumb('Local AI');
@@ -976,21 +1191,3 @@ export function renderPlayground() {
   updateCrumb('Playground');
 }
 
-// ── Backups (Settings) ──
-export async function loadBackups() {
-  const host = document.getElementById('backupList');
-  if (!host) return;
-  try {
-    const res = await fetch('/api/backups');
-    const { backups } = await res.json();
-    if (!backups || !backups.length) {
-      host.innerHTML = '<div class="muted">No backups yet — they’re created when you apply a configuration.</div>';
-      return;
-    }
-    host.innerHTML = backups.slice(0, 12).map(b =>
-      `<div class="backup-row"><span class="backup-name mono">${esc(b.name)}</span><span class="backup-time muted">${esc(b.mtime ? new Date(b.mtime).toLocaleString() : '')}</span></div>`
-    ).join('') + (backups.length > 12 ? `<div class="muted">+${backups.length - 12} more</div>` : '');
-  } catch {
-    host.innerHTML = '<div class="muted">Could not load backups.</div>';
-  }
-}

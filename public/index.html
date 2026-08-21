@@ -55,6 +55,10 @@
           <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg></span>
           <span class="nav-label">Clients</span>
         </a>
+        <a class="nav-item" data-page="configuration" onclick="navigate('configuration')" title="Configuration">
+          <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2.2" fill="currentColor" stroke="none"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="18" r="2.2" fill="currentColor" stroke="none"/></svg></span>
+          <span class="nav-label">Configuration</span>
+        </a>
         <a class="nav-item" data-page="playground" onclick="navigate('playground')" title="Playground">
           <span class="ni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 4 20 12 6 20 6 4"/></svg></span>
           <span class="nav-label">Playground</span>
@@ -65,7 +69,7 @@
         </a>
       </nav>
       <div class="sidebar-foot">
-        <div class="ver">v0.4.0</div>
+        <div class="ver">v0.5.0</div>
       </div>
     </aside>
 
@@ -83,7 +87,7 @@
           <button class="icon-btn theme-toggle" id="themeToggle" onclick="cycleTheme()" title="Cycle theme" aria-label="Cycle theme">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
-          <div class="app-ver" id="appVersion">v0.4.0</div>
+          <div class="app-ver" id="appVersion">v0.5.0</div>
         </div>
       </header>
 
@@ -132,6 +136,9 @@
         </div>
         <div class="client-grid" id="clientGrid"></div>
       </section>
+
+      <!-- ───────── Configuration ───────── -->
+      <section class="page" id="page-configuration"></section>
 
       <!-- ───────── Playground ───────── -->
       <section class="page" id="page-playground">

@@ -17,7 +17,7 @@
 
 ## 📖 Overview
 
-**Nexference v0.4.0 — Multi-Client Architecture & Runtime Foundation** evolves the product from a Claude-specific gateway tool into a *universal AI workspace*. The milestone makes four concepts unambiguously distinct and introduces a real compatibility system:
+**Nexference v0.5.0 — Real Configuration Management & Provider Intelligence** evolves the product from a Claude-specific gateway tool into a *universal AI workspace*. v0.4.0 separated Providers / Clients / Models / Runtimes with a real compatibility system; v0.5.0 makes configuration **real, safe, and observable**: a Configuration Workspace that reads the live config, previews the exact CURRENT → NEW diff, applies through an atomic+verified write with automatic backups, restores or deletes those backups safely, watches the file for external edits, and keeps an activity history. Provider connections can be tested independently and persist their last result.
 
 - **Provider** — where the AI/model comes from (Anthropic, OpenRouter, Google, OpenAI, Groq, …). A provider is *not* automatically a client.
 - **Model** — a specific model id on a provider (Claude, GPT, Gemini, Llama, …).
@@ -81,6 +81,17 @@ The active page is persisted across refreshes (no flash to the wrong view).
 - **🦙 Runtime adapters (v0.4.0)** — Ollama has a real adapter (detect/status/models); other runtimes are detection-only and never faked. Claude Code + Ollama is honestly marked **Experimental (requires an Anthropic-compatible proxy)**.
 - **🗂️ Profiles (v0.4.0)** — Save & apply configuration selections (client + connection + provider/runtime + model). Profiles store references only — **never API secrets**.
 - **🔌 `/api/clients` endpoint (v0.4.0)** — Surfaces the client catalogue to the UI and external tooling.
+
+### v0.5.0 — Real Configuration Management & Provider Intelligence
+- **🛠️ Configuration Workspace** — A dedicated page showing the live `~/.claude/settings.json`: client, provider/base URL, model, validity, last-modified, and a **View JSON** modal (API key masked).
+- **🔍 CURRENT → NEW diff preview** — Before applying, the wizard computes a server-side diff of the existing vs proposed config (secrets masked) so you see exactly what will change.
+- **✅ Safe, atomic apply (v0.4.0→v0.5.0 hardening)** — Every apply validates the payload, **backs up the current config first**, writes via a temp-file + atomic rename, then **verifies by re-reading and comparing**. The live config is never touched if any step fails.
+- **💾 Backup management** — List, **View**, **Restore** (which itself makes a safety backup first, so it's reversible), and **Delete** backups. Backups live in `~/.nexference/backups/` (isolated from Claude's config).
+- **👁️ External-change detection** — `fs.watch` + an SSE stream (`/api/config/events`) notify the UI when the config file changes outside Nexference, so the "Current Configuration" view stays truthful. Watcher is cleaned up on process exit.
+- **⚡ Independent provider testing** — `/api/providers/:id/test` probes the connection via the appropriate provider adapter and **persists lastTestedAt / lastTestStatus** (no secrets) so the UI can show "last tested 2m ago · success".
+- **📜 Activity history** — Apply / restore / delete / external-change actions are recorded locally (no secrets) and shown on the Configuration page.
+- **💡 Resumable drafts** — An in-progress wizard selection survives a refresh; the Configuration page offers **Resume setup** / **Discard**.
+- **🔐 API-key boundary** — `credentialsStore` is the single client-side abstraction for keys; server-side test metadata stores **only** non-sensitive outcome data.
 
 ---
 
@@ -171,7 +182,11 @@ src/server/
 │   ├── modelService.js      # fetchModelsForProvider / scrapeModelsForProvider / fetchAllModels
 │   └── providerAdapter.js    # Provider Adapter (Anthropic / OpenAI / Gemini) — fetch + test
 ├── config/
-│   └── settingsStore.js     # ~/.claude/settings.json read / timestamped backup / write / open-folder
+│   ├── settingsStore.js     # ~/.claude/settings.json read / status / atomic+verified write / open-folder
+│   ├── backupStore.js       # list / read / restore (safe) / delete Nexference-owned backups
+│   ├── configService.js     # status aggregation + CURRENT→NEW diff
+│   ├── configWatcher.js     # fs.watch external-change detection + SSE source + cleanup on exit
+│   └── credentialsStore.js  # server-side NON-secret provider test metadata (lastTestedAt/status)
 ├── local/
 │   └── runtimes.js          # Local runtime adapters (Ollama detect; others planned)
 ├── clients/
@@ -179,7 +194,9 @@ src/server/
 └── routes/
     ├── models.js            # /api/cached-models, /api/refresh-models, /api/models
     ├── test.js              # /api/test
-    ├── config.js            # /api/config, /api/open-folder, /api/backups
+    ├── config.js            # /api/config, /api/config/status, /api/config/preview, /api/config/apply, /api/config/events, /api/open-folder
+    ├── backups.js           # /api/backups, /:id/content, /:id/restore (POST), /:id (DELETE)
+    ├── providers.js         # /api/providers/:id/test, /:id/models
     ├── local.js             # /api/local-runtimes
     └── clients.js           # /api/clients, /api/clients/:id
 ```
