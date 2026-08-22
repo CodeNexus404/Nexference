@@ -2,29 +2,28 @@ import { norm } from '../utils/index.js';
 import { PROVIDERS } from '../providers/registry.js';
 import { modelCache } from '../providers/modelCache.js';
 import { fetchModelsForProvider } from '../providers/modelService.js';
+import {
+  getUnifiedModels, getModelDetails, getRecommendedModels, getModelStats,
+  refreshProviderModels, refreshAllModels, isFreeModel,
+} from '../models/modelIntelligenceService.js';
 
-// Model routes — cached summary, manual refresh, and a live proxy fetch.
-// Logic (including the free-model filter) preserved verbatim from server.js.
-
-function isFreeModel(p, m) {
-  if (m.paid) return false;
-  if (p.id === 'openrouter') {
-    return m.id?.endsWith(':free') || (m.pricing && parseFloat(m.pricing.prompt || 0) === 0 && parseFloat(m.pricing.completion || 0) === 0);
-  }
-  if (['nvidia', 'huggingface', 'chutes', 'orcarouter'].includes(p.id)) {
-    return !/embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma/i.test(m.id || '');
-  }
-  return true;
-}
+// Model routes — three responsibilities, all read-through to the server-side
+// model cache / discovery:
+//   1. Legacy endpoints kept verbatim: /api/cached-models, /api/refresh-models,
+//      and the /api/models?url=… live proxy (used for on-demand fetches).
+//   2. v0.8.0 unified intelligence: GET /api/models (no `url`) returns a single
+//      normalized catalogue across cloud + local models; plus /detail,
+//      /recommended, /stats, and POST /models/refresh.
+// Logic (including the free-model filter) preserved from the original server.js.
 
 export function registerModelRoutes(app) {
-  // ─── GET cached models (server pre-fetched on startup) ───
+  // ─── GET cached models (server pre-fetched on startup) — legacy ───
   app.get('/api/cached-models', (req, res) => {
     const summary = {};
     for (const p of PROVIDERS) {
       const cached = modelCache[p.id];
       if (cached && cached.models) {
-        const freeModels = cached.models.filter(m => isFreeModel(p, m));
+        const freeModels = cached.models.filter(m => isFreeModel(p.id, m));
         summary[p.id] = {
           models: cached.models,
           freeModels,
@@ -40,19 +39,16 @@ export function registerModelRoutes(app) {
     res.json({ providers: summary, cacheTime: Date.now() });
   });
 
-  // ─── POST refresh models (specific provider or all) ───
+  // ─── POST refresh models (specific provider or all) — legacy ───
   app.post('/api/refresh-models', async (req, res) => {
-    const { providerId, key } = req.body;
+    const { providerId, key } = req.body || {};
     if (providerId) {
       const p = PROVIDERS.find(x => x.id === providerId);
       if (!p) return res.status(404).json({ error: 'Unknown provider' });
       const result = await fetchModelsForProvider(p, key || '');
-      if (result.ok) {
-        modelCache[p.id].source = 'manual';
-      }
+      if (result.ok) modelCache[p.id].source = 'manual';
       return res.json(result);
     }
-    // Refresh all
     const results = await Promise.allSettled(
       PROVIDERS.map(async (p) => {
         const result = await fetchModelsForProvider(p, key || '');
@@ -63,11 +59,74 @@ export function registerModelRoutes(app) {
     res.json({ results: results.map(r => r.value) });
   });
 
-  // ─── GET live model list from a provider (server-side proxy → no CORS) ───
+  // ─── Unified model catalogue (v0.8.0) ───
+  // GET /api/models                → all cloud + local, normalized
+  // GET /api/models?type=cloud     → cloud only
+  // GET /api/models?type=local     → local only
+  // GET /api/models?provider=openrouter&free=1&q=gpt&capabilities=chat
+  // GET /api/models?recommended=1  → workspace-aware recommendations
+  // If `url` is present, this falls back to the legacy live proxy behaviour.
   app.get('/api/models', async (req, res) => {
-    const { url, key, format = 'openai' } = req.query;
-    if (!url) return res.status(400).json({ ok: false, error: 'Missing url' });
+    const { url } = req.query;
+    if (url) return liveProxy(req, res);
 
+    const opts = {
+      type: req.query.type,
+      provider: req.query.provider,
+      q: req.query.q,
+      free: req.query.free,
+      source: req.query.source,
+      capabilities: req.query.capabilities,
+      recommended: req.query.recommended,
+      context: { clientId: req.query.clientId, providerId: req.query.ctxProvider },
+    };
+    try {
+      const records = await getUnifiedModels(opts);
+      res.json({ total: records.length, models: records, generatedAt: new Date().toISOString() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Single model detail (v0.8.0) ───
+  app.get('/api/models/detail', async (req, res) => {
+    const { provider, id } = req.query;
+    if (!provider || !id) return res.status(400).json({ error: 'provider and id are required' });
+    const detail = await getModelDetails(provider, id);
+    if (!detail) return res.status(404).json({ error: 'Model not found in cache' });
+    res.json(detail);
+  });
+
+  // ─── Recommended models (v0.8.0) ───
+  app.get('/api/models/recommended', async (req, res) => {
+    const ctx = { clientId: req.query.clientId, providerId: req.query.providerId };
+    const recs = await getRecommendedModels(ctx);
+    res.json({ total: recs.length, models: recs });
+  });
+
+  // ─── Aggregate stats (v0.8.0) ───
+  app.get('/api/models/stats', async (req, res) => {
+    res.json(await getModelStats());
+  });
+
+  // ─── Refresh the unified catalogue (v0.8.0) ───
+  app.post('/api/models/refresh', async (req, res) => {
+    const { providerId, key } = req.body || {};
+    try {
+      if (providerId) {
+        const result = await refreshProviderModels(providerId, key || '');
+        return res.json(result);
+      }
+      const results = await refreshAllModels();
+      res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── GET live model list from a provider (server-side proxy → no CORS) ───
+  async function liveProxy(req, res) {
+    const { url, key, format = 'openai' } = req.query;
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 12000);
@@ -138,5 +197,5 @@ export function registerModelRoutes(app) {
     } catch (err) {
       res.json({ ok: false, error: err.message });
     }
-  });
+  }
 }

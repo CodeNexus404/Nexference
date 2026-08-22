@@ -17,7 +17,7 @@
 
 ## 📖 Overview
 
-**Nexference v0.7.0 — Runtime Intelligence & Unified Workspace** makes the platform **environment-aware**. It detects installed clients, running local runtimes, installed local models, and hardware; aggregates them into a single unified **Environment Service** (`GET /api/environment`); and surfaces hardware-aware, conservative model recommendations. The Workspace becomes a live environment dashboard (health, overview, recommendations, activity), the compatibility engine gains scores/tiers/limitations, and the Configuration Workspace enriches its "current configuration" detection. v0.6.0 added the client-adapter layer, capability matrix, local runtime integration, Compatibility Explorer, and portable profiles; v0.7.0 ties it all into one coherent, observable environment state:
+**Nexference v0.8.0 — Provider & Model Intelligence** makes the platform **model-aware**. It adds a unified **Model Intelligence Service** that normalizes every cloud + local model into one honest, filterable record — with truthful source status (live / fallback / cached / installed), free-vs-paid detection from real pricing or curated metadata, capability flags derived only from what a provider/runtime actually reports, workspace-aware recommendations, and a single catalogue API. The Models page becomes a real **Model Library** (search, filter, status badges, details, recommendations, recent, refresh), the configuration wizard shows model source/compatibility before selection, and the Workspace gains a Model Intelligence panel. v0.7.0 made the platform environment-aware (Environment Service, hardware-aware recommendations, Runtime Intelligence); v0.8.0 builds the model layer on top of it:
 
 - **Multi-Client Adapters** — a server-side `ClientAdapter` interface (`detect`, `getCapabilities`, `supportsAutoConfig`, `buildConfig`, `validateConfig`, `applyConfig`, `readConfig`, `launch`) with a `ClaudeCodeAdapter` wrapping the proven, **unchanged**, byte-identical `buildClaudeSettings` path, plus capability-aware adapters for OpenCode CLI, Codex CLI, and Gemini CLI.
 - **Capability Matrix** — every client exposes `autoConfigure`, `supportsCloudProviders`, `supportsLocalRuntimes`, `supportsCustomBaseUrl`, `supportsEnvironmentVariables`, `supportsModelSelection`, `supportsLaunch`, `supportsReadConfig`, `supportsBackup`, and a `level` (1 = fully verified, 2 = assisted/manual, 3 = detection-only). The wizard and the compatibility engine both derive from it — never a disparate hardcode.
@@ -53,7 +53,7 @@ The app is organised into focused pages (sidebar):
 | **Workspace** | Operational home — current config card, quick actions, provider/local-runtime summary, activity log. |
 | **Cloud Providers** | Browse & filter every provider (popular, free, Anthropic/OpenAI/Google), open a config panel, connect. |
 | **Local AI** | Local runtimes (Ollama detection; others listed as coming soon). |
-| **Models** | Search the live model catalogue across all providers, with free/paid badges and one-click use. |
+| **Models** | Model Library — search/filter the unified cloud + local catalogue, with source/free/capability badges, details, recommendations, recent, and refresh. |
 | **Clients** | Client Manager — AI coding clients with per-client support level, config location, connection types, and one-click configuration. |
 | **Playground** | Interactive try-out space — on the roadmap (placeholder today). |
 | **Settings** | Theme, configuration profiles, timestamped backups, security notes. |
@@ -107,6 +107,16 @@ The active page is persisted across refreshes (no flash to the wrong view).
  - **🏠 Workspace is now environment-aware** — A live dashboard: Environment Health (status + contributing factors), Current Workspace, Environment Overview (clients/providers/runtimes/models counts), Recommendations (only data-derived), and Recent Activity. The Configuration Workspace clearly shows the active client/source/provider-or-runtime/model and "Detected configuration — partial information" when it can't confidently identify the active setup.
  - **⌘K environment actions** — Refresh Environment, View Installed Models, Open Local Runtimes, Create Profile, plus per-client configure.
  - **🔌 New endpoints** — `GET /api/environment`, `GET /api/environment/refresh`, `GET /api/hardware/capabilities`.
+
+### v0.8.0 — Provider & Model Intelligence
+  - **🧠 Model Intelligence Service** — `src/server/models/modelIntelligenceService.js` normalizes every cloud model (from the existing three-tier cache) and every local model (from runtime discovery) into one **Model Record**: `{ id, name, providerId, providerFormat, kind, source, sourceStatus, isFree, isPaid, pricing, installed, contextLength, parameters, size, quantization, capabilities, recommended, recommendationReason, provenance }`. Unknown fields are `null`/`"unknown"` — never invented.
+  - **🏷️ Honest status badges** — Every model carries a `sourceStatus`: `LIVE` (live API), `FALLBACK` (website scrape or curated static), `CACHED`, or `INSTALLED` (local). Free/paid is derived from real pricing (OpenRouter) or curated paid flags, and capabilities are **never** inferred from a marketing name (the only signal trusted is an explicit non-chat id allowlist to exclude embeddings/TTS/image models from "chat").
+  - **🔎 Unified catalogue API** — `GET /api/models` returns the whole normalized catalogue across cloud + local (filters: `type`, `provider`, `q`, `free`, `capabilities`, `recommended`); `GET /api/models/detail` returns one model's full provenance; `GET /api/models/recommended` returns workspace-aware recommendations; `GET /api/models/stats` returns aggregate counts; `POST /api/models/refresh` refreshes one provider or all (with an in-flight guard so no fetch is duplicated).
+  - **📚 Model Library (Models page rewrite)** — A searchable, filterable explorer: stats chips, All/Cloud/Local segmented control, provider filter, Free-only and Chat toggles, per-provider source + last-tested badges, free/paid + capability badges, a **Details** modal (full provenance, honest capabilities, pricing), a workspace-aware **Recommended** strip, a secret-free **Recent** list, and a one-click catalogue **Refresh**.
+  - **🧩 Config-workflow model step** — The wizard's cloud model step now uses the unified picker, showing each candidate's source status, free/paid, and capabilities, plus a Details affordance, before selection.
+  - **🏠 Workspace Model Intelligence panel** — The Workspace now shows catalogue counts, top recommendations for the current setup, and recent models, alongside the existing environment health.
+  - **⌘K model actions** — Open Model Library, Refresh Model Catalogue, Recommended Models.
+  - **🧪 Test history surfaced** — Provider connection-test results (persisted non-secret since v0.5.0) are shown per provider in the Model Library so you can see which gateways were last verified.
 
 ### v0.5.0 — Real Configuration Management & Provider Intelligence
 - **🛠️ Configuration Workspace** — A dedicated page showing the live `~/.claude/settings.json`: client, provider/base URL, model, validity, last-modified, and a **View JSON** modal (API key masked).
@@ -207,6 +217,8 @@ src/server/
 │   ├── modelCache.js        # in-memory model cache + timestamps + refresh interval
 │   ├── modelService.js      # fetchModelsForProvider / scrapeModelsForProvider / fetchAllModels
 │   └── providerAdapter.js    # Provider Adapter (Anthropic / OpenAI / Gemini) — fetch + test
+├── models/
+│   └── modelIntelligenceService.js  # v0.8.0 — unified Model Intelligence layer (normalize, recommend, refresh)
 ├── config/
 │   ├── settingsStore.js     # ~/.claude/settings.json read / status / atomic+verified write / open-folder
 │   ├── backupStore.js       # list / read / restore (safe) / delete Nexference-owned backups
@@ -272,8 +284,11 @@ public/src/
 │   ├── gatewayCard.js       # Legacy provider card component (Providers page)
 │   ├── modal.js             # Generic modal/sheet (single overlay, Esc/backdrop close)
 │   ├── modelPicker.js       # Searchable, free-marked model picker
+│   ├── modelLibrary.js      # v0.8.0 — Model Library (search/filter/status/details/recents)
 │   ├── providerConfig.js    # Per-provider config panel (key + model + test)
 │   └── commandPalette.js    # ⌘K command palette
+├── models/
+│   └── modelService.js      # v0.8.0 — client access to /api/models + recent-models store
 └── ui/app.js                # action layer (test, apply, pages, config workflow, profiles, Client Manager)
 ```
 
@@ -326,7 +341,11 @@ Open **http://localhost:3000**. The server prints the config path it manages on 
 | `POST` | `/api/config` | Write a gateway config (backs up the previous file first) |
 | `GET`  | `/api/cached-models` | All cached models grouped by provider (free counts + source) |
 | `POST` | `/api/refresh-models` | Re-fetch models for one provider or all |
-| `GET`  | `/api/models` | Live model list from a provider (server-side proxy, no CORS) |
+| `GET`  | `/api/models` | Unified normalized catalogue across cloud + local (filters: `type`, `provider`, `q`, `free`, `capabilities`, `recommended`); or a live model list from a provider when `url` is supplied (server-side proxy, no CORS) |
+| `GET`  | `/api/models/detail` | Full provenance + honest capabilities for one model (`provider` + `id`) |
+| `GET`  | `/api/models/recommended` | Workspace-aware recommended models (`clientId`/`providerId` optional) |
+| `GET`  | `/api/models/stats` | Aggregate catalogue counts (cloud free/paid/local/providers + by source) |
+| `POST` | `/api/models/refresh` | Refresh the catalogue for one provider or all (in-flight guarded) |
 | `GET`  | `/api/test` | Send a real probe request to validate a key/model |
 | `GET`  | `/api/local-runtimes` | Detected local runtimes (Ollama real; others planned) |
 | `GET`  | `/api/open-folder` | Open the `settings.json` folder in the OS file manager |

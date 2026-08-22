@@ -4,6 +4,8 @@ import { openModal, closeModal } from './modal.js';
 import { openWorkflow } from '../config/workflow.js';
 import { PROVIDERS } from '../providers/registry.js';
 import { CLIENTS, getClient } from '../clients/registry.js';
+import { modelService } from '../models/modelService.js';
+import { notify } from '../core/notifications.js';
 import { esc } from './util.js';
 
 // Command Palette — a lightweight ⌘K / Ctrl+K launcher. Pure navigation/action
@@ -33,6 +35,9 @@ export function toggleCommandPalette() {
     { label: 'Open Local Runtimes', hint: 'Page', run: () => router.navigate('localai') },
     { label: 'Create Profile', hint: 'Profiles', run: () => { if (window.navigate) window.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },
     { label: 'Open Playground', hint: 'Page', run: () => router.navigate('playground') },
+    { label: 'Open Model Library', hint: 'Models', run: () => router.navigate('models') },
+    { label: 'Refresh Model Catalogue', hint: 'Models', run: async () => { await modelService.refresh(); notify.toast('Model catalogue refreshed', 'success'); } },
+    { label: 'Recommended Models', hint: 'Models', run: () => { router.navigate('models'); } },
     { label: 'Toggle Theme', hint: 'Appearance', run: () => { if (window.setTheme) window.setTheme(theme.current() === 'dark' ? 'light' : 'dark'); } },
     { label: 'Toggle Sidebar', hint: 'Appearance', run: () => { if (window.toggleSidebar) window.toggleSidebar(); } },
   ];

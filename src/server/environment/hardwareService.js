@@ -12,24 +12,35 @@ const execFileP = promisify(execFile);
 // ═══════════════════════════════════════════════════
 
 async function probeGpu(platform) {
-  // Honest best-effort. Only attempt a light, time-boxed Linux nvidia probe;
-  // anything else is reported as unknown rather than invented.
-  if (platform !== 'linux') {
-    return { available: null, name: null, vram: null, note: 'GPU auto-detection is platform-limited; memory-based estimates are used.' };
-  }
-  try {
-    const { stdout } = await execFileP('nvidia-smi', ['-L'], { timeout: 1500 });
-    const name = stdout.split('\n')[0]?.replace(/^GPU 0: /, '').trim() || null;
-    let vram = null;
+  // Honest best-effort. We only report what a probe can actually confirm;
+  // otherwise the field is null and recommendations are flagged as estimates.
+  if (platform === 'linux') {
     try {
-      const mem = await execFileP('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { timeout: 1500 });
-      const mb = parseInt(mem.stdout.trim().split('\n')[0], 10);
-      if (!Number.isNaN(mb)) vram = +(mb / 1024).toFixed(1);
-    } catch { /* ignore */ }
-    return { available: !!name, name, vram, note: name ? 'Detected via nvidia-smi.' : 'No NVIDIA GPU detected.' };
-  } catch {
-    return { available: false, name: null, vram: null, note: 'No NVIDIA GPU detected (nvidia-smi unavailable).' };
+      const { stdout } = await execFileP('nvidia-smi', ['-L'], { timeout: 1500 });
+      const name = stdout.split('\n')[0]?.replace(/^GPU 0: /, '').trim() || null;
+      let vram = null;
+      try {
+        const mem = await execFileP('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { timeout: 1500 });
+        const mb = parseInt(mem.stdout.trim().split('\n')[0], 10);
+        if (!Number.isNaN(mb)) vram = +(mb / 1024).toFixed(1);
+      } catch { /* ignore */ }
+      return { available: !!name, name, vram, note: name ? 'Detected via nvidia-smi.' : 'No NVIDIA GPU detected.' };
+    } catch {
+      return { available: false, name: null, vram: null, note: 'No NVIDIA GPU detected (nvidia-smi unavailable).' };
+    }
   }
+  if (platform === 'darwin') {
+    try {
+      const { stdout } = await execFileP('system_profiler', ['SPDisplaysDataType', '-json'], { timeout: 2000 });
+      const displays = JSON.parse(stdout)?.SPDisplaysDataType || [];
+      const model = displays.map((d) => d.sppci_model).find(Boolean) || null;
+      const vram = displays[0]?.spdisplays_vram ? String(displays[0].spdisplays_vram) : null;
+      return { available: !!model, name: model, vram, note: model ? 'Apple Silicon / integrated GPU (unified memory).' : 'No GPU reported.' };
+    } catch {
+      return { available: null, name: null, vram: null, note: 'GPU auto-detection unavailable on this platform.' };
+    }
+  }
+  return { available: null, name: null, vram: null, note: 'GPU auto-detection is platform-limited; memory-based estimates are used.' };
 }
 
 export function getHardwareProfile() {
@@ -93,4 +104,66 @@ export function getHardwareCapabilities(profile = getHardwareProfile()) {
   recommendations.push('Recommendations are conservative estimates; precise per-model requirements vary by architecture and quantisation.');
 
   return { ramTier, gpuTier, suggestedModelSizes, warnings, recommendations, estimate: true };
+}
+
+// ── Real-time device info (v0.8.0) — a live, re-probable snapshot of the host. ──
+let prevCpu = null;
+
+function cpuTicks(cpus) {
+  let idle = 0, total = 0;
+  for (const c of cpus) {
+    for (const t of Object.values(c.times)) total += t;
+    idle += c.times.idle;
+  }
+  return { idle, total };
+}
+
+// CPU busy % since the previous call (null on the very first call).
+function getCpuUsage() {
+  const cpus = os.cpus() || [];
+  const cur = cpuTicks(cpus);
+  let usage = null;
+  if (prevCpu && prevCpu.total) {
+    const idleDelta = cur.idle - prevCpu.idle;
+    const totalDelta = cur.total - prevCpu.total;
+    if (totalDelta > 0) usage = +(100 * (1 - idleDelta / totalDelta)).toFixed(1);
+  }
+  prevCpu = cur;
+  return usage;
+}
+
+export async function getDeviceInfo() {
+  const platform = os.platform();
+  const GB = 1073741824;
+  const totalBytes = os.totalmem();
+  const freeBytes = os.freemem();
+  const usedBytes = totalBytes - freeBytes;
+  const cpus = os.cpus() || [];
+  return {
+    hostname: os.hostname(),
+    platform,
+    arch: os.arch(),
+    release: os.release(),
+    uptimeSec: Math.floor(os.uptime()),
+    cpu: {
+      model: cpus.length ? cpus[0].model : null,
+      cores: cpus.length,
+      usagePct: getCpuUsage(),
+      loadavg: os.loadavg().map((n) => +n.toFixed(2)),
+    },
+    memory: {
+      totalGB: +(totalBytes / GB).toFixed(1),
+      freeGB: +(freeBytes / GB).toFixed(1),
+      usedGB: +(usedBytes / GB).toFixed(1),
+      usedPct: +((usedBytes / totalBytes) * 100).toFixed(1),
+    },
+    gpu: await probeGpu(platform),
+    process: {
+      node: process.version,
+      pid: process.pid,
+      rssMB: +(process.memoryUsage().rss / 1048576).toFixed(1),
+      uptimeSec: Math.floor(process.uptime()),
+    },
+    detectedAt: new Date().toISOString(),
+  };
 }

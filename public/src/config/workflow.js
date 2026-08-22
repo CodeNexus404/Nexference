@@ -5,6 +5,7 @@ import { recordActivity } from '../core/activityStore.js';
 import { openModal } from '../components/modal.js';
 import { esc, logoHtml, clientLogoHtml, maskKey, highlightJSON } from '../components/util.js';
 import { renderModelPicker } from '../components/modelPicker.js';
+import { renderModelPickerUnified } from '../components/modelLibrary.js';
 import { configEngine } from './engine.js';
 import { LocalSettingsRuntime, CopyableRuntime } from './runtimeAdapter.js';
 import { getProvider, claudeCodeProviders, PROVIDERS } from '../providers/registry.js';
@@ -302,10 +303,10 @@ export function openWorkflow(opts = {}) {
     if (wf.connectionType === 'cloud') {
       const provider = getProvider(wf.provider);
       host.innerHTML = `<h4 class="wf-h">Select model</h4>
-        <p class="wf-sub">${esc(provider ? provider.name : '')} · search the catalogue (live API, scraped, or curated fallback).</p>
+        <p class="wf-sub">${esc(provider ? provider.name : '')} · search the unified catalogue (live API, scraped, or curated fallback). Source status, free/paid and capabilities are shown honestly.</p>
         <div class="pc-model-host" id="wfModelHost"></div>`;
       wf.bodyEl.appendChild(host);
-      renderModelPicker(host.querySelector('#wfModelHost'), wf.provider, {
+      renderModelPickerUnified(host.querySelector('#wfModelHost'), wf.provider, {
         includePaid: wf.includePaid,
         showPaidToggle: false,
         current: wf.model,

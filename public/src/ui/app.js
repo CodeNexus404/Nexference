@@ -20,6 +20,8 @@ import { openModal } from '../components/modal.js';
 import { credentialsStore } from '../config/credentialsStore.js';
 import { recordActivity, getActivities } from '../core/activityStore.js';
 import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
+import { renderModelLibrary } from '../components/modelLibrary.js';
+import { modelService } from '../models/modelService.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  UI action layer — the orchestration functions that were previously private
@@ -602,6 +604,11 @@ function renderWorkspaceFromEnv(env) {
       <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
     </div>
 
+    <div class="panel ws-models" id="wsModelIntel">
+      <h3>Model Intelligence</h3>
+      <div class="muted">Loading model catalogue…</div>
+    </div>
+
     <div class="panel ws-profiles">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
@@ -625,6 +632,30 @@ function renderWorkspaceFromEnv(env) {
           return `<div class="profile-row"><div><b>${esc(p.name)}</b> <span class="muted">${esc(prov)} · ${esc(full.model || '?')}</span></div><button class="btn btn2" onclick="applyProfile('${p.id}')">Use</button></div>`;
         }).join('')
       : '<div class="muted">No profiles yet — save one from Settings.</div>';
+  }
+
+  fillWsModelIntel();
+}
+
+async function fillWsModelIntel() {
+  const host = document.getElementById('wsModelIntel');
+  if (!host) return;
+  try {
+    const [stats, recs] = await Promise.all([modelService.getStats(), modelService.getRecommended()]);
+    const recent = modelService.getRecent();
+    host.innerHTML = `
+      <h3>Model Intelligence</h3>
+      <div class="ml-stats">
+        <span class="ml-chip"><b>${stats.cloudTotal}</b> cloud</span>
+        <span class="ml-chip"><b>${stats.cloudFree}</b> free</span>
+        <span class="ml-chip"><b>${stats.cloudPaid}</b> paid</span>
+        <span class="ml-chip"><b>${stats.localTotal}</b> local</span>
+      </div>
+      ${recs.length ? `<div class="ws-next-body" style="margin-top:8px">${recs.slice(0, 4).map((r) => `<div class="ws-next-item">★ <b class="mono">${esc(r.name || r.id)}</b> <span class="muted">${esc(r.providerName)}</span> — ${esc(r.recommendationReason || 'recommended')}</div>`).join('')}</div>` : ''}
+      ${recent.length ? `<div class="ml-recent" style="margin-top:10px">${recent.slice(0, 5).map((m) => `<button class="chipx" onclick="useModel('${esc(m.providerId)}','${esc(m.id)}')">${esc(m.name || m.id)}</button>`).join('')}</div>` : ''}
+      <div style="margin-top:10px"><button class="btn btn2" onclick="navigate('models')">Open Model Library</button></div>`;
+  } catch {
+    host.innerHTML = '<div class="muted">Model catalogue unavailable.</div>';
   }
 }
 
@@ -1062,26 +1093,101 @@ export function cfgTogglePaid() { openWorkflow(); }
 export function cfgGenerate() { openWorkflow(); }
 export async function cfgApply() { openWorkflow(); }
 
+let deviceTimer = null;
+
 export async function renderLocalAI() {
   setCrumb('Local AI');
   const grid = document.getElementById('rtGrid');
   if (!grid) return;
-  grid.innerHTML = '<div class="muted">Detecting local runtimes…</div>';
-  try {
-    const res = await fetch('/api/local-runtimes');
-    const { runtimes } = await res.json();
-    grid.innerHTML = runtimes.map(rt => {
-      const status = rt.planned ? 'planned' : (rt.running ? 'running' : (rt.detected ? 'detected' : 'offline'));
-      const badge = rt.planned ? 'Coming soon' : (rt.running ? `${rt.modelCount} models` : 'Not running');
-      return `<div class="panel rt-card ${rt.running ? 'live' : ''}">
-        <div class="rt-top"><b>${esc(rt.name)}</b><span class="badge ${status}">${esc(badge)}</span></div>
-        <div class="rt-sub">${esc(rt.note || '')}</div>
-        ${rt.running && rt.models && rt.models.length ? `<div class="rt-models">${rt.models.slice(0, 6).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 6 ? `<span class="chipx">+${rt.models.length - 6}</span>` : ''}</div>` : ''}
-      </div>`;
-    }).join('');
-  } catch (err) {
-    grid.innerHTML = '<div class="muted">Failed to detect local runtimes.</div>';
+
+  grid.innerHTML = `
+    <div class="panel device-panel" id="devicePanel">
+      <div class="device-head">
+        <h3>Device</h3>
+        <span class="badge live" id="devLive">live</span>
+      </div>
+      <div class="device-grid">
+        <div class="device-metric">
+          <div class="dm-label">CPU</div>
+          <div class="dm-val mono" id="devCpu">—</div>
+          <div class="dm-sub" id="devCpuSub">—</div>
+          <div class="meter"><span class="meter-fill" id="devCpuBar"></span></div>
+        </div>
+        <div class="device-metric">
+          <div class="dm-label">Memory</div>
+          <div class="dm-val mono" id="devMem">—</div>
+          <div class="dm-sub" id="devMemSub">—</div>
+          <div class="meter"><span class="meter-fill" id="devMemBar"></span></div>
+        </div>
+        <div class="device-metric">
+          <div class="dm-label">GPU</div>
+          <div class="dm-val mono" id="devGpu">—</div>
+          <div class="dm-sub" id="devGpuSub">—</div>
+        </div>
+        <div class="device-metric">
+          <div class="dm-label">System</div>
+          <div class="dm-val mono" id="devSys">—</div>
+          <div class="dm-sub" id="devSysSub">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="rt-section-h">Local runtimes</div>
+    <div id="rtList"><div class="muted">Detecting local runtimes…</div></div>`;
+
+  const rtList = grid.querySelector('#rtList');
+
+  async function loadRuntimes() {
+    try {
+      const res = await fetch('/api/local-runtimes');
+      const { runtimes } = await res.json();
+      rtList.innerHTML = runtimes.map(rt => {
+        const status = rt.planned ? 'planned' : (rt.running ? 'running' : (rt.detected ? 'detected' : 'offline'));
+        const badge = rt.planned ? 'Coming soon' : (rt.running ? `${rt.modelCount} models` : 'Not running');
+        return `<div class="panel rt-card ${rt.running ? 'live' : ''}">
+          <div class="rt-top"><b>${esc(rt.name)}</b><span class="badge ${status}">${esc(badge)}</span></div>
+          <div class="rt-sub">${esc(rt.note || '')}</div>
+          ${rt.running && rt.models && rt.models.length ? `<div class="rt-models">${rt.models.slice(0, 6).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 6 ? `<span class="chipx">+${rt.models.length - 6}</span>` : ''}</div>` : ''}
+        </div>`;
+      }).join('');
+    } catch {
+      rtList.innerHTML = '<div class="muted">Failed to detect local runtimes.</div>';
+    }
   }
+
+  function fmtUptime(sec) {
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+
+  function set(id, v) { const el = grid.querySelector('#' + id); if (el) el.textContent = v; }
+
+  async function loadDevice() {
+    try {
+      const info = await (await fetch('/api/hardware/device')).json();
+      const cpu = info.cpu || {};
+      const mem = info.memory || {};
+      const gpu = info.gpu || {};
+      set('devCpu', cpu.cores ? `${cpu.cores} cores` : '—');
+      set('devCpuSub', `${esc(cpu.model || 'unknown')}${cpu.usagePct != null ? ` · ${cpu.usagePct}% used` : ''}`);
+      set('devMem', `${mem.usedGB != null ? mem.usedGB : '—'} / ${mem.totalGB != null ? mem.totalGB : '—'} GB`);
+      set('devMemSub', `${mem.usedPct != null ? mem.usedPct + '% used' : ''}${mem.freeGB != null ? ` · ${mem.freeGB} GB free` : ''}`);
+      set('devGpu', gpu.name || (gpu.available === false ? 'Not detected' : '—'));
+      set('devGpuSub', gpu.note || '');
+      set('devSys', `${esc(info.hostname || '')} · ${esc(info.platform || '')}`);
+      set('devSysSub', `${esc(info.arch || '')} · up ${fmtUptime(info.uptimeSec || 0)} · Node ${esc(info.process?.node || '')}`);
+      const cpuBar = grid.querySelector('#devCpuBar'); if (cpuBar) cpuBar.style.width = (cpu.usagePct != null ? cpu.usagePct : 0) + '%';
+      const memBar = grid.querySelector('#devMemBar'); if (memBar) memBar.style.width = (mem.usedPct != null ? mem.usedPct : 0) + '%';
+    } catch { /* keep last good values */ }
+  }
+
+  if (deviceTimer) clearInterval(deviceTimer);
+  await loadDevice();
+  await loadRuntimes();
+  deviceTimer = setInterval(loadDevice, 3000);
 }
 
 export function renderClients() {
@@ -1383,44 +1489,19 @@ export function renderCloudProviders() {
   drawGrid();
 }
 
-// ── Models explorer ──
+// ── Models explorer (v0.8.0 — Model Intelligence) ──
 export function renderModels() {
   updateCrumb('Models');
   const host = document.getElementById('modelList');
   if (!host) return;
-  let q = '';
-
-  const draw = () => {
-    const ql = q.toLowerCase();
-    const rows = [];
-    PROVIDERS.forEach(p => {
-      getModels(p.id).forEach(m => {
-        if (ql && !((m.id || '').toLowerCase().includes(ql) || (m.name || '').toLowerCase().includes(ql))) return;
-        const free = getFreeModels(p.id).some(x => x.id === m.id);
-        rows.push({ p, m, free });
-      });
-    });
-    if (!rows.length) { host.innerHTML = '<div class="muted">No models loaded yet. Visit Cloud Providers to fetch catalogues.</div>'; return; }
-    const shown = rows.slice(0, 400);
-    host.innerHTML = `<div class="model-rows">` + shown.map(r => `
-      <div class="model-row">
-        <div class="mr-id"><b class="mono">${esc(r.m.id)}</b><span class="mr-name">${esc(r.m.name || '')}</span></div>
-        <div class="mr-prov">${esc(r.p.name)}</div>
-        ${r.free ? '<span class="badge free">free</span>' : '<span class="badge paid">paid</span>'}
-        <button class="btn btn2 mr-btn" onclick="useModel('${esc(r.p.id)}','${esc(r.m.id)}')">Use</button>
-      </div>`).join('') + `</div>` +
-      (rows.length > shown.length ? `<div class="muted">Showing first ${shown.length} of ${rows.length} matches.</div>` : '');
-  };
-
-  const search = document.getElementById('modelSearch');
-  if (search) search.addEventListener('input', (e) => { q = e.target.value; draw(); });
-  draw();
+  renderModelLibrary(host);
 }
 
 export function useModel(providerId, modelId) {
   Storage.setModel(providerId, modelId);
   workspace.activeProvider = providerId;
   workspace.activeModel = modelId;
+  modelService.addRecent({ providerId, id: modelId, name: modelId, providerName: getProvider(providerId)?.name || providerId });
   notify.toast(`Selected ${modelId} (${getProvider(providerId).name})`, 'success');
 }
 
