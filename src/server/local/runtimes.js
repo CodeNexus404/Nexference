@@ -189,13 +189,14 @@ export async function detectRuntimes() {
 }
 
 // ── LM Studio model discovery (from the device) ──────────────────────
-// LM Studio's CLI `lms ls --json` enumerates every model installed on this
-// device and reports the exact model id the Local Server expects (e.g.
-// "qwen3.5-4b"), its real on-disk size, params, quantisation and context
-// length — all WITHOUT the server running. We prefer this (correct ids + real
-// sizes, used for honest compatibility scoring) and fall back to scanning
-// ~/.lmstudio/models when `lms` is unavailable. The OpenAI-compatible Local
-// Server still needs to be running for execution, so we probe it for `running`.
+// Two sources, in priority order:
+//   1. The `lms ls --json` CLI — richest data (exact Local-Server model ids,
+//      real on-disk size, params, quantisation, context length). BUT invoking
+//      `lms` BOOTS the LM Studio backend (packaged as "Bionic" on macOS) as a
+//      side effect, so it must never run during passive detection. It is only
+//      used when the Local Server is ALREADY running (see `allowCli`).
+//   2. A pure filesystem scan of ~/.lmstudio/models — non-invasive, never
+//      launches the app; used for passive detection and as the CLI fallback.
 function getLmStudioCli() {
   const cands = [
     join(os.homedir(), '.lmstudio', 'bin', 'lms'),
@@ -206,12 +207,15 @@ function getLmStudioCli() {
   return null;
 }
 
-let _lmCache = { ts: 0, list: null };
-function getLmStudioModelList() {
+let _lmCache = { ts: 0, list: null, allowCli: false };
+// `allowCli` gates the `lms` CLI, which launches LM Studio (Bionic). When false
+// (passive detection) only the non-invasive filesystem scan runs, so the app is
+// never started as a side effect of discovery.
+function getLmStudioModelList({ allowCli = false } = {}) {
   const now = Date.now();
-  if (_lmCache.list && now - _lmCache.ts < 4000) return _lmCache.list;
+  if (_lmCache.list && _lmCache.allowCli === allowCli && now - _lmCache.ts < 4000) return _lmCache.list;
   const list = [];
-  const cli = getLmStudioCli();
+  const cli = allowCli ? getLmStudioCli() : null;
   if (cli) {
     try {
       const r = spawnSync(cli, ['ls', '--json'], { timeout: 8000, maxBuffer: 32 * 1024 * 1024 });
@@ -274,7 +278,7 @@ function getLmStudioModelList() {
       }
     } catch { /* ignore — no models discoverable */ }
   }
-  _lmCache = { ts: now, list };
+  _lmCache = { ts: now, list, allowCli };
   return list;
 }
 
@@ -298,7 +302,10 @@ function getInstalledModels(id) {
 async function detectOpenAICompat(rt) {
   const cfg = getRuntimeExec(rt.id);
   const probe = await probeRuntime(rt.id);
-  const diskList = rt.id === 'lmstudio' ? getLmStudioModelList() : [];
+  // Only allow the `lms` CLI (which launches Bionic) when the Local Server is
+  // already running — otherwise passive detection would boot the app. Offline,
+  // we fall back to a pure filesystem scan. See getLmStudioModelList.
+  const diskList = rt.id === 'lmstudio' ? getLmStudioModelList({ allowCli: probe.running }) : [];
   const modelDetails = Object.fromEntries(diskList.map((m) => [m.id, m]));
   if (probe.running) {
     // Live /v1/models also advertises LM Studio's bundled embedding model; keep
