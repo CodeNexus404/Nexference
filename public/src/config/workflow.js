@@ -308,10 +308,14 @@ export function openWorkflow(opts = {}) {
       wf.bodyEl.appendChild(host);
       renderModelPickerUnified(host.querySelector('#wfModelHost'), wf.provider, {
         includePaid: wf.includePaid,
-        showPaidToggle: false,
+        showPaidToggle: true,
         current: wf.model,
         onSelect: (id) => { wf.model = id; Storage.setModel(wf.provider, id); },
       });
+      // Keep the wizard's paid preference in sync with the inline toggle so the
+      // review step and any later re-render honour the user's choice.
+      const paidBox = host.querySelector('#wfModelHost .mp-paid input');
+      if (paidBox) paidBox.addEventListener('change', (e) => { wf.includePaid = !!e.target.checked; });
     } else {
       host.innerHTML = `<h4 class="wf-h">Select local model</h4>
         <p class="wf-sub">Enter the model name served by ${esc(getRuntime(wf.runtime)?.name || 'the runtime')}. Ollama models are listed if it is running.</p>

@@ -133,6 +133,8 @@ const GLOBALS = {
   toggleCommandPalette: toggleCommandPalette,
   openWorkflow: openWorkflow,
   updateShellStatus: UI.updateShellStatus,
+  openHealthModal: UI.openHealthModal,
+  openActivityModal: UI.openActivityModal,
   loadBackups: UI.loadBackups,
   refreshConfigStatus: UI.refreshConfigStatus,
   viewCurrentConfig: UI.viewCurrentConfig,

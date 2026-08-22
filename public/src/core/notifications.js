@@ -28,6 +28,13 @@ export class NotificationManager {
     const icons = { success: '✓', error: '✕', warning: '!', info: 'i' };
     const label = { success: 'Success', error: 'Error', warning: 'Warning', info: 'Information' };
 
+    // Dedup: suppress an identical message+type fired within a short window so
+    // repeated identical events (e.g. a poll loop) don't stack duplicate toasts.
+    const key = `${type0}::${message}`;
+    const now = Date.now();
+    if (this._last && this._last.key === key && now - this._last.at < 2500) return null;
+    this._last = { key, at: now };
+
     const el = document.createElement('div');
     el.className = `toast toast-${type0}`;
     el.setAttribute('role', type0 === 'error' ? 'alert' : 'status');
@@ -38,7 +45,7 @@ export class NotificationManager {
 
     const dismiss = () => {
       el.classList.add('leaving');
-      setTimeout(() => el.remove(), 180);
+      setTimeout(() => el.remove(), 200);
     };
     el.querySelector('.toast-x').addEventListener('click', dismiss);
 
@@ -47,9 +54,14 @@ export class NotificationManager {
     // Trigger entrance transition on next frame.
     requestAnimationFrame(() => el.classList.add('show'));
 
-    const ttl = type0 === 'error' ? 6000 : 4000;
-    const timer = setTimeout(dismiss, ttl);
-    el.addEventListener('mouseenter', () => clearTimeout(timer));
+    // Dismiss time: errors linger longer; the progress bar is synced to it so
+    // the visual countdown matches the actual auto-dismiss. Hovering pauses
+    // both the timer and (via CSS) the progress bar.
+    const ttl = type0 === 'error' ? 6500 : 4500;
+    el.style.setProperty('--toast-dur', ttl + 'ms');
+    let timer = setTimeout(dismiss, ttl);
+    el.addEventListener('mouseenter', () => { clearTimeout(timer); el.classList.add('paused'); });
+    el.addEventListener('mouseleave', () => { el.classList.remove('paused'); timer = setTimeout(dismiss, ttl); });
     return el;
   }
 

@@ -38,8 +38,12 @@ async function readOpenAISSE(res, onToken) {
       if (!data || data === '[DONE]') continue;
       try {
         const j = JSON.parse(data);
-        const delta = j.choices?.[0]?.delta?.content;
-        if (delta) { content += delta; onToken && onToken(delta); }
+        // Captures both normal output (`content`) and reasoning-model thinking
+        // (`reasoning_content` / `reasoning`), so reasoning models still surface
+        // visible output instead of an empty stream.
+        const delta = j.choices?.[0]?.delta || {};
+        const piece = delta.content || delta.reasoning_content || delta.reasoning || '';
+        if (piece) { content += piece; onToken && onToken(piece); }
         if (j.usage) usage = { inputTokens: j.usage.prompt_tokens ?? null, outputTokens: j.usage.completion_tokens ?? null };
       } catch { /* ignore malformed chunk */ }
     }
@@ -136,7 +140,9 @@ async function executeOpenAILocal({ runtimeId, model, messages, systemPrompt, pa
   }
   if (!stream) {
     const j = await res.json();
-    const content = j.choices?.[0]?.message?.content || '';
+    const msg = j.choices?.[0]?.message || {};
+    let content = msg.content || '';
+    if (msg.reasoning_content) content = msg.reasoning_content + (content ? '\n\n' + content : '');
     const u = j.usage || null;
     return { content, usage: u ? { inputTokens: u.prompt_tokens ?? null, outputTokens: u.completion_tokens ?? null } : null };
   }

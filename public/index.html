@@ -9,7 +9,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b8def'/><path d='M30 72V28l40 44V28' stroke='%230a0b0d' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <script>
     // Set the active page + sidebar state before first paint to avoid a flash.
@@ -69,7 +69,7 @@
         </a>
       </nav>
       <div class="sidebar-foot">
-        <div class="ver">v0.9.0</div>
+        <div class="ver">v1.0.0</div>
       </div>
     </aside>
 
@@ -86,7 +86,7 @@
           <button class="icon-btn theme-toggle" id="themeToggle" onclick="cycleTheme()" title="Cycle theme" aria-label="Cycle theme">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
-          <div class="app-ver" id="appVersion">v0.9.0</div>
+          <div class="app-ver" id="appVersion">v1.0.0</div>
         </div>
       </header>
 
@@ -161,7 +161,7 @@
             <h3>Appearance</h3>
             <div class="seg" id="themeSeg"></div>
           </div>
-          <div class="panel">
+          <div class="panel settings-profiles">
             <h3>Configuration Profiles</h3>
             <p class="muted">Profiles reference a provider &amp; model — they never store secrets.</p>
             <div class="profile-list" id="profileList"></div>
@@ -170,14 +170,15 @@
               <button class="btn btn-go" onclick="createProfile()">Save current as profile</button>
             </div>
           </div>
-          <div class="panel">
+          <div class="panel settings-backups">
             <h3>Backups</h3>
             <p class="muted">Before each apply, the previous <code>~/.claude/settings.json</code> is copied to <code>~/.nexference/backups/</code> with a timestamp.</p>
             <div id="backupList" class="backup-list"></div>
           </div>
-          <div class="panel security-note">
-            <span class="lock">🔒</span> API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose. Config is written through the local server to <code>~/.claude/settings.json</code> after a backup is made.
-          </div>
+        </div>
+        <div class="security-note">
+          <span class="lock">🔒</span>
+          <span>API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose. Config is written through the local server to <code>~/.claude/settings.json</code> after a backup is made.</span>
         </div>
       </section>
     </main>

@@ -17,6 +17,7 @@ import { computeMetrics } from './executionMetrics.js';
 import { validateExecution } from './executionValidation.js';
 import { runExecutionAdapter } from './executionAdapter.js';
 import { getExecutionCapabilities } from './executionRegistry.js';
+import { recordActivity } from '../activity/activityService.js';
 
 const HISTORY_DIR = join(homedir(), '.nexference');
 const HISTORY_PATH = join(HISTORY_DIR, 'executions.json');
@@ -59,7 +60,7 @@ function makeRecord(id, req) {
     systemPrompt: req.systemPrompt || null,
     parameters: req.parameters || null,
     createdAt: new Date().toISOString(),
-    status: 'queued',
+    status: 'created',
     success: false,
     content: '',
     usage: null,
@@ -99,13 +100,23 @@ async function startRun(id, req) {
   let firstTokenAt = null;
   const timeoutMs = req.execTimeoutMs || 180_000;
   const timeout = setTimeout(() => { rec.aborted = true; rec.timeout = true; rec.controller && rec.controller.abort(); }, timeoutMs);
+  // Explicit lifecycle: created -> validating -> running -> streaming -> complete/failed/cancelled/timed-out/interrupted
+  rec.record.status = 'validating';
+  emit(rec, { type: 'status', executionId: id, data: { status: 'validating' } });
   rec.record.status = 'running';
+  emit(rec, { type: 'status', executionId: id, data: { status: 'running' } });
   emit(rec, { type: 'start', executionId: id, data: { model: req.model, source: req.source, providerId: req.providerId, runtimeId: req.runtimeId } });
   try {
-    const result = await runExecutionAdapter(req, {
+    const result = await runExecutionAdapter({ ...req, messages: normalizeMessages(req) }, {
       signal,
       onToken: (delta) => {
-        if (!firstTokenAt) firstTokenAt = Date.now();
+        if (!firstTokenAt) {
+          firstTokenAt = Date.now();
+          if (rec.record.status !== 'streaming') {
+            rec.record.status = 'streaming';
+            emit(rec, { type: 'status', executionId: id, data: { status: 'streaming' } });
+          }
+        }
         rec.record.content += delta;
         emit(rec, { type: 'token', executionId: id, data: { delta } });
       },
@@ -125,13 +136,21 @@ async function startRun(id, req) {
     rec.record.status = 'complete';
     rec.record.success = true;
     rec.record.sourceStatus = 'ok';
+    emit(rec, { type: 'status', executionId: id, data: { status: 'complete' } });
     emit(rec, { type: 'complete', executionId: id, data: { content: result.content, usage: result.usage, metrics } });
   } catch (err) {
     const aborted = rec.aborted || signal.aborted;
-    rec.record.status = aborted ? (rec.timeout ? 'error' : 'cancelled') : 'error';
+    if (aborted && rec.timeout) rec.record.status = 'timed-out';
+    else if (aborted) rec.record.status = 'cancelled';
+    else rec.record.status = 'error';
     rec.record.success = false;
-    rec.record.error = maskSecrets(aborted ? (rec.timeout ? 'Execution timed out.' : 'Execution cancelled.') : (err?.message || 'Execution failed.'));
-    emit(rec, { type: 'error', executionId: id, data: { message: rec.record.error, cancelled: !!aborted && !rec.timeout } });
+    rec.record.error = maskSecrets(
+      aborted
+        ? (rec.timeout ? `Execution timed out after ${Math.round(timeoutMs / 1000)} seconds.` : 'Execution cancelled.')
+        : (err?.message || 'Execution failed.')
+    );
+    emit(rec, { type: 'status', executionId: id, data: { status: rec.record.status } });
+    emit(rec, { type: 'error', executionId: id, data: { message: rec.record.error, cancelled: !!aborted && !rec.timeout, timedOut: !!rec.timeout } });
   } finally {
     clearTimeout(timeout);
     rec.done = true;
@@ -162,7 +181,32 @@ function finalize(rec, req) {
   history.unshift(summary);
   if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
   saveHistory();
+
+  // Normalised activity entry (secret-free). Maps explicit lifecycle to status.
+  const statusMap = {
+    complete: ['complete', 'success'],
+    cancelled: ['cancel', 'warning'],
+    'timed-out': ['timeout', 'warning'],
+    error: ['fail', 'error'],
+  };
+  const [action, actStatus] = statusMap[r.status] || ['finish', 'info'];
+  recordActivity(
+    'execution',
+    action,
+    actStatus,
+    `Execution ${r.status} (${r.source}${r.model ? '/' + r.model : ''})`,
+    { source: r.source, model: r.model, status: r.status, durationMs: r.metrics?.totalDurationMs ?? null }
+  );
 }
+
+// Stale in-memory execution cleanup — keeps the live Map bounded so long-lived
+// servers don't leak memory while still preserving history on disk.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, rec] of executions) {
+    if (rec.done && now - Date.parse(rec.record.createdAt || new Date().toISOString()) > 60_000) executions.delete(id);
+  }
+}, 60_000);
 
 export async function createExecution(req) {
   const validation = await validateExecution(req);
@@ -181,7 +225,7 @@ export async function compareExecutions(req) {
     const single = {
       source: ref.source, providerId: ref.providerId, runtimeId: ref.runtimeId, model: ref.model,
       systemPrompt, prompt, messages: prompt ? [{ role: 'user', content: prompt }] : [],
-      parameters, key, stream,
+      parameters, key: ref.key || key, stream,
     };
     const validation = await validateExecution(single);
     if (!validation.executable) { out.push({ ref, validation, executionId: null }); continue; }
@@ -250,9 +294,12 @@ export function streamExecution(id, req, res) {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders && res.flushHeaders();
-  const send = (ev) => { try { res.write(`data: ${JSON.stringify(ev)}\n\n`); } catch { /* ignore */ } };
+  const send = (ev) => { try { res.write(`data: ${JSON.stringify(ev)}\n\n`); if (typeof res.flush === 'function') res.flush(); } catch { /* ignore */ } };
   for (const ev of rec.buffered) send(ev);
-  const handler = (ev) => send(ev);
+  const handler = (ev) => {
+    send(ev);
+    if (ev.type === 'complete' || ev.type === 'error' || rec.done) cleanup();
+  };
   rec.emitter.on('event', handler);
   const cleanup = () => { rec.emitter.removeListener('event', handler); try { res.end(); } catch { /* ignore */ } };
   req.on('close', cleanup);

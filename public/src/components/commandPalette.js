@@ -31,6 +31,8 @@ export function toggleCommandPalette() {
     { label: 'Open Profiles', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },
     { label: 'Open Compatibility Explorer', hint: 'Page', run: () => { if (window.openCompatibilityExplorer) window.openCompatibilityExplorer(); } },
     { label: 'Refresh Environment', hint: 'Environment', run: () => { if (window.refreshWorkspace) window.refreshWorkspace(); else router.navigate('workspace'); } },
+    { label: 'Check Workspace Health', hint: 'Health', run: () => { if (window.openHealthModal) window.openHealthModal(); else router.navigate('workspace'); } },
+    { label: 'View Activity', hint: 'Activity', run: () => { if (window.openActivityModal) window.openActivityModal(); else router.navigate('workspace'); } },
     { label: 'View Installed Models', hint: 'Environment', run: () => { if (window.navigate) window.navigate('localai'); } },
     { label: 'Open Local Runtimes', hint: 'Page', run: () => router.navigate('localai') },
     { label: 'Create Profile', hint: 'Profiles', run: () => { if (window.navigate) window.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },

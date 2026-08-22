@@ -1,6 +1,6 @@
 import os from 'os';
-import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { spawn, spawnSync } from 'child_process';
+import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { norm } from '../utils/index.js';
 import { getRuntimeExec, probeRuntime } from '../execution/executionRegistry.js';
@@ -188,21 +188,140 @@ export async function detectRuntimes() {
   return results;
 }
 
+// ── LM Studio model discovery (from the device) ──────────────────────
+// LM Studio's CLI `lms ls --json` enumerates every model installed on this
+// device and reports the exact model id the Local Server expects (e.g.
+// "qwen3.5-4b"), its real on-disk size, params, quantisation and context
+// length — all WITHOUT the server running. We prefer this (correct ids + real
+// sizes, used for honest compatibility scoring) and fall back to scanning
+// ~/.lmstudio/models when `lms` is unavailable. The OpenAI-compatible Local
+// Server still needs to be running for execution, so we probe it for `running`.
+function getLmStudioCli() {
+  const cands = [
+    join(os.homedir(), '.lmstudio', 'bin', 'lms'),
+    '/usr/local/bin/lms',
+    '/opt/homebrew/bin/lms',
+  ];
+  for (const c of cands) if (existsSync(c)) return c;
+  return null;
+}
+
+let _lmCache = { ts: 0, list: null };
+function getLmStudioModelList() {
+  const now = Date.now();
+  if (_lmCache.list && now - _lmCache.ts < 4000) return _lmCache.list;
+  const list = [];
+  const cli = getLmStudioCli();
+  if (cli) {
+    try {
+      const r = spawnSync(cli, ['ls', '--json'], { timeout: 8000, maxBuffer: 32 * 1024 * 1024 });
+      if (r.status === 0 && r.stdout) {
+        const parsed = JSON.parse(r.stdout.toString());
+        if (Array.isArray(parsed)) {
+          for (const m of parsed) {
+            // Skip LM Studio's auto-bundled embedding model — it isn't a chat
+            // model the user installed and doesn't belong in the Playground list.
+            if (m.type === 'embedding') continue;
+            list.push({
+              id: m.modelKey,
+              label: m.displayName || m.modelKey,
+              sizeBytes: m.sizeBytes || 0,
+              params: m.paramsString || null,
+              quant: m.quantization?.name || null,
+              contextLength: m.maxContextLength || null,
+              vision: !!m.vision,
+              path: m.path || null,
+            });
+          }
+        }
+      }
+    } catch { /* fall through to disk scan */ }
+  }
+  if (!list.length) {
+    const root = (() => {
+      try {
+        const sp = join(os.homedir(), '.lmstudio', 'apps', 'bionic', 'settings.json');
+        if (existsSync(sp)) {
+          const s = JSON.parse(readFileSync(sp, 'utf8'));
+          if (s && typeof s.downloadsFolder === 'string' && s.downloadsFolder) return s.downloadsFolder;
+        }
+      } catch { /* ignore */ }
+      return join(os.homedir(), '.lmstudio', 'models');
+    })();
+    try {
+      if (existsSync(root)) {
+        for (const pub of readdirSync(root)) {
+          const pubPath = join(root, pub);
+          let st; try { st = statSync(pubPath); } catch { continue; }
+          if (!st.isDirectory()) {
+            if (pub.toLowerCase().endsWith('.gguf')) {
+              list.push({ id: pub.replace(/\.gguf$/i, ''), label: pub, sizeBytes: st.size, params: null, quant: null, contextLength: null, vision: false, path: pub });
+            }
+            continue;
+          }
+          for (const m of readdirSync(pubPath)) {
+            const mPath = join(pubPath, m);
+            let ms; try { ms = statSync(mPath); } catch { continue; }
+            if (ms.isDirectory()) {
+              let size = 0;
+              try { for (const f of readdirSync(mPath)) { const fp = join(mPath, f); const fs2 = statSync(fp); if (fs2.isFile()) size += fs2.size; } } catch { /* ignore */ }
+              list.push({ id: `${pub}/${m}`, label: m, sizeBytes: size, params: null, quant: null, contextLength: null, vision: false, path: `${pub}/${m}` });
+            } else if (m.toLowerCase().endsWith('.gguf')) {
+              list.push({ id: `${pub}/${m.replace(/\.gguf$/i, '')}`, label: m, sizeBytes: ms.size, params: null, quant: null, contextLength: null, vision: false, path: `${pub}/${m}` });
+            }
+          }
+        }
+      }
+    } catch { /* ignore — no models discoverable */ }
+  }
+  _lmCache = { ts: now, list };
+  return list;
+}
+
+// id → detail map, used by validation for real compatibility scoring.
+export function getLmStudioModelDetails() {
+  const map = {};
+  for (const m of getLmStudioModelList()) map[m.id] = m;
+  return map;
+}
+
+// Installed models discoverable on this device for a runtime.
+function getInstalledModels(id) {
+  if (id === 'lmstudio') return getLmStudioModelList().map((m) => m.id);
+  return [];
+}
+
 // Detect any OpenAI-compatible local server (LM Studio, vLLM, SGLang, llama.cpp).
-// Honest: only reports running:true when the server actually answers /models.
+// Honest: reports running:true only when the server actually answers /models.
+// When it is offline we still surface models installed on the device (so the
+// Playground can list them) and flag that the server must be started to run them.
 async function detectOpenAICompat(rt) {
   const cfg = getRuntimeExec(rt.id);
   const probe = await probeRuntime(rt.id);
-  if (!probe.running) {
+  const diskList = rt.id === 'lmstudio' ? getLmStudioModelList() : [];
+  const modelDetails = Object.fromEntries(diskList.map((m) => [m.id, m]));
+  if (probe.running) {
+    // Live /v1/models also advertises LM Studio's bundled embedding model; keep
+    // only the models we actually discovered on the device (excludes embeddings).
+    const allowed = new Set(diskList.map((m) => m.id));
+    const models = (probe.models.length ? probe.models : diskList.map((m) => m.id)).filter((id) => allowed.has(id));
     return {
-      id: rt.id, name: rt.name, type: 'local', running: false,
-      detected: probe.reachable, models: [], modelCount: 0,
-      note: probe.reachable ? `Reachable but not serving models (${cfg.baseUrl})` : `Not detected — start ${rt.name} and load a model`,
+      id: rt.id, name: rt.name, type: 'local', running: true, detected: true,
+      installed: true, models, modelCount: models.length, modelDetails, note: rt.note,
     };
   }
+  const models = diskList.map((m) => m.id);
+  const appInstalled = isAppInstalled(rt.id) === true;
   return {
-    id: rt.id, name: rt.name, type: 'local', running: true, detected: true,
-    models: probe.models, modelCount: probe.models.length, note: rt.note,
+    id: rt.id, name: rt.name, type: 'local', running: false, detected: probe.reachable,
+    installed: appInstalled || models.length > 0,
+    models, modelCount: models.length, modelDetails,
+    needsServer: appInstalled || models.length > 0,
+    note: appInstalled
+      ? (models.length
+          ? `${models.length} model(s) installed locally — start ${rt.name}'s Local Server to run them`
+          : `Installed — download a model or start ${rt.name}'s Local Server`)
+      : `Not detected — install ${rt.name} and load a model`,
   };
 }
 
@@ -256,11 +375,23 @@ export function startRuntime(id) {
       if (platform === 'linux') { spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref(); return { supported: true, ok: true, message: 'Starting Ollama server…', platform }; }
       return { supported: true, ok: false, message: `Auto-start for Ollama is not available on this platform (${platform}).` };
     }
-    if (id === 'lmstudio' && platform === 'darwin') {
-      const app = findDarwinApp('lmstudio');
-      if (!app) return { supported: true, ok: false, message: 'LM Studio (Bionic) is not installed in /Applications. Install it to enable auto-start.' };
-      spawn('open', ['-a', app], { detached: true, stdio: 'ignore' }).unref();
-      return { supported: true, ok: true, message: `Starting ${app}…`, platform, app };
+    if (id === 'lmstudio') {
+      // Prefer the real server launcher so the OpenAI-compatible Local Server
+      // actually comes up (opening the app alone does not start it).
+      const lms = getLmStudioCli();
+      if (lms) {
+        try {
+          spawn(lms, ['server', 'start'], { detached: true, stdio: 'ignore' }).unref();
+          return { supported: true, ok: true, message: 'Starting LM Studio Local Server (lms)…', platform, app: 'lms' };
+        } catch { /* fall through to opening the app */ }
+      }
+      if (platform === 'darwin') {
+        const app = findDarwinApp('lmstudio');
+        if (!app) return { supported: true, ok: false, message: 'LM Studio (Bionic) is not installed in /Applications. Install it to enable auto-start.' };
+        spawn('open', ['-a', app], { detached: true, stdio: 'ignore' }).unref();
+        return { supported: true, ok: true, message: `Starting ${app}…`, platform, app };
+      }
+      return { supported: true, ok: false, message: `Auto-start for ${rt.name} is not available on this platform (${platform}).` };
     }
     return { supported: true, ok: false, message: `Auto-start for ${rt.name} is not available on this platform (${platform}).` };
   } catch (err) {

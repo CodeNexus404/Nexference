@@ -16,7 +16,7 @@ import { notify } from '../core/notifications.js';
 // ═══════════════════════════════════════════════════════════════
 
 function relTime(iso) {
-  if (!iso) return 'unknown';
+  if (!iso) return '—';
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
@@ -39,7 +39,7 @@ function statusBadge(sourceStatus) {
 function capBadge(cap, val) {
   if (val === true) return `<span class="ml-cap on">${esc(cap)}</span>`;
   if (val === false) return `<span class="ml-cap off">${esc(cap)}</span>`;
-  return `<span class="ml-cap unk" title="unknown">${esc(cap)}?</span>`;
+  return ''; // unknown → omit rather than show a misleading "?"
 }
 
 function modelRowHTML(m, currentId) {
@@ -58,7 +58,7 @@ function modelRowHTML(m, currentId) {
         <span class="ml-prov">${esc(m.providerName || m.providerId)}</span>
         ${statusBadge(m.sourceStatus)}
         ${freeBadge}
-        ${m.capabilities && m.capabilities.chat ? '<span class="ml-cap on">chat</span>' : (m.capabilities && m.capabilities.chat === false ? '<span class="ml-cap off">non-chat</span>' : '<span class="ml-cap unk">chat?</span>')}
+        ${capBadge('chat', m.capabilities && m.capabilities.chat)}
       </div>
       <div class="ml-row-acts">
         <button class="btn btn2 ml-use" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">Use</button>
@@ -80,36 +80,33 @@ async function showDetails(providerId, modelId) {
   const detail = await modelService.getDetail(providerId, modelId);
   if (!detail) { notify.toast('Model details unavailable', 'warning'); return; }
   const prov = getProvider(providerId);
-  const fmt = (v) => (v === null || v === undefined || v === '') ? '<span class="ml-cap unk">unknown</span>' : esc(String(v));
+  const DASH = '—';
+  const fmt = (v) => (v === null || v === undefined || v === '') ? DASH : esc(String(v));
   const caps = detail.capabilities || {};
   const prov2 = detail.provenance || {};
-  const fetched = prov2.fetchedAt ? new Date(prov2.fetchedAt).toLocaleString() : 'unknown';
+  const fetched = prov2.fetchedAt ? new Date(prov2.fetchedAt).toLocaleString() : DASH;
+  const capBadges = ['chat', 'vision', 'reasoning', 'tools', 'embeddings']
+    .map((c) => capBadge(c, caps[c])).join('');
   const bodyHTML = `
     <div class="ml-detail">
       <div class="ml-detail-head">
         <h4 class="mono">${esc(detail.name || detail.id)}</h4>
         <span class="ml-id">${esc(detail.id)}</span>
       </div>
-      <div class="kv"><span>Provider</span><b>${esc(detail.providerName || detail.providerId)}</b></div>
-      <div class="kv"><span>Kind</span><b>${esc(detail.kind)}</b></div>
-      <div class="kv"><span>Source</span><b>${esc(detail.source || 'unknown')} · ${statusBadge(detail.sourceStatus)}</b></div>
-      <div class="kv"><span>Pricing</span><b>${detail.pricing ? esc(JSON.stringify(detail.pricing)) : 'unknown'}</b></div>
-      <div class="kv"><span>Free</span><b>${detail.isFree ? 'Yes' : (detail.isPaid ? 'No' : 'unknown')}</b></div>
+      <div class="kv"><span>Provider</span><b>${esc(detail.providerName || detail.providerId || DASH)}</b></div>
+      <div class="kv"><span>Kind</span><b>${esc(detail.kind || DASH)}</b></div>
+      <div class="kv"><span>Source</span><b>${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus)}</b></div>
+      <div class="kv"><span>Pricing</span><b>${detail.pricing ? esc(typeof detail.pricing === 'string' ? detail.pricing : JSON.stringify(detail.pricing)) : DASH}</b></div>
+      <div class="kv"><span>Free</span><b>${detail.isFree ? 'Yes' : (detail.isPaid ? 'No' : DASH)}</b></div>
       <div class="kv"><span>Context length</span><b>${fmt(detail.contextLength)}</b></div>
       <div class="kv"><span>Parameters</span><b>${fmt(detail.parameters)}</b></div>
       <div class="kv"><span>Size</span><b>${fmt(detail.size)}</b></div>
       <div class="kv"><span>Quantization</span><b>${fmt(detail.quantization)}</b></div>
-      <div class="kv"><span>Installed</span><b>${detail.installed ? 'Yes' : 'No'}</b></div>
+      <div class="kv"><span>Installed</span><b>${detail.installed === true ? 'Yes' : (detail.installed === false ? 'No' : DASH)}</b></div>
       <h4 style="margin:14px 0 6px">Capabilities</h4>
-      <div class="ml-caps">
-        ${capBadge('chat', caps.chat)}
-        ${capBadge('vision', caps.vision)}
-        ${capBadge('reasoning', caps.reasoning)}
-        ${capBadge('tools', caps.tools)}
-        ${capBadge('embeddings', caps.embeddings)}
-      </div>
+      <div class="ml-caps">${capBadges || '<span class="muted">No capability data reported.</span>'}</div>
       <h4 style="margin:14px 0 6px">Provenance</h4>
-      <div class="muted">Last fetched: ${esc(fetched)} · total in catalogue: ${esc(prov2.total ?? 'unknown')} · source: ${esc(prov2.source || 'unknown')}</div>
+      <div class="muted">Last fetched: ${esc(fetched)} · total in catalogue: ${esc(prov2.total != null ? prov2.total : DASH)} · source: ${esc(prov2.source || DASH)}</div>
       ${detail.recommendationReason ? `<div class="ml-rec-note">★ ${esc(detail.recommendationReason)}</div>` : ''}
     </div>`;
   openModal({ title: 'Model details', subtitle: `${esc(prov ? prov.name : detail.providerId)} · honest metadata only`, size: 'wide', bodyHTML });
@@ -342,7 +339,7 @@ export async function renderModelPickerUnified(host, providerId, opts = {}) {
         ${m.isFree ? '<span class="mp-free">free</span>' : '<span class="badge paid">paid</span>'}
         ${statusBadge(m.sourceStatus)}
         <span class="mp-id">${esc(m.id)}</span>
-        <button class="btn btn2 ml-det-sm" data-id="${esc(m.id)}" title="Details">ⓘ</button>
+        <span class="ml-det-sm" role="button" tabindex="0" data-id="${esc(m.id)}" title="Model details" aria-label="Model details">i</span>
       </button>`).join('');
     list.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', (e) => {
       if (e.target.closest('.ml-det-sm')) return;

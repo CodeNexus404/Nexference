@@ -3,9 +3,11 @@ import { getProvider } from '../providers/registry.js';
 import { Storage } from '../core/storage.js';
 import { workspace } from '../core/state.js';
 import { openModal } from './modal.js';
-import { openWorkflow } from '../config/workflow.js';
 import { renderModelPicker } from './modelPicker.js';
 import { notify } from '../core/notifications.js';
+import { configEngine } from '../config/engine.js';
+import { LocalSettingsRuntime, CopyableRuntime } from '../config/runtimeAdapter.js';
+import { recordActivity } from '../core/activityStore.js';
 
 // Provider configuration panel — opened when a provider card is clicked. Replaces
 // the old inline-card editing with a focused modal: API key (password + show/hide),
@@ -49,7 +51,7 @@ export function openProviderConfig(providerId) {
 
       <div class="modal-actions">
         <button class="btn btn2" data-act="test" type="button">Test Connection</button>
-        <button class="btn btn-go" data-act="continue" type="button">Continue →</button>
+        <button class="btn btn-go" data-act="apply" type="button">${provider.claudeCode ? 'Apply to Claude Code' : 'Show config'}</button>
       </div>
     </div>`;
 
@@ -91,9 +93,53 @@ export function openProviderConfig(providerId) {
         else notify.toast('Test unavailable', 'error');
       });
 
-      b.querySelector('[data-act="continue"]').addEventListener('click', () => {
-        ctrl.close();
-        openWorkflow({ initialProvider: providerId });
+      // Apply / show config — decided by provider compatibility with Claude Code
+      // (registry `claudeCode` flag), not by provider id:
+      // - Anthropic-compatible providers (anthropic, agentrouter, aerolink,
+      //   freemodel, tokenrouter, custom) write the built config directly to
+      //   settings.json (atomic + backup + verify on the server).
+      // - OpenAI/Gemini-style clients (openrouter, nvidia, groq, gemini, …) are
+      //   NOT written to settings.json. The generated JSON is shown in a copyable
+      //   dialog (tailored to the client by CopyableRuntime) so the user applies
+      //   it manually to the right client.
+      b.querySelector('[data-act="apply"]').addEventListener('click', async () => {
+        const key = keyInput.value;
+        const model = (b.querySelector(`.model-${providerId}`)?.value || '').trim();
+        if (!model) { notify.toast('Choose a model before applying.', 'warning'); return; }
+        if (!provider.publicModels && !key) { notify.toast('Add an API key before applying.', 'warning'); return; }
+        const baseUrl = provider.hasCustomUrl
+          ? (b.querySelector(`.base-url-${providerId}`)?.value || provider.baseUrl)
+          : provider.baseUrl;
+        const cfg = configEngine.buildClaudeSettings(provider, baseUrl, model, key);
+
+        if (provider.claudeCode) {
+          const ok = await LocalSettingsRuntime.write(cfg);
+          if (ok) {
+            Storage.setKey(providerId, key);
+            Storage.setModel(providerId, model);
+            workspace.applied = {
+              client: 'claude-code', connectionType: 'cloud', provider: providerId,
+              runtime: null, model, appliedAt: new Date().toISOString(), status: 'configured',
+            };
+            workspace.appliedProviderId = providerId;
+            workspace.activeProvider = providerId;
+            workspace.activeModel = model;
+            workspace.activeClient = 'claude-code';
+            Storage.setApplied(workspace.applied);
+            recordActivity('apply', `Applied ${provider.name} · model ${model} to Claude Code`);
+            notify.toast(`Applied ${provider.name} to Claude Code!`, 'success');
+            notify.log(`Applied ${provider.name} · model ${model} (backup saved)`, 't-ok');
+            if (window.renderWorkspace) window.renderWorkspace();
+            if (window.updateShellStatus) window.updateShellStatus();
+            ctrl.close();
+          }
+          return;
+        }
+
+        // Non-Claude-Code client: show the generated JSON in a copyable dialog.
+        // Do NOT write to settings.json.
+        CopyableRuntime.show(cfg, `${provider.name} config`);
+        recordActivity('copy-config', `Viewed ${provider.name} · model ${model} config (copy)`);
       });
     },
   });

@@ -488,7 +488,7 @@ export function renderWorkspace() {
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
   section.innerHTML = `
-    <div class="page-head">
+    <div class="page-head reveal-f">
       <div>
         <h1>${greet}</h1>
         <p>Nexference reads your environment — installed clients, local runtimes, models and hardware — and shows what you can safely configure.</p>
@@ -601,10 +601,18 @@ function renderWorkspaceFromEnv(env) {
   (hw.warnings || []).forEach((w) => recs.push(w));
 
   body.innerHTML = `
-    <div class="panel ws-health ${health.status || 'neutral'}">
+    <div class="ws-hero">
+      <div class="ws-kpi reveal-f" style="--d:.04s"><span class="kpi-ico">⌘</span><b>${installedClients.length}</b><span>Clients</span><small>installed &amp; detected</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.08s"><span class="kpi-ico">☁</span><b>${providersConfigured}</b><span>Providers</span><small>API keys configured</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.12s"><span class="kpi-ico">⚙</span><b>${runningRt.length}</b><span>Runtimes</span><small>running locally</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">◈</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
+    </div>
+
+    <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
       <div class="ws-health-head">
         <span class="ws-eyebrow">Environment Health</span>
         <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+        <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
       </div>
       <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
       <div class="health-factors">
@@ -612,7 +620,7 @@ function renderWorkspaceFromEnv(env) {
       </div>
     </div>
 
-    <div class="panel ws-config">
+    <div class="panel ws-config reveal" style="--d:.10s">
       <div class="ws-config-head">
         <span class="ws-eyebrow">Current Workspace</span>
         <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
@@ -630,30 +638,30 @@ function renderWorkspaceFromEnv(env) {
       </div>
     </div>
 
-    <div class="panel ws-summary">
+    <div class="panel ws-summary reveal" style="--d:.15s">
       <h3>Environment Overview</h3>
       <div class="stat-row"><div class="stat"><b>${installedClients.length}</b><span>clients detected</span></div><div class="stat"><b>${providersConfigured}</b><span>providers configured</span></div></div>
       <div class="stat-row"><div class="stat"><b>${runningRt.length}</b><span>runtimes running</span></div><div class="stat"><b>${models.length}</b><span>local models</span></div></div>
     </div>
 
-    <div class="panel ws-next">
+    <div class="panel ws-next reveal" style="--d:.20s">
       <h3>Recommendations</h3>
       <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
     </div>
 
-    <div class="panel ws-models" id="wsModelIntel">
+    <div class="panel ws-models reveal" id="wsModelIntel" style="--d:.25s">
       <h3>Model Intelligence</h3>
       <div class="muted">Loading model catalogue…</div>
     </div>
 
-    <div class="panel ws-profiles">
+    <div class="panel ws-profiles reveal" style="--d:.30s">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
       <div id="wsProfiles" class="ws-profile-list"></div>
       <button class="btn btn2" onclick="navigate('settings')">Manage profiles</button>
     </div>
 
-    <div class="panel ws-activity">
+    <div class="panel ws-activity reveal" style="--d:.35s">
       <div class="panel-h"><h3>Activity</h3><button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button></div>
       <div class="term"><div class="term-body" id="termOut"></div></div>
     </div>`;
@@ -672,6 +680,101 @@ function renderWorkspaceFromEnv(env) {
   }
 
   fillWsModelIntel();
+}
+
+// ── Workspace Health modal (v1.0.0) ───────────────────────────────
+// Uses the dedicated, honest /api/health report (categories + score). No
+// secrets are surfaced. Partial failures are shown explicitly, never hidden
+// behind a green overall status.
+const HEALTH_BADGE = {
+  healthy: 'configured', attention: 'browse', 'config-required': 'needs',
+  partial: 'browse', offline: 'unsupported', unknown: 'browse',
+};
+
+export async function openHealthModal() {
+  const { openModal } = await import('../components/modal.js');
+  openModal({
+    title: 'Workspace Health',
+    subtitle: 'Honest status across configuration, clients, runtimes, providers and execution.',
+    size: 'wide',
+    bodyHTML: '<div id="healthModalBody"><div class="muted">Loading workspace health…</div></div>',
+    onMount: async () => {
+      try {
+        const res = await fetch('/api/health');
+        const h = await res.json();
+        const body = document.getElementById('healthModalBody');
+        if (!body) return;
+        const cats = Object.entries(h.categories || {}).map(([name, c]) => `
+          <div class="health-cat">
+            <div class="health-cat-head">
+              <span class="badge ${HEALTH_BADGE[c.state] || 'browse'}">${esc(c.state)}</span>
+              <b>${esc(name)}</b>
+            </div>
+            <p class="muted">${esc(c.summary || '')}</p>
+            <ul class="health-items">
+              ${(c.items || []).map((it) => `<li class="${it.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(it.label)}</b><span class="muted">${esc(it.detail || '')}</span></div></li>`).join('')}
+            </ul>
+          </div>`).join('');
+        const issues = (h.issues || []).length
+          ? `<div class="health-issues"><h4>Issues</h4>${h.issues.map((i) => `<div class="ws-next-item">${esc(i.message)}</div>`).join('')}</div>` : '';
+        const recs = (h.recommendations || []).length
+          ? `<div class="health-issues"><h4>Recommendations</h4>${h.recommendations.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>` : '';
+        body.innerHTML = `
+          <div class="health-overall">
+            <div class="health-score ${h.overall}"><b>${h.score}</b><span>/100</span></div>
+            <div><span class="badge ${HEALTH_BADGE[h.overall] || 'browse'} big">${esc(h.overall)}</span>
+            <p class="muted">Generated ${esc(new Date(h.generatedAt).toLocaleTimeString())}</p></div>
+          </div>
+          <div class="health-cats">${cats}</div>
+          ${issues}${recs}`;
+      } catch {
+        const body = document.getElementById('healthModalBody');
+        if (body) body.innerHTML = '<div class="muted">Unable to load workspace health. Check the server connection.</div>';
+      }
+    },
+  });
+}
+
+// ── Activity modal (v1.0.0) ───────────────────────────────────────
+// Unified feed: server-side events (/api/activity) merged with the existing
+// client-side activity store. Fully secret-free.
+export async function openActivityModal() {
+  const { openModal } = await import('../components/modal.js');
+  const { getActivities } = await import('../core/activityStore.js');
+  openModal({
+    title: 'Activity',
+    subtitle: 'Recent important workspace events — configuration, backups, runtimes, executions.',
+    size: 'wide',
+    bodyHTML: '<div id="activityModalBody"><div class="muted">Loading activity…</div></div>',
+    onMount: async () => {
+      try {
+        const [serverRes, local] = await Promise.all([
+          fetch('/api/activity').then((r) => r.json()).catch(() => ({ activities: [] })),
+          Promise.resolve(getActivities()),
+        ]);
+        const merged = [
+          ...(serverRes.activities || []).map((a) => ({ ...a, origin: 'server' })),
+          ...local.map((a) => ({ ...a, origin: 'client', category: a.kind, summary: a.message, timestamp: a.at, status: a.kind === 'info' ? 'info' : (a.kind === 'apply' || a.kind === 'restore' ? 'success' : a.kind === 'delete' ? 'warning' : 'info') })),
+        ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 40);
+
+        const body = document.getElementById('activityModalBody');
+        if (!body) return;
+        if (!merged.length) { body.innerHTML = '<div class="muted">No activity recorded yet.</div>'; return; }
+        const icon = { success: '✓', warning: '⚠', error: '✕', info: '•' };
+        body.innerHTML = `<div class="activity-list">${merged.map((a) => `
+          <div class="activity-row activity-${esc(a.status)}">
+            <span class="act-ico">${icon[a.status] || '•'}</span>
+            <div class="act-msg">
+              <div>${esc(a.summary)}</div>
+              <div class="muted" style="font-size:11px">${esc(a.category || 'event')} · ${esc(new Date(a.timestamp).toLocaleString())}</div>
+            </div>
+          </div>`).join('')}</div>`;
+      } catch {
+        const body = document.getElementById('activityModalBody');
+        if (body) body.innerHTML = '<div class="muted">Unable to load activity.</div>';
+      }
+    },
+  });
 }
 
 async function fillWsModelIntel() {
@@ -1287,13 +1390,13 @@ export async function renderLocalAI() {
         const running = !!rt.running;
         const detected = !!rt.detected;
         const status = planned ? 'planned' : (running ? 'running' : (detected ? 'detected' : 'offline'));
-        const badge = planned ? 'Coming soon' : (running ? `${rt.modelCount} models` : (detected ? 'Detected' : 'Offline'));
+        const badge = planned ? 'Coming soon' : (running ? `${rt.modelCount} models` : (rt.modelCount ? `${rt.modelCount} installed` : (detected ? 'Detected' : 'Offline')));
         const stateText = planned ? 'Planned' : (running ? 'Running' : (detected ? 'Detected' : 'Offline'));
         const initial = (rt.name || '?').trim().charAt(0).toUpperCase();
         const logoHTML = `<span class="rt-logo-monogram">${esc(initial)}</span>` + (rt.logo
           ? `<img class="rt-logo-img" src="${esc(rt.logo)}" alt="${esc(rt.name)} logo" loading="lazy" onerror="this.closest('.rt-logo').classList.remove('has-img');this.remove()">`
           : '');
-        const modelsHTML = running && rt.models && rt.models.length
+        const modelsHTML = rt.models && rt.models.length
           ? `<div class="rt-models">${rt.models.slice(0, 8).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 8 ? `<span class="chipx">+${rt.models.length - 8}</span>` : ''}</div>`
           : '';
         return `<div class="panel rt-card ${running ? 'live' : ''} ${status}">
@@ -1729,79 +1832,122 @@ async function openExecutionHistory() {
     </div>`).join('') : '<div class="muted">No executions yet.</div>'}</div>`;
   openModal({ title: 'Execution history', size: 'wide', bodyHTML: body });
 }
+// Exposed globally so inline onclick handlers (Workspace "View all", Playground History) resolve it.
+window.openExecutionHistory = openExecutionHistory;
 
 export async function renderPlayground() {
   updateCrumb('Playground');
   const section = document.getElementById('page-playground');
   if (!section) return;
-  if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
-  const draft = historyStore.loadDraft();
-  const fmtMs = (ms) => (ms == null ? '—' : (ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms'));
+
+  // Tear down any in-flight run from a previous mount.
+  if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+  if (pgES && pgES.abort) { try { pgES.abort(); } catch { /* ignore */ } }
+  pgES = null; pgExecId = null;
+
+  const draft = historyStore.loadDraft() || {};
+  const state = {
+    source: draft.source || null,
+    providerId: draft.providerId || (PROVIDERS[0] && PROVIDERS[0].id),
+    runtimeId: draft.runtimeId || 'ollama',
+    model: draft.model || '',
+    systemPrompt: draft.systemPrompt || '',
+    prompt: draft.prompt || '',
+    parameters: draft.parameters || { temperature: 0.7, maxTokens: 1024, topP: 1 },
+  };
+
+  // ── Capabilities (cloud providers + local runtimes) ──
+  let providerOptions = '', runtimeOptions = '', localRunning = false;
+  try {
+    const caps = await playgroundService.capabilities();
+    const cloud = (caps.cloud || []).filter((c) => c.supportsExecution);
+    const local = (caps.local || []).filter((c) => c.supportsExecution);
+    localRunning = local.some((r) => r.running);
+    providerOptions = cloud.length
+      ? cloud.map((c) => `<option value="${esc(c.id)}">${esc(c.name || c.id)}</option>`).join('')
+      : PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    runtimeOptions = local.length
+      ? local.map((r) => `<option value="${esc(r.id)}">${esc(r.name || r.id)}</option>`).join('')
+      : '<option value="ollama">Ollama</option>';
+  } catch {
+    providerOptions = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    runtimeOptions = '<option value="ollama">Ollama</option>';
+  }
+  if (!state.source) state.source = localRunning ? 'local' : 'cloud';
+
+  const fmtMs = (ms) => (ms == null ? '—' : ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms');
 
   section.innerHTML = `
-    <div class="page-head">
+    <div class="page-head reveal-f">
       <div>
         <h1>Playground</h1>
-        <p>Try cloud providers and local runtimes honestly — validate before you send, then stream, measure and compare.</p>
+        <p>Validate, then stream real completions from cloud providers and local runtimes — honestly, with live compatibility and metrics.</p>
       </div>
       <div class="pg-head-actions">
-        <button class="btn ghost sm" onclick="openExecutionHistory()">History</button>
-        <button class="btn ghost sm" onclick="clearPlayground()">Clear</button>
+        <button class="btn ghost sm" id="pgHistory" type="button">History</button>
+        <button class="btn ghost sm" id="pgClear" type="button">Clear</button>
       </div>
     </div>
+
     <div class="pg">
-      <div class="panel pg-config">
+      <div class="panel pg-config lift reveal" style="--d:.05s">
         <div class="seg">
-          <button class="seg-btn" data-src="cloud">Cloud</button>
-          <button class="seg-btn" data-src="local">Local</button>
+          <button class="seg-btn" data-src="cloud" type="button">Cloud</button>
+          <button class="seg-btn" data-src="local" type="button">Local</button>
         </div>
+
         <div class="pg-field" id="pgProviderField">
           <label>Provider</label>
-          <select id="pgProvider" class="inp"></select>
+          <select id="pgProvider" class="inp">${providerOptions}</select>
+          <div id="pgModelPicker"></div>
         </div>
+
         <div class="pg-field" id="pgRuntimeField" hidden>
           <label>Runtime</label>
-          <select id="pgRuntime" class="inp"></select>
-        </div>
-        <div class="pg-field">
-          <label>Model</label>
-          <input id="pgModel" class="inp" placeholder="model id (e.g. gpt-4o-mini)" />
-          <div id="pgModelPicker"></div>
+          <select id="pgRuntime" class="inp">${runtimeOptions}</select>
           <div id="pgLocalModels"></div>
         </div>
+
         <div class="pg-field">
-          <label>System prompt</label>
+          <label>Model</label>
+          <input id="pgModel" class="inp" placeholder="model id (e.g. claude-3-5-sonnet)" />
+        </div>
+
+        <div class="pg-field">
+          <label>System prompt <span class="muted">(optional)</span></label>
           <textarea id="pgSystem" class="inp" rows="3" placeholder="Optional system instructions…"></textarea>
         </div>
+
         <div class="pg-params">
           <label>Parameters</label>
           <div class="pg-param"><span>Temperature <b id="pgTempVal"></b></span><input type="range" id="pgTemp" min="0" max="2" step="0.1" /></div>
           <div class="pg-param"><span>Max tokens <b id="pgMaxVal"></b></span><input type="range" id="pgMax" min="1" max="8192" step="1" /></div>
           <div class="pg-param"><span>Top P <b id="pgTopVal"></b></span><input type="range" id="pgTop" min="0" max="1" step="0.05" /></div>
-          <button class="btn ghost sm" id="pgResetParams">Reset</button>
+          <button class="btn ghost sm" id="pgResetParams" type="button">Reset</button>
         </div>
+
         <div class="pg-status" id="pgStatus"><div class="muted">Checking compatibility…</div></div>
-        <div class="pg-actions">
-          <button class="btn btn-go" id="pgRun">Run</button>
-          <button class="btn" id="pgStop" hidden>Stop</button>
-        </div>
       </div>
-      <div class="panel pg-out">
+
+      <div class="panel pg-out lift reveal" style="--d:.12s">
         <div class="pg-out-head">
           <span>Output</span>
           <div class="pg-out-acts">
-            <button class="btn ghost sm" id="pgCopy" hidden>Copy</button>
-            <button class="btn ghost sm" id="pgRetry" hidden>Retry</button>
-            <button class="btn ghost sm" id="pgUseConfig" hidden>Use in Config</button>
-            <button class="btn ghost sm" id="pgSaveProfile" hidden>Save as Profile</button>
-            <button class="btn ghost sm" id="pgCompare" hidden>Compare</button>
+            <button class="btn ghost sm" id="pgCopy" type="button" hidden>Copy</button>
+            <button class="btn ghost sm" id="pgRetry" type="button" hidden>Retry</button>
+            <button class="btn ghost sm" id="pgUseConfig" type="button" hidden>Use in Config</button>
+            <button class="btn ghost sm" id="pgSaveProfile" type="button" hidden>Save as Profile</button>
+            <button class="btn ghost sm" id="pgCompare" type="button" hidden>Compare</button>
           </div>
         </div>
         <div class="pg-metrics" id="pgMetrics" hidden></div>
         <div class="pg-content muted" id="pgContent">Run a prompt to see output.</div>
         <div class="pg-prompt">
           <textarea id="pgPrompt" class="inp" rows="3" placeholder="Enter a prompt… (⌘/Ctrl+Enter to run)"></textarea>
-          <button class="btn btn-go" id="pgSend">Send</button>
+          <div class="pg-prompt-actions">
+            <button class="btn" id="pgStop" type="button" hidden>Stop</button>
+            <button class="btn btn-go" id="pgSend" type="button">Run</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -1821,98 +1967,38 @@ export async function renderPlayground() {
   const statusEl = $('pgStatus');
   const contentEl = $('pgContent');
   const metricsEl = $('pgMetrics');
-  const runBtn = $('pgRun'), stopBtn = $('pgStop');
-  const copyBtn = $('pgCopy'), retryBtn = $('pgRetry'), useCfgBtn = $('pgUseConfig'), saveProfBtn = $('pgSaveProfile'), compareBtn = $('pgCompare');
+  const runBtn = $('pgSend'), stopBtn = $('pgStop');
+  const copyBtn = $('pgCopy'), retryBtn = $('pgRetry'), useCfgBtn = $('pgUseConfig'),
+        saveProfBtn = $('pgSaveProfile'), compareBtn = $('pgCompare');
 
-  const state = { ...draft };
+  function persist() { historyStore.saveDraft(state); }
 
   function setSelect(sel, val, fallback) {
     const ok = Array.from(sel.options).some((o) => o.value === val);
     sel.value = ok ? val : fallback;
   }
-
-  try {
-    const caps = await playgroundService.capabilities();
-    pgSupported.cloud = new Set((caps.cloud || []).filter((c) => c.supportsExecution).map((c) => c.id));
-    pgSupported.local = new Set((caps.local || []).filter((c) => c.supportsExecution).map((c) => c.id));
-    providerSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}${pgSupported.cloud.has(p.id) ? '' : ' · discovery only'}</option>`).join('');
-    const locs = (caps.local || []).filter((c) => c.supportsExecution);
-    runtimeSel.innerHTML = locs.length ? locs.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('') : `<option value="">No executable runtime</option>`;
-  } catch {
-    providerSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
-    runtimeSel.innerHTML = `<option value="ollama">Ollama</option>`;
-  }
-  setSelect(providerSel, state.providerId, providerSel.options[0]?.value || 'openrouter');
-  setSelect(runtimeSel, state.runtimeId, runtimeSel.options[0]?.value || 'ollama');
-
-  function mountCloudPicker() {
-    modelPickerHost.innerHTML = '';
-    localModelsHost.innerHTML = '';
-    if (!providerSel.value) return;
-    renderModelPicker(modelPickerHost, providerSel.value, {
-      includePaid: true, showPaidToggle: false, current: modelInput.value,
-      onSelect: (id) => { modelInput.value = id; state.model = id; persist(); scheduleValidate(); },
-    });
-  }
-  async function loadLocalModels() {
-    modelPickerHost.innerHTML = '';
-    localModelsHost.innerHTML = '<div class="muted">Detecting installed models…</div>';
-    try {
-      const res = await fetch('/api/local-runtimes');
-      const { runtimes } = await res.json();
-      const rt = (runtimes || []).find((r) => r.id === runtimeSel.value);
-      const models = rt?.models || [];
-      if (!models.length) { localModelsHost.innerHTML = '<div class="muted">No models detected — start the runtime and pull a model.</div>'; return; }
-      localModelsHost.innerHTML = '<div class="mp-list">' + models.map((m) => `<button type="button" class="mp-item" data-m="${esc(m)}"><span class="mp-name">${esc(m)}</span></button>`).join('') + '</div>';
-      localModelsHost.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', () => { modelInput.value = b.dataset.m; state.model = b.dataset.m; persist(); scheduleValidate(); }));
-    } catch { localModelsHost.innerHTML = '<div class="muted">Could not detect local models.</div>'; }
-  }
-
-  function setSource(src) {
-    state.source = src;
-    sourceSeg.forEach((b) => b.classList.toggle('active', b.dataset.src === src));
-    const cloud = src === 'cloud';
-    providerField.hidden = !cloud;
-    runtimeField.hidden = cloud;
-    if (cloud) mountCloudPicker(); else loadLocalModels();
-    scheduleValidate();
-  }
-  sourceSeg.forEach((b) => b.addEventListener('click', () => setSource(b.dataset.src)));
-
-  modelInput.addEventListener('input', () => { state.model = modelInput.value.trim(); persist(); scheduleValidate(); });
-  providerSel.addEventListener('change', () => { state.providerId = providerSel.value; if (state.source === 'cloud') mountCloudPicker(); persist(); scheduleValidate(); });
-  runtimeSel.addEventListener('change', () => { state.runtimeId = runtimeSel.value; if (state.source === 'local') loadLocalModels(); persist(); scheduleValidate(); });
-  systemInput.addEventListener('input', () => { state.systemPrompt = systemInput.value; persist(); });
-  promptInput.addEventListener('input', () => { state.prompt = promptInput.value; persist(); });
-
-  function syncParamLabels() { $('pgTempVal').textContent = (+temp.value).toFixed(1); $('pgMaxVal').textContent = maxT.value; $('pgTopVal').textContent = (+topP.value).toFixed(2); }
-  function readParams() { state.parameters = { temperature: +temp.value, maxTokens: +maxT.value, topP: +topP.value }; persist(); }
-  [temp, maxT, topP].forEach((el) => el.addEventListener('input', () => { syncParamLabels(); readParams(); }));
-  $('pgResetParams').addEventListener('click', () => { temp.value = 0.7; maxT.value = 1024; topP.value = 1; syncParamLabels(); readParams(); });
-
-  modelInput.value = state.model || '';
-  systemInput.value = state.systemPrompt || '';
-  promptInput.value = state.prompt || '';
-  temp.value = state.parameters.temperature; maxT.value = state.parameters.maxTokens; topP.value = state.parameters.topP;
-  syncParamLabels();
-  setSource(state.source || 'cloud');
-
-  function persist() { historyStore.saveDraft(state); }
+  setSelect(providerSel, state.providerId, providerSel.options[0] && providerSel.options[0].value);
+  setSelect(runtimeSel, state.runtimeId, runtimeSel.options[0] && runtimeSel.options[0].value);
 
   function buildReq() {
-    const base = {
+    const req = {
       source: state.source,
       model: state.model || '',
-      systemPrompt: state.systemPrompt || '',
+      systemPrompt: systemInput.value,
       prompt: promptInput.value,
       parameters: { ...state.parameters },
       stream: true,
     };
-    if (state.source === 'cloud') { base.providerId = providerSel.value; base.key = Storage.getKey(providerSel.value) || ''; }
-    else { base.runtimeId = runtimeSel.value; }
-    return base;
+    if (state.source === 'cloud') {
+      req.providerId = providerSel.value;
+      req.key = Storage.getKey(providerSel.value) || '';
+    } else {
+      req.runtimeId = runtimeSel.value;
+    }
+    return req;
   }
 
+  // ── Live compatibility check ──
   let valTimer = null;
   function scheduleValidate() { clearTimeout(valTimer); valTimer = setTimeout(updateStatus, 350); }
   async function updateStatus() {
@@ -1930,33 +2016,137 @@ export async function renderPlayground() {
       const head = `<div class="pg-status-head"><b>Compatibility</b> · score <span class="pg-score">${v.score ?? 0}</span> · <span class="pg-level">${esc(v.level)}</span></div>`;
       statusEl.innerHTML = head + (items.length ? `<ul class="pg-check">${items.join('')}</ul>` : '');
       return v;
-    } catch (e) { statusEl.innerHTML = `<div class="muted">Validation error: ${esc(e.message)}</div>`; return null; }
+    } catch (e) {
+      statusEl.innerHTML = `<div class="muted">Validation error: ${esc(e.message)}</div>`;
+      return null;
+    }
   }
 
   function renderMetrics(m, usage) {
-    if (!m) return;
+    if (!m && !usage) return;
     const rows = [];
-    if (m.totalDurationMs != null) rows.push(['Duration', fmtMs(m.totalDurationMs)]);
-    if (m.timeToFirstTokenMs != null) rows.push(['Time to first token', fmtMs(m.timeToFirstTokenMs)]);
-    if (m.inputTokens != null) rows.push(['Input tokens', m.inputTokens]);
-    if (m.outputTokens != null) rows.push(['Output tokens', m.outputTokens]);
-    if (m.tokensPerSecond != null) rows.push(['Speed', m.tokensPerSecond.toFixed(1) + ' tok/s']);
-    if (usage && usage.latencyMs != null && m.providerReportedLatencyMs == null) rows.push(['Provider latency', fmtMs(usage.latencyMs)]);
+    if (m && m.totalDurationMs != null) rows.push(['Duration', fmtMs(m.totalDurationMs)]);
+    if (m && m.timeToFirstTokenMs != null) rows.push(['Time to first token', fmtMs(m.timeToFirstTokenMs)]);
+    if (m && m.inputTokens != null) rows.push(['Input tokens', m.inputTokens]);
+    if (m && m.outputTokens != null) rows.push(['Output tokens', m.outputTokens]);
+    if (m && m.tokensPerSecond != null) rows.push(['Speed', m.tokensPerSecond.toFixed(1) + ' tok/s']);
+    if (usage && usage.latencyMs != null && !(m && m.providerReportedLatencyMs != null)) rows.push(['Provider latency', fmtMs(usage.latencyMs)]);
     metricsEl.hidden = false;
     metricsEl.innerHTML = `<div class="pg-metrics-head">Metrics</div><div class="pg-metrics-grid">${rows.map((r) => `<div class="pg-metric"><span>${esc(r[0])}</span><b>${esc(String(r[1]))}</b></div>`).join('')}</div>`;
   }
 
-  function finishRun(success) {
-    if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
-    if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
-    stopBtn.hidden = true; runBtn.disabled = false; runBtn.classList.remove('spinning');
-    [copyBtn, retryBtn, useCfgBtn, saveProfBtn, compareBtn].forEach((b) => (b.hidden = false));
-    if (success) notify.toast('Execution complete', 'success');
+  function updateLive(start, len) {
+    const el = Date.now() - start;
+    const spd = el > 0 ? Math.round((len / 4) / (el / 1000)) : 0;
+    const d = document.getElementById('pgLiveDur'), s = document.getElementById('pgLiveSpd');
+    if (d) d.textContent = el >= 1000 ? (el / 1000).toFixed(2) + 's' : Math.round(el) + 'ms';
+    if (s) s.textContent = spd > 0 ? spd.toFixed(1) + ' tok/s (live)' : 'measuring…';
+  }
+
+  // ── Source selection (cloud / local) ──
+  function setSource(src) {
+    state.source = src;
+    sourceSeg.forEach((b) => b.classList.toggle('active', b.dataset.src === src));
+    const cloud = src === 'cloud';
+    providerField.hidden = !cloud;
+    runtimeField.hidden = cloud;
+    if (cloud) mountCloudPicker(); else loadLocalModels();
+    scheduleValidate();
+  }
+  sourceSeg.forEach((b) => b.addEventListener('click', () => setSource(b.dataset.src)));
+
+  function mountCloudPicker() {
+    modelPickerHost.innerHTML = '';
+    localModelsHost.innerHTML = '';
+    if (!providerSel.value) return;
+    renderModelPicker(modelPickerHost, providerSel.value, {
+      includePaid: true, showPaidToggle: false, current: modelInput.value,
+      onSelect: (id) => { modelInput.value = id; state.model = id; persist(); scheduleValidate(); },
+    });
+  }
+
+  async function loadLocalModels() {
+    modelPickerHost.innerHTML = '';
+    localModelsHost.innerHTML = '<div class="muted">Detecting installed models…</div>';
+    try {
+      const { runtimes } = await fetch('/api/local-runtimes').then((r) => r.json());
+      const rt = (runtimes || []).find((r) => r.id === runtimeSel.value);
+      const models = rt && rt.models ? rt.models : [];
+      if (!models.length) {
+        localModelsHost.innerHTML = '<div class="muted">No models detected for this runtime.</div>';
+        return;
+      }
+      const hint = rt && rt.needsServer
+        ? `<div class="mp-hint">${esc(rt.name || 'This runtime')}'s Local Server is offline — start it in the ${esc(rt.name || 'app')} app (and load a model) to run these. They're listed from your device.</div>`
+        : '';
+      localModelsHost.innerHTML = hint + '<div class="mp-list">' + models.map((m) =>
+        `<button type="button" class="mp-item" data-m="${esc(m)}"><span class="mp-name">${esc(m)}</span></button>`).join('') + '</div>';
+      localModelsHost.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', () => {
+        modelInput.value = b.dataset.m; state.model = b.dataset.m; persist(); scheduleValidate();
+      }));
+      if (!state.model && models[0]) { modelInput.value = models[0]; state.model = models[0]; persist(); }
+    } catch {
+      localModelsHost.innerHTML = '<div class="muted">Could not detect local models.</div>';
+    }
+  }
+
+  // ── Streaming (fetch + ReadableStream reader) ──
+  async function streamExecution(id) {
+    const ctrl = new AbortController();
+    pgES = ctrl;
+    const res = await fetch('/api/executions/' + encodeURIComponent(id) + '/stream', { signal: ctrl.signal });
+    if (!res.ok || !res.body) throw new Error('Stream failed to open');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', full = '';
+    const start = Date.now();
+    pgLiveTimer = setInterval(() => updateLive(start, full.length), 200);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          const t = line.trim();
+          if (!t.startsWith('data:')) continue;
+          const data = t.slice(5).trim();
+          if (!data) continue;
+          let ev; try { ev = JSON.parse(data); } catch { continue; }
+          if (ev.type === 'token') {
+            full += (ev.data && ev.data.delta) || '';
+            contentEl.textContent = full;
+          } else if (ev.type === 'complete') {
+            clearInterval(pgLiveTimer); pgLiveTimer = null; pgES = null;
+            contentEl.className = 'pg-content';
+            contentEl.innerHTML = miniMarkdown((ev.data && ev.data.content) || '');
+            renderMetrics(ev.data && ev.data.metrics, ev.data && ev.data.usage);
+            finishRun(true);
+            return;
+          } else if (ev.type === 'error') {
+            clearInterval(pgLiveTimer); pgLiveTimer = null; pgES = null;
+            contentEl.className = 'pg-content err';
+            contentEl.textContent = (ev.data && ev.data.message) || 'Execution failed.';
+            finishRun(false);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        clearInterval(pgLiveTimer); pgLiveTimer = null; pgES = null;
+        contentEl.className = 'pg-content err';
+        contentEl.textContent = e.message || 'Stream interrupted.';
+        finishRun(false);
+      }
+    }
   }
 
   async function run() {
     const prompt = promptInput.value.trim();
     if (!prompt) { notify.toast('Enter a prompt first', 'warning'); return; }
+    try { localStorage.setItem('nx_pg_active', '1'); } catch { /* ignore */ }
     persist();
     const req = buildReq();
     runBtn.disabled = true; runBtn.classList.add('spinning');
@@ -1965,41 +2155,68 @@ export async function renderPlayground() {
     metricsEl.hidden = false;
     metricsEl.innerHTML = `<div class="pg-metrics-head"><span class="pg-live-dot"></span>Live</div><div class="pg-metrics-grid"><div class="pg-metric"><span>Elapsed</span><b id="pgLiveDur">0ms</b></div><div class="pg-metric"><span>Speed</span><b id="pgLiveSpd">measuring…</b></div></div>`;
     [copyBtn, retryBtn, useCfgBtn, saveProfBtn, compareBtn].forEach((b) => (b.hidden = true));
-    execStream(req, {
-      onToken: (buf) => { contentEl.textContent = buf; },
-      onLive: ({ elapsedMs, speed }) => {
-        const d = document.getElementById('pgLiveDur');
-        const s = document.getElementById('pgLiveSpd');
-        if (d) d.textContent = elapsedMs >= 1000 ? (elapsedMs / 1000).toFixed(2) + 's' : Math.round(elapsedMs) + 'ms';
-        if (s) s.textContent = speed > 0 ? speed.toFixed(1) + ' tok/s (live)' : 'measuring…';
-      },
-      onDone: ({ content, metrics, usage }) => {
-        contentEl.className = 'pg-content'; contentEl.innerHTML = miniMarkdown(content);
-        renderMetrics(metrics, usage); finishRun(true);
-      },
-      onError: (validation, execFailed, msg) => {
+    try {
+      const v = await playgroundService.validate(req);
+      if (!v || !v.executable) {
         contentEl.className = 'pg-content err';
-        contentEl.textContent = msg || (validation && (validation.reasons || []).join(' ')) || 'Execution failed.';
+        contentEl.textContent = [...(v && v.requiredConfiguration || []), ...(v && v.reasons || [])].filter(Boolean).join(' ') || 'This configuration is not executable.';
         finishRun(false);
-      },
-    });
+        return;
+      }
+      const created = await playgroundService.create(req);
+      if (!created.executable || !created.executionId) {
+        contentEl.className = 'pg-content err';
+        contentEl.textContent = (created.validation && (created.validation.reasons || []).join(' ')) || 'Execution could not be started.';
+        finishRun(false);
+        return;
+      }
+      pgExecId = created.executionId;
+      await streamExecution(pgExecId);
+    } catch (e) {
+      contentEl.className = 'pg-content err';
+      contentEl.textContent = e.message || 'Execution failed.';
+      finishRun(false);
+    }
   }
 
   function stop() {
+    try { localStorage.removeItem('nx_pg_active'); } catch { /* ignore */ }
     if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
     if (pgExecId) playgroundService.cancel(pgExecId).catch(() => {});
-    if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
+    if (pgES && pgES.abort) { try { pgES.abort(); } catch { /* ignore */ } pgES = null; }
     contentEl.className = 'pg-content';
     stopBtn.hidden = true; runBtn.disabled = false; runBtn.classList.remove('spinning');
   }
 
+  function finishRun(success) {
+    try { localStorage.removeItem('nx_pg_active'); } catch { /* ignore */ }
+    if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+    if (pgES && pgES.abort) { try { pgES.abort(); } catch { /* ignore */ } pgES = null; }
+    stopBtn.hidden = true; runBtn.disabled = false; runBtn.classList.remove('spinning');
+    [copyBtn, retryBtn, useCfgBtn, saveProfBtn, compareBtn].forEach((b) => (b.hidden = false));
+    if (success) notify.toast('Execution complete', 'success');
+  }
+
+  function clearPlayground() {
+    historyStore.clearDraft();
+    pgExecId = null;
+    if (pgES && pgES.abort) { try { pgES.abort(); } catch { /* ignore */ } pgES = null; }
+    if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+    notify.toast('Playground cleared', 'info');
+    router.navigate('playground');
+  }
+
+  // ── Wiring ──
   runBtn.addEventListener('click', run);
   stopBtn.addEventListener('click', stop);
-  $('pgSend').addEventListener('click', run);
   promptInput.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); } });
-  $('pgClear').addEventListener('click', () => { historyStore.clearDraft(); pgExecId = null; if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; } notify.toast('Playground cleared', 'info'); router.navigate('playground'); });
+  $('pgHistory').addEventListener('click', openExecutionHistory);
+  $('pgClear').addEventListener('click', clearPlayground);
 
-  copyBtn.addEventListener('click', () => { navigator.clipboard?.writeText(contentEl.textContent).then(() => notify.toast('Copied', 'success')).catch(() => {}); });
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard && navigator.clipboard.writeText(contentEl.textContent)
+      .then(() => notify.toast('Copied', 'success')).catch(() => {});
+  });
   retryBtn.addEventListener('click', run);
   useCfgBtn.addEventListener('click', () => {
     openWorkflow({
@@ -2013,7 +2230,14 @@ export async function renderPlayground() {
   saveProfBtn.addEventListener('click', () => {
     const name = window.prompt('Profile name');
     if (!name) return;
-    Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name, client: 'claude-code', connectionType: state.source === 'local' ? 'local' : 'cloud', sourceType: state.source === 'local' ? 'local' : 'cloud', provider: state.source === 'cloud' ? providerSel.value : null, runtime: state.source === 'local' ? runtimeSel.value : null, model: state.model || null });
+    Storage.saveProfile({
+      id: 'p_' + Date.now().toString(36), name, client: 'claude-code',
+      connectionType: state.source === 'local' ? 'local' : 'cloud',
+      sourceType: state.source === 'local' ? 'local' : 'cloud',
+      provider: state.source === 'cloud' ? providerSel.value : null,
+      runtime: state.source === 'local' ? runtimeSel.value : null,
+      model: state.model || null,
+    });
     notify.toast(`Saved profile “${name}”`, 'success');
   });
   compareBtn.addEventListener('click', openCompareModal);
@@ -2023,12 +2247,13 @@ export async function renderPlayground() {
     const body = `<div class="pg-cmp">
       <p class="muted">Compare the same prompt across multiple models. Add targets, then run.</p>
       <div id="cmpList" class="pg-cmp-list"></div>
-      <button class="btn ghost sm" id="cmpAdd">+ Add model</button>
+      <button class="btn ghost sm" id="cmpAdd" type="button">+ Add model</button>
       <div id="cmpAddForm" class="pg-cmp-add" hidden>
         <select id="cmpSrc"><option value="cloud">Cloud</option><option value="local">Local</option></select>
-        <select id="cmpProv"></select>
+        <select id="cmpProv">${providerOptions}</select>
+        <select id="cmpRt">${runtimeOptions}</select>
         <input id="cmpModel" class="inp" placeholder="model id" />
-        <button class="btn ghost sm" id="cmpAddOk">Add</button>
+        <button class="btn ghost sm" id="cmpAddOk" type="button">Add</button>
       </div>
       <div id="cmpResults" class="pg-cmp-results" hidden></div>
     </div>`;
@@ -2037,23 +2262,27 @@ export async function renderPlayground() {
       onMount: (b) => {
         const listEl = b.querySelector('#cmpList');
         const draw = () => {
-          listEl.innerHTML = targets.map((t, i) => `<div class="pg-cmp-target"><b>#${i + 1}</b> ${esc(t.source === 'cloud' ? (t.providerId + ' / ' + (t.model || '?')) : (t.runtimeId + ' / ' + (t.model || '?')))}${targets.length > 1 ? ` <button class="btn ghost sm" data-i="${i}">remove</button>` : ''}</div>`).join('') || '<div class="muted">No targets.</div>';
+          listEl.innerHTML = targets.map((t, i) =>
+            `<div class="pg-cmp-target"><b>#${i + 1}</b> ${esc(t.source === 'cloud' ? (t.providerId + ' / ' + (t.model || '?')) : (t.runtimeId + ' / ' + (t.model || '?')))}${targets.length > 1 ? ` <button class="btn ghost sm" data-i="${i}" type="button">remove</button>` : ''}</div>`).join('') || '<div class="muted">No targets.</div>';
           listEl.querySelectorAll('button[data-i]').forEach((x) => x.addEventListener('click', () => { targets.splice(+x.dataset.i, 1); draw(); }));
         };
         draw();
         const provSel = b.querySelector('#cmpProv');
-        provSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
         b.querySelector('#cmpAdd').addEventListener('click', () => { b.querySelector('#cmpAddForm').hidden = false; });
         b.querySelector('#cmpAddOk').addEventListener('click', () => {
           const src = b.querySelector('#cmpSrc').value;
           const model = b.querySelector('#cmpModel').value.trim();
           if (!model) { notify.toast('Enter a model id', 'warning'); return; }
-          targets.push(src === 'cloud' ? { source: 'cloud', providerId: provSel.value, model } : { source: 'local', runtimeId: 'ollama', model });
+          if (src === 'cloud') {
+            targets.push({ source: 'cloud', providerId: b.querySelector('#cmpProv').value, model });
+          } else {
+            targets.push({ source: 'local', runtimeId: b.querySelector('#cmpRt').value, model });
+          }
           b.querySelector('#cmpModel').value = ''; b.querySelector('#cmpAddForm').hidden = true; draw();
         });
         const resHost = b.querySelector('#cmpResults');
         const runBtn2 = document.createElement('button');
-        runBtn2.className = 'btn btn-go'; runBtn2.textContent = 'Run comparison';
+        runBtn2.className = 'btn btn-go'; runBtn2.type = 'button'; runBtn2.textContent = 'Run comparison';
         runBtn2.style.marginTop = '12px';
         b.querySelector('.pg-cmp').appendChild(runBtn2);
         runBtn2.addEventListener('click', async () => {
@@ -2061,15 +2290,22 @@ export async function renderPlayground() {
           runBtn2.disabled = true; runBtn2.textContent = 'Comparing…';
           resHost.hidden = false; resHost.innerHTML = '<div class="muted">Running comparison…</div>';
           try {
-            const out = await playgroundService.compare({ prompt: promptInput.value, systemPrompt: state.systemPrompt, parameters: state.parameters, modelRefs: targets.map((t) => ({ source: t.source, providerId: t.providerId, runtimeId: t.runtimeId, model: t.model })) });
+            const out = await playgroundService.compare({
+              prompt: promptInput.value, systemPrompt: state.systemPrompt,
+              parameters: state.parameters,
+              modelRefs: targets.map((t) => ({
+                source: t.source, providerId: t.providerId, runtimeId: t.runtimeId, model: t.model,
+                key: t.source === 'cloud' ? (Storage.getKey(t.providerId) || '') : undefined,
+              })),
+            });
             const execs = out.executions || [];
             resHost.innerHTML = '<div class="pg-cmp-grid"></div>';
             const grid = resHost.querySelector('.pg-cmp-grid');
             execs.forEach((ex, i) => {
               const col = document.createElement('div'); col.className = 'pg-cmp-col';
-              col.innerHTML = `<div class="pg-cmp-col-head">#${i + 1} · ${esc(ex.ref.model || '')}</div><div class="pg-cmp-col-body muted">Queued…</div>`;
+              col.innerHTML = `<div class="pg-cmp-col-head">#${i + 1} · ${esc(ex.ref && ex.ref.model || '')}</div><div class="pg-cmp-col-body muted">Queued…</div>`;
               grid.appendChild(col);
-              if (!ex.executionId) { col.querySelector('.pg-cmp-col-body').textContent = (ex.validation?.reasons && ex.validation.reasons[0]) || 'Not executable'; return; }
+              if (!ex.executionId) { col.querySelector('.pg-cmp-col-body').textContent = (ex.validation && ex.validation.reasons && ex.validation.reasons[0]) || 'Not executable'; return; }
               pollUntilDone(ex.executionId, col);
             });
           } catch (e) { resHost.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
@@ -2086,8 +2322,9 @@ export async function renderPlayground() {
         const rec = await playgroundService.get(id);
         if (rec && (rec.status === 'complete' || rec.status === 'error' || rec.status === 'cancelled')) {
           if (rec.status === 'complete') {
-            bodyEl.className = 'pg-cmp-col-body'; bodyEl.innerHTML = miniMarkdown(rec.content || '');
-            if (rec.metrics) bodyEl.insertAdjacentHTML('beforeend', `<div class="pg-cmp-metrics">${fmtMs(rec.metrics.totalDurationMs || 0)} · ${rec.metrics.outputTokens ?? '?'} out · ${rec.metrics.tokensPerSecond ? rec.metrics.tokensPerSecond.toFixed(1) + ' tok/s' : '—'}</div>`);
+            bodyEl.className = 'pg-cmp-col-body';
+            bodyEl.innerHTML = miniMarkdown(rec.content || '');
+            if (rec.metrics) bodyEl.insertAdjacentHTML('beforeend', `<div class="pg-cmp-metrics">${fmtMs(rec.metrics.totalDurationMs || 0)} · ${rec.metrics.outputTokens != null ? rec.metrics.outputTokens : '?'} out · ${rec.metrics.tokensPerSecond ? rec.metrics.tokensPerSecond.toFixed(1) + ' tok/s' : '—'}</div>`);
           } else { bodyEl.className = 'pg-cmp-col-body err'; bodyEl.textContent = rec.error || 'Failed'; }
           return;
         }
@@ -2097,9 +2334,29 @@ export async function renderPlayground() {
     tick();
   }
 
-  window.openExecutionHistory = openExecutionHistory;
-  window.clearPlayground = () => { $('pgClear').click(); };
+  // ── Inputs / params ──
+  modelInput.addEventListener('input', () => { state.model = modelInput.value.trim(); persist(); scheduleValidate(); });
+  providerSel.addEventListener('change', () => { state.providerId = providerSel.value; if (state.source === 'cloud') mountCloudPicker(); persist(); scheduleValidate(); });
+  runtimeSel.addEventListener('change', () => { state.runtimeId = runtimeSel.value; if (state.source === 'local') loadLocalModels(); persist(); scheduleValidate(); });
+  systemInput.addEventListener('input', () => { state.systemPrompt = systemInput.value; persist(); });
+  promptInput.addEventListener('input', () => { state.prompt = promptInput.value; persist(); });
 
+  function syncParamLabels() {
+    $('pgTempVal').textContent = (+temp.value).toFixed(1);
+    $('pgMaxVal').textContent = maxT.value;
+    $('pgTopVal').textContent = (+topP.value).toFixed(2);
+  }
+  function readParams() { state.parameters = { temperature: +temp.value, maxTokens: +maxT.value, topP: +topP.value }; persist(); }
+  [temp, maxT, topP].forEach((el) => el.addEventListener('input', () => { syncParamLabels(); readParams(); }));
+  $('pgResetParams').addEventListener('click', () => { temp.value = 0.7; maxT.value = 1024; topP.value = 1; syncParamLabels(); readParams(); });
+
+  // Seed values
+  modelInput.value = state.model || '';
+  systemInput.value = state.systemPrompt || '';
+  promptInput.value = state.prompt || '';
+  temp.value = state.parameters.temperature; maxT.value = state.parameters.maxTokens; topP.value = state.parameters.topP;
+  syncParamLabels();
+  setSource(state.source);
   updateStatus();
 }
 

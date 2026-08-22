@@ -1,5 +1,6 @@
 import { listBackups, readBackup, restoreBackup, deleteBackup } from '../config/backupStore.js';
 import { BACKUP_DIR } from '../config/settingsStore.js';
+import { recordActivity } from '../activity/activityService.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Backup routes — list, inspect, restore (safe), and delete Nexference-owned
@@ -28,11 +29,13 @@ export function registerBackupRoutes(app) {
   });
 
   // ─── POST restore a backup (creates a safety backup of the live config first) ───
-  app.post('/api/backups/:id/restore', (req, res) => {
+    app.post('/api/backups/:id/restore', (req, res) => {
     try {
       const result = restoreBackup(req.params.id);
+      recordActivity('backup', 'restore', 'success', `Backup ${req.params.id} restored`, { backupId: req.params.id });
       res.json(result);
     } catch (err) {
+      recordActivity('backup', 'restore', 'error', `Backup restore failed: ${err.message}`);
       res.status(500).json({ error: err.message });
     }
   });
@@ -42,6 +45,7 @@ export function registerBackupRoutes(app) {
     try {
       const ok = deleteBackup(req.params.id);
       if (!ok) return res.status(404).json({ error: 'backup not found' });
+      recordActivity('backup', 'delete', 'info', `Backup ${req.params.id} deleted`, { backupId: req.params.id });
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

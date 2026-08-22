@@ -141,9 +141,14 @@ async function scrapeModelsForProvider(provider) {
 
 // ─── Fetch all providers (non-blocking) ───
 async function fetchAllModels(source = 'startup') {
+  // Anthropic is Claude Code's native provider and is intentionally excluded from
+  // the configurable provider list (and the health count), so it is also skipped
+  // here — keeping the fetched set and its denominator consistent with what the
+  // UI actually shows.
+  const fetchable = PROVIDERS.filter((p) => p.id !== 'anthropic');
   console.log(`\n  🔄 Fetching models from all providers (${source})…`);
   const results = await Promise.allSettled(
-    PROVIDERS.map(async (p) => {
+    fetchable.map(async (p) => {
       const result = await fetchModelsForProvider(p, '');
       if (result.ok) {
         if (result.source !== 'website') modelCache[p.id].source = source;
@@ -156,7 +161,7 @@ async function fetchAllModels(source = 'startup') {
   );
 
   const successCount = results.filter(r => r.value?.ok).length;
-  console.log(`  📊 Fetched models from ${successCount}/${PROVIDERS.length} providers\n`);
+  console.log(`  📊 Fetched models from ${successCount}/${fetchable.length} providers\n`);
   return results.map(r => r.value);
 }
 

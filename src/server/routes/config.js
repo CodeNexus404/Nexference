@@ -3,6 +3,7 @@ import { getConfigStatus } from '../config/configService.js';
 import { subscribe } from '../config/configWatcher.js';
 import { diffConfigs } from '../config/configService.js';
 import { checkCompatibility } from '../clients/compatibilityService.js';
+import { recordActivity } from '../activity/activityService.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Config routes — read / status / preview / apply / open-folder / live events.
@@ -68,8 +69,12 @@ export function registerConfigRoutes(app) {
       }
 
       const result = writeSettings(next); // throws on backup/verify failure
+      recordActivity('config', 'apply', 'success', 'Claude Code configuration applied', {
+        path: SETTINGS_PATH, backupId: result.backupId,
+      });
       res.json({ success: true, path: SETTINGS_PATH, config: result.merged, backupPath: result.backupPath, verified: true });
     } catch (err) {
+      recordActivity('config', 'apply', 'error', `Configuration apply failed: ${err.message}`);
       res.status(500).json({ error: err.message });
     }
   });
