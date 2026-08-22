@@ -1,6 +1,6 @@
 {
   "name": "nexference",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Nexference — Universal AI provider & runtime workspace. Manage cloud providers, local runtimes, models, and client configuration.",
   "type": "module",
   "scripts": {

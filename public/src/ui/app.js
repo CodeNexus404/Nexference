@@ -22,6 +22,10 @@ import { recordActivity, getActivities } from '../core/activityStore.js';
 import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
 import { renderModelLibrary } from '../components/modelLibrary.js';
 import { modelService } from '../models/modelService.js';
+import { renderModelPicker } from '../components/modelPicker.js';
+import { playgroundService } from '../playground/playgroundService.js';
+import { historyStore } from '../playground/historyStore.js';
+import { miniMarkdown } from '../playground/markdown.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  UI action layer — the orchestration functions that were previously private
@@ -496,7 +500,8 @@ export function renderWorkspace() {
         <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
         <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
       </div>
-    </div>`;
+    </div>
+    <div id="wsRecent" class="ws-recent" hidden></div>`;
 
   fetchEnvironment();
   updateShellStatus();
@@ -520,8 +525,40 @@ async function fetchEnvironment(force) {
     const res = await fetch('/api/environment' + (force ? '/refresh' : ''));
     const env = await res.json();
     renderWorkspaceFromEnv(env);
+    loadRecentExecutions();
   } catch {
     body.innerHTML = '<div class="panel"><div class="muted">Could not load environment state.</div></div>';
+  }
+}
+
+// Workspace "Recent Executions" — a live read of the v0.9.0 run history
+// (server-backed, secret-free). No content bodies are shown here.
+async function loadRecentExecutions() {
+  const host = document.getElementById('wsRecent');
+  if (!host) return;
+  try {
+    const res = await fetch('/api/executions');
+    const { executions } = await res.json();
+    if (!executions || !executions.length) { host.hidden = true; host.innerHTML = ''; return; }
+    host.hidden = false;
+    host.innerHTML = `
+      <div class="ws-recent-head">
+        <h3>Recent Executions</h3>
+        <button class="btn ghost sm" onclick="openExecutionHistory()">View all</button>
+      </div>
+      <div class="ws-recent-list">
+        ${executions.slice(0, 5).map((e) => `
+          <div class="ws-recent-item">
+            <span class="dot ${e.success ? 'ok' : 'bad'}"></span>
+            <div class="ws-recent-main">
+              <b>${esc(e.model || '—')}</b>
+              <span class="ws-recent-sub">${esc(e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || ''))}</span>
+            </div>
+            <span class="ws-recent-time">${e.createdAt ? new Date(e.createdAt).toLocaleDateString() : ''}</span>
+          </div>`).join('')}
+      </div>`;
+  } catch {
+    host.hidden = true;
   }
 }
 
@@ -1095,60 +1132,227 @@ export async function cfgApply() { openWorkflow(); }
 
 let deviceTimer = null;
 
+// Benchmark modal — runs a fixed prompt against a local model and shows the
+// honest metrics returned by the backend (no fabrication on the client).
+function openBenchmarkModal(rt) {
+  const models = (rt.models || []).filter(Boolean);
+  if (!models.length) { notify.toast('No models available to benchmark', 'warning'); return; }
+  const fmt = (ms) => (ms == null ? '—' : (ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms'));
+  const body = `<div class="bench">
+    <p class="muted">Runs a fixed prompt against a model on <b>${esc(rt.name)}</b> and measures real throughput. No secrets involved.</p>
+    <div class="pg-field"><label>Model</label><select id="benchModel" class="inp">${models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select></div>
+    <div class="pg-field"><label>Prompt (optional)</label><textarea id="benchPrompt" class="inp" rows="3" placeholder="Leave blank to use the default benchmark prompt…"></textarea></div>
+    <div id="benchResult" class="bench-result" hidden></div>
+  </div>`;
+  openModal({
+    title: `Benchmark · ${rt.name}`, size: 'wide', bodyHTML: body,
+    onMount: (b) => {
+      const modelSel = b.querySelector('#benchModel');
+      const promptEl = b.querySelector('#benchPrompt');
+      const resEl = b.querySelector('#benchResult');
+      const runBtn = document.createElement('button');
+      runBtn.className = 'btn btn-go'; runBtn.textContent = 'Run benchmark';
+      runBtn.style.marginTop = '12px';
+      b.querySelector('.bench').appendChild(runBtn);
+      runBtn.addEventListener('click', async () => {
+        const model = modelSel.value;
+        if (!model) { notify.toast('No model selected', 'warning'); return; }
+        const prompt = promptEl.value.trim() || BENCH_PROMPT;
+        runBtn.disabled = true; runBtn.textContent = 'Benchmarking…';
+        resEl.hidden = false;
+        resEl.innerHTML = `<div class="pg-metrics-grid"><div class="pg-metric"><span>Elapsed</span><b id="benchDur">0ms</b></div><div class="pg-metric"><span>Speed</span><b id="benchSpd">measuring…</b></div></div>`;
+        execStream(
+          { source: 'local', runtimeId: rt.id, model, systemPrompt: '', prompt, messages: [{ role: 'user', content: prompt }], parameters: { temperature: 0.7, maxTokens: 320, topP: 1 }, stream: true },
+          {
+            onLive: ({ elapsedMs, speed }) => {
+              const d = document.getElementById('benchDur');
+              const s = document.getElementById('benchSpd');
+              if (d) d.textContent = elapsedMs >= 1000 ? (elapsedMs / 1000).toFixed(2) + 's' : Math.round(elapsedMs) + 'ms';
+              if (s) s.textContent = speed > 0 ? speed.toFixed(1) + ' tok/s (live)' : 'measuring…';
+            },
+            onDone: ({ metrics }) => {
+              const m = metrics || {};
+              const rows = [];
+              if (m.totalDurationMs != null) rows.push(['Duration', fmt(m.totalDurationMs)]);
+              if (m.timeToFirstTokenMs != null) rows.push(['Time to first token', fmt(m.timeToFirstTokenMs)]);
+              if (m.inputTokens != null) rows.push(['Input tokens', m.inputTokens]);
+              if (m.outputTokens != null) rows.push(['Output tokens', m.outputTokens]);
+              if (m.tokensPerSecond != null) rows.push(['Speed', m.tokensPerSecond.toFixed(1) + ' tok/s']);
+              resEl.innerHTML = `<div class="pg-metrics-grid">${rows.map((rr) => `<div class="pg-metric"><span>${esc(rr[0])}</span><b>${esc(String(rr[1]))}</b></div>`).join('')}</div>`;
+              runBtn.disabled = false; runBtn.textContent = 'Run benchmark';
+            },
+            onError: (validation, execFailed, msg) => {
+              resEl.innerHTML = `<div class="err">${esc((validation && (validation.reasons || []).join(' ')) || msg || 'Benchmark failed')}</div>`;
+              runBtn.disabled = false; runBtn.textContent = 'Run benchmark';
+            },
+          }
+        );
+      });
+    },
+  });
+}
+
+// Shared execution runner with a real-time ticker. While the source streams,
+// it reports live elapsed duration + an estimated throughput (chars/4 tokens)
+// so the UI shows changing numbers until the final, exact metrics arrive.
+// Returns { executable, executionId?, es, timer }.
+async function execStream(req, cb = {}) {
+  const { onToken, onLive, onDone, onError } = cb;
+  const v = await playgroundService.validate(req);
+  if (!v.executable) { onError && onError(v, false); return { executable: false, validation: v }; }
+  const created = await playgroundService.create(req);
+  if (!created.executable || !created.executionId) { onError && onError(created.validation, true); return created; }
+  pgExecId = created.executionId;
+  const start = Date.now();
+  let buffer = '';
+  pgLiveTimer = setInterval(() => {
+    const el = Date.now() - start;
+    const toks = Math.max(0, Math.round(buffer.length / 4));
+    const speed = el > 0 ? toks / (el / 1000) : 0;
+    onLive && onLive({ elapsedMs: el, tokens: toks, speed });
+  }, 150);
+  const es = playgroundService.stream(pgExecId, (ev) => {
+    if (ev.type === 'token') { buffer += ev.data.delta || ''; onToken && onToken(buffer); }
+    else if (ev.type === 'complete') {
+      if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+      try { es.close(); } catch { /* ignore */ }
+      pgES = null; pgExecId = null;
+      onDone && onDone({ content: buffer, metrics: ev.data.metrics, usage: ev.data.usage });
+    } else if (ev.type === 'error') {
+      if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+      try { es.close(); } catch { /* ignore */ }
+      pgES = null; pgExecId = null;
+      onError && onError(null, true, ev.data.message);
+    }
+  });
+  pgES = es;
+  return { executable: true, executionId: pgExecId, es, timer: pgLiveTimer };
+}
+
 export async function renderLocalAI() {
   setCrumb('Local AI');
   const grid = document.getElementById('rtGrid');
   if (!grid) return;
 
   grid.innerHTML = `
-    <div class="panel device-panel" id="devicePanel">
-      <div class="device-head">
-        <h3>Device</h3>
-        <span class="badge live" id="devLive">live</span>
+    <div class="lai">
+      <section class="lai-hero">
+        <div class="lai-hero-id">
+          <span class="lai-hero-badge"><span class="dot"></span>Live</span>
+          <div class="lai-hero-host mono" id="devHost">—</div>
+          <div class="lai-hero-sub" id="devSysSub">—</div>
+        </div>
+        <div class="lai-kpis">
+          <div class="lai-kpi">
+            <div class="lai-kpi-top"><span>CPU</span><b class="mono" id="devCpu">—</b></div>
+            <div class="meter"><span class="meter-fill" id="devCpuBar"></span></div>
+            <div class="lai-kpi-sub" id="devCpuSub">—</div>
+          </div>
+          <div class="lai-kpi">
+            <div class="lai-kpi-top"><span>Memory</span><b class="mono" id="devMem">—</b></div>
+            <div class="meter"><span class="meter-fill" id="devMemBar"></span></div>
+            <div class="lai-kpi-sub" id="devMemSub">—</div>
+          </div>
+          <div class="lai-kpi">
+            <div class="lai-kpi-top"><span>GPU</span><b class="mono" id="devGpu">—</b></div>
+            <div class="lai-kpi-sub" id="devGpuSub">—</div>
+          </div>
+          <div class="lai-kpi">
+            <div class="lai-kpi-top"><span>System</span><b class="mono" id="devSys">—</b></div>
+            <div class="lai-kpi-sub" id="devSysSub2">—</div>
+          </div>
+        </div>
+      </section>
+      <div class="lai-runs-head">
+        <h3>Runtime services</h3>
+        <span class="muted" id="rtCount">—</span>
       </div>
-      <div class="device-grid">
-        <div class="device-metric">
-          <div class="dm-label">CPU</div>
-          <div class="dm-val mono" id="devCpu">—</div>
-          <div class="dm-sub" id="devCpuSub">—</div>
-          <div class="meter"><span class="meter-fill" id="devCpuBar"></span></div>
-        </div>
-        <div class="device-metric">
-          <div class="dm-label">Memory</div>
-          <div class="dm-val mono" id="devMem">—</div>
-          <div class="dm-sub" id="devMemSub">—</div>
-          <div class="meter"><span class="meter-fill" id="devMemBar"></span></div>
-        </div>
-        <div class="device-metric">
-          <div class="dm-label">GPU</div>
-          <div class="dm-val mono" id="devGpu">—</div>
-          <div class="dm-sub" id="devGpuSub">—</div>
-        </div>
-        <div class="device-metric">
-          <div class="dm-label">System</div>
-          <div class="dm-val mono" id="devSys">—</div>
-          <div class="dm-sub" id="devSysSub">—</div>
-        </div>
-      </div>
-    </div>
-    <div class="rt-section-h">Local runtimes</div>
-    <div id="rtList"><div class="muted">Detecting local runtimes…</div></div>`;
+      <div id="rtList" class="rt-grid"><div class="muted">Detecting local runtimes…</div></div>
+    </div>`;
 
   const rtList = grid.querySelector('#rtList');
+
+  function rtHue(id) {
+    let h = 0;
+    for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return h;
+  }
 
   async function loadRuntimes() {
     try {
       const res = await fetch('/api/local-runtimes');
       const { runtimes } = await res.json();
       rtList.innerHTML = runtimes.map(rt => {
-        const status = rt.planned ? 'planned' : (rt.running ? 'running' : (rt.detected ? 'detected' : 'offline'));
-        const badge = rt.planned ? 'Coming soon' : (rt.running ? `${rt.modelCount} models` : 'Not running');
-        return `<div class="panel rt-card ${rt.running ? 'live' : ''}">
-          <div class="rt-top"><b>${esc(rt.name)}</b><span class="badge ${status}">${esc(badge)}</span></div>
-          <div class="rt-sub">${esc(rt.note || '')}</div>
-          ${rt.running && rt.models && rt.models.length ? `<div class="rt-models">${rt.models.slice(0, 6).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 6 ? `<span class="chipx">+${rt.models.length - 6}</span>` : ''}</div>` : ''}
+        const planned = !!rt.planned;
+        const running = !!rt.running;
+        const detected = !!rt.detected;
+        const status = planned ? 'planned' : (running ? 'running' : (detected ? 'detected' : 'offline'));
+        const badge = planned ? 'Coming soon' : (running ? `${rt.modelCount} models` : (detected ? 'Detected' : 'Offline'));
+        const stateText = planned ? 'Planned' : (running ? 'Running' : (detected ? 'Detected' : 'Offline'));
+        const initial = (rt.name || '?').trim().charAt(0).toUpperCase();
+        const logoHTML = `<span class="rt-logo-monogram">${esc(initial)}</span>` + (rt.logo
+          ? `<img class="rt-logo-img" src="${esc(rt.logo)}" alt="${esc(rt.name)} logo" loading="lazy" onerror="this.closest('.rt-logo').classList.remove('has-img');this.remove()">`
+          : '');
+        const modelsHTML = running && rt.models && rt.models.length
+          ? `<div class="rt-models">${rt.models.slice(0, 8).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 8 ? `<span class="chipx">+${rt.models.length - 8}</span>` : ''}</div>`
+          : '';
+        return `<div class="panel rt-card ${running ? 'live' : ''} ${status}">
+          <div class="rt-card-top">
+            <div class="rt-logo ${rt.logo ? 'has-img' : ''}" style="--rt:hsl(${rtHue(rt.id)} 68% 58%)">${logoHTML}</div>
+            <div class="rt-title"><b>${esc(rt.name)}</b><span class="rt-meta">Local runtime</span></div>
+            <span class="badge ${status}">${esc(badge)}</span>
+            ${!running && rt.supportsStart ? (rt.installed === false ? `<span class="rt-note-sm" title="Install the app to enable auto-start">Not installed</span>` : `<button class="btn btn-ghost sm rt-start" data-start="${esc(rt.id)}" title="Start ${esc(rt.name)}">Start</button>`) : ''}
+            ${running && rt.models && rt.models.length ? `<button class="btn btn-ghost sm rt-bench" data-bench="${esc(rt.id)}" title="Benchmark a model on ${esc(rt.name)}">Benchmark</button>` : ''}
+          </div>
+          <div class="rt-desc">${esc(rt.note || '')}</div>
+          ${modelsHTML}
+          <div class="rt-foot">
+            <div class="rt-foot-item"><span>State</span><b>${esc(stateText)}</b></div>
+            <div class="rt-foot-item"><span>Models</span><b>${running ? rt.modelCount : '—'}</b></div>
+          </div>
         </div>`;
       }).join('');
+      rtList.querySelectorAll('.rt-start').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          const id = btn.dataset.start;
+          // Trigger the allowlisted start command (safe; no arbitrary shell).
+          try {
+            const r = await (await fetch(`/api/local-runtimes/${id}/start`, { method: 'POST' })).json();
+            if (!r.supported) { notify.toast(r.message || 'Auto-start not supported.', 'info'); setTimeout(() => loadRuntimes(), 600); return; }
+            if (!r.ok) { notify.toast(r.message || 'Could not start runtime.', 'warning'); setTimeout(() => loadRuntimes(), 600); return; }
+          } catch { /* keep waiting; we poll status below */ }
+          // Live wait: count up elapsed time and poll until the service is
+          // reachable, so the user sees real-time progress, not a frozen button.
+          const t0 = Date.now();
+          btn.disabled = true;
+          const tick = setInterval(() => { btn.textContent = 'Starting… ' + ((Date.now() - t0) / 1000).toFixed(1) + 's'; }, 150);
+          let settled = false;
+          const finish = (msg, kind) => {
+            if (settled) return; settled = true;
+            clearInterval(tick);
+            notify.toast(msg, kind);
+            setTimeout(() => loadRuntimes(), 700);
+          };
+          const poll = setInterval(async () => {
+            try {
+              const { runtimes: rs } = await (await fetch('/api/local-runtimes')).json();
+              const rtNow = (rs || []).find((r) => r.id === id);
+              if (rtNow && rtNow.running) { finish(`${rtNow.name} is running.`, 'success'); return; }
+            } catch { /* keep polling */ }
+            if (Date.now() - t0 > 25000) finish('Still starting — check the runtime manually.', 'warning');
+          }, 700);
+        });
+      });
+      rtList.querySelectorAll('.rt-bench').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = btn.dataset.bench;
+          const rtObj = runtimes.find((r) => r.id === id);
+          if (rtObj) openBenchmarkModal(rtObj);
+        });
+      });
+      const cnt = grid.querySelector('#rtCount'); if (cnt) cnt.textContent = `${runtimes.length} runtimes`;
     } catch {
       rtList.innerHTML = '<div class="muted">Failed to detect local runtimes.</div>';
     }
@@ -1171,14 +1375,16 @@ export async function renderLocalAI() {
       const cpu = info.cpu || {};
       const mem = info.memory || {};
       const gpu = info.gpu || {};
+      set('devHost', info.hostname || '—');
       set('devCpu', cpu.cores ? `${cpu.cores} cores` : '—');
       set('devCpuSub', `${esc(cpu.model || 'unknown')}${cpu.usagePct != null ? ` · ${cpu.usagePct}% used` : ''}`);
       set('devMem', `${mem.usedGB != null ? mem.usedGB : '—'} / ${mem.totalGB != null ? mem.totalGB : '—'} GB`);
       set('devMemSub', `${mem.usedPct != null ? mem.usedPct + '% used' : ''}${mem.freeGB != null ? ` · ${mem.freeGB} GB free` : ''}`);
       set('devGpu', gpu.name || (gpu.available === false ? 'Not detected' : '—'));
       set('devGpuSub', gpu.note || '');
-      set('devSys', `${esc(info.hostname || '')} · ${esc(info.platform || '')}`);
       set('devSysSub', `${esc(info.arch || '')} · up ${fmtUptime(info.uptimeSec || 0)} · Node ${esc(info.process?.node || '')}`);
+      set('devSys', `Node ${esc(info.process?.node || '—')}`);
+      set('devSysSub2', esc(info.system || `${info.platform || ''} ${info.release || ''}`));
       const cpuBar = grid.querySelector('#devCpuBar'); if (cpuBar) cpuBar.style.width = (cpu.usagePct != null ? cpu.usagePct : 0) + '%';
       const memBar = grid.querySelector('#devMemBar'); if (memBar) memBar.style.width = (mem.usedPct != null ? mem.usedPct : 0) + '%';
     } catch { /* keep last good values */ }
@@ -1505,7 +1711,395 @@ export function useModel(providerId, modelId) {
   notify.toast(`Selected ${modelId} (${getProvider(providerId).name})`, 'success');
 }
 
-export function renderPlayground() {
+let pgExecId = null;
+let pgES = null;
+let pgLiveTimer = null;
+const pgSupported = { cloud: new Set(), local: new Set() };
+const BENCH_PROMPT = 'Explain how a transformer language model works. Cover self-attention, positional encoding, feed-forward layers, and the training objective. Be thorough and precise.';
+
+// Module-scoped so the Workspace "View all" button works even before the
+// Playground page has been rendered.
+async function openExecutionHistory() {
+  const execs = await historyStore.listExecutions();
+  const body = `<div class="pg-hist">${execs.length ? execs.map((e) => `
+    <div class="pg-hist-item">
+      <div class="pg-hist-top"><b>${esc(e.model || '—')}</b><span class="badge ${e.success ? 'ok' : 'bad'}">${esc(e.status || '')}</span></div>
+      <div class="pg-hist-meta">${esc((e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || '')))} · ${e.createdAt ? new Date(e.createdAt).toLocaleString() : ''}</div>
+      <div class="pg-hist-prev">${esc((e.promptPreview || '').slice(0, 140))}</div>
+    </div>`).join('') : '<div class="muted">No executions yet.</div>'}</div>`;
+  openModal({ title: 'Execution history', size: 'wide', bodyHTML: body });
+}
+
+export async function renderPlayground() {
   updateCrumb('Playground');
+  const section = document.getElementById('page-playground');
+  if (!section) return;
+  if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
+  const draft = historyStore.loadDraft();
+  const fmtMs = (ms) => (ms == null ? '—' : (ms >= 1000 ? (ms / 1000).toFixed(2) + 's' : Math.round(ms) + 'ms'));
+
+  section.innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>Playground</h1>
+        <p>Try cloud providers and local runtimes honestly — validate before you send, then stream, measure and compare.</p>
+      </div>
+      <div class="pg-head-actions">
+        <button class="btn ghost sm" onclick="openExecutionHistory()">History</button>
+        <button class="btn ghost sm" onclick="clearPlayground()">Clear</button>
+      </div>
+    </div>
+    <div class="pg">
+      <div class="panel pg-config">
+        <div class="seg">
+          <button class="seg-btn" data-src="cloud">Cloud</button>
+          <button class="seg-btn" data-src="local">Local</button>
+        </div>
+        <div class="pg-field" id="pgProviderField">
+          <label>Provider</label>
+          <select id="pgProvider" class="inp"></select>
+        </div>
+        <div class="pg-field" id="pgRuntimeField" hidden>
+          <label>Runtime</label>
+          <select id="pgRuntime" class="inp"></select>
+        </div>
+        <div class="pg-field">
+          <label>Model</label>
+          <input id="pgModel" class="inp" placeholder="model id (e.g. gpt-4o-mini)" />
+          <div id="pgModelPicker"></div>
+          <div id="pgLocalModels"></div>
+        </div>
+        <div class="pg-field">
+          <label>System prompt</label>
+          <textarea id="pgSystem" class="inp" rows="3" placeholder="Optional system instructions…"></textarea>
+        </div>
+        <div class="pg-params">
+          <label>Parameters</label>
+          <div class="pg-param"><span>Temperature <b id="pgTempVal"></b></span><input type="range" id="pgTemp" min="0" max="2" step="0.1" /></div>
+          <div class="pg-param"><span>Max tokens <b id="pgMaxVal"></b></span><input type="range" id="pgMax" min="1" max="8192" step="1" /></div>
+          <div class="pg-param"><span>Top P <b id="pgTopVal"></b></span><input type="range" id="pgTop" min="0" max="1" step="0.05" /></div>
+          <button class="btn ghost sm" id="pgResetParams">Reset</button>
+        </div>
+        <div class="pg-status" id="pgStatus"><div class="muted">Checking compatibility…</div></div>
+        <div class="pg-actions">
+          <button class="btn btn-go" id="pgRun">Run</button>
+          <button class="btn" id="pgStop" hidden>Stop</button>
+        </div>
+      </div>
+      <div class="panel pg-out">
+        <div class="pg-out-head">
+          <span>Output</span>
+          <div class="pg-out-acts">
+            <button class="btn ghost sm" id="pgCopy" hidden>Copy</button>
+            <button class="btn ghost sm" id="pgRetry" hidden>Retry</button>
+            <button class="btn ghost sm" id="pgUseConfig" hidden>Use in Config</button>
+            <button class="btn ghost sm" id="pgSaveProfile" hidden>Save as Profile</button>
+            <button class="btn ghost sm" id="pgCompare" hidden>Compare</button>
+          </div>
+        </div>
+        <div class="pg-metrics" id="pgMetrics" hidden></div>
+        <div class="pg-content muted" id="pgContent">Run a prompt to see output.</div>
+        <div class="pg-prompt">
+          <textarea id="pgPrompt" class="inp" rows="3" placeholder="Enter a prompt… (⌘/Ctrl+Enter to run)"></textarea>
+          <button class="btn btn-go" id="pgSend">Send</button>
+        </div>
+      </div>
+    </div>`;
+
+  const $ = (id) => section.querySelector('#' + id);
+  const sourceSeg = section.querySelectorAll('.seg-btn');
+  const providerField = $('pgProviderField');
+  const runtimeField = $('pgRuntimeField');
+  const providerSel = $('pgProvider');
+  const runtimeSel = $('pgRuntime');
+  const modelInput = $('pgModel');
+  const modelPickerHost = $('pgModelPicker');
+  const localModelsHost = $('pgLocalModels');
+  const systemInput = $('pgSystem');
+  const promptInput = $('pgPrompt');
+  const temp = $('pgTemp'), maxT = $('pgMax'), topP = $('pgTop');
+  const statusEl = $('pgStatus');
+  const contentEl = $('pgContent');
+  const metricsEl = $('pgMetrics');
+  const runBtn = $('pgRun'), stopBtn = $('pgStop');
+  const copyBtn = $('pgCopy'), retryBtn = $('pgRetry'), useCfgBtn = $('pgUseConfig'), saveProfBtn = $('pgSaveProfile'), compareBtn = $('pgCompare');
+
+  const state = { ...draft };
+
+  function setSelect(sel, val, fallback) {
+    const ok = Array.from(sel.options).some((o) => o.value === val);
+    sel.value = ok ? val : fallback;
+  }
+
+  try {
+    const caps = await playgroundService.capabilities();
+    pgSupported.cloud = new Set((caps.cloud || []).filter((c) => c.supportsExecution).map((c) => c.id));
+    pgSupported.local = new Set((caps.local || []).filter((c) => c.supportsExecution).map((c) => c.id));
+    providerSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}${pgSupported.cloud.has(p.id) ? '' : ' · discovery only'}</option>`).join('');
+    const locs = (caps.local || []).filter((c) => c.supportsExecution);
+    runtimeSel.innerHTML = locs.length ? locs.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join('') : `<option value="">No executable runtime</option>`;
+  } catch {
+    providerSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+    runtimeSel.innerHTML = `<option value="ollama">Ollama</option>`;
+  }
+  setSelect(providerSel, state.providerId, providerSel.options[0]?.value || 'openrouter');
+  setSelect(runtimeSel, state.runtimeId, runtimeSel.options[0]?.value || 'ollama');
+
+  function mountCloudPicker() {
+    modelPickerHost.innerHTML = '';
+    localModelsHost.innerHTML = '';
+    if (!providerSel.value) return;
+    renderModelPicker(modelPickerHost, providerSel.value, {
+      includePaid: true, showPaidToggle: false, current: modelInput.value,
+      onSelect: (id) => { modelInput.value = id; state.model = id; persist(); scheduleValidate(); },
+    });
+  }
+  async function loadLocalModels() {
+    modelPickerHost.innerHTML = '';
+    localModelsHost.innerHTML = '<div class="muted">Detecting installed models…</div>';
+    try {
+      const res = await fetch('/api/local-runtimes');
+      const { runtimes } = await res.json();
+      const rt = (runtimes || []).find((r) => r.id === runtimeSel.value);
+      const models = rt?.models || [];
+      if (!models.length) { localModelsHost.innerHTML = '<div class="muted">No models detected — start the runtime and pull a model.</div>'; return; }
+      localModelsHost.innerHTML = '<div class="mp-list">' + models.map((m) => `<button type="button" class="mp-item" data-m="${esc(m)}"><span class="mp-name">${esc(m)}</span></button>`).join('') + '</div>';
+      localModelsHost.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', () => { modelInput.value = b.dataset.m; state.model = b.dataset.m; persist(); scheduleValidate(); }));
+    } catch { localModelsHost.innerHTML = '<div class="muted">Could not detect local models.</div>'; }
+  }
+
+  function setSource(src) {
+    state.source = src;
+    sourceSeg.forEach((b) => b.classList.toggle('active', b.dataset.src === src));
+    const cloud = src === 'cloud';
+    providerField.hidden = !cloud;
+    runtimeField.hidden = cloud;
+    if (cloud) mountCloudPicker(); else loadLocalModels();
+    scheduleValidate();
+  }
+  sourceSeg.forEach((b) => b.addEventListener('click', () => setSource(b.dataset.src)));
+
+  modelInput.addEventListener('input', () => { state.model = modelInput.value.trim(); persist(); scheduleValidate(); });
+  providerSel.addEventListener('change', () => { state.providerId = providerSel.value; if (state.source === 'cloud') mountCloudPicker(); persist(); scheduleValidate(); });
+  runtimeSel.addEventListener('change', () => { state.runtimeId = runtimeSel.value; if (state.source === 'local') loadLocalModels(); persist(); scheduleValidate(); });
+  systemInput.addEventListener('input', () => { state.systemPrompt = systemInput.value; persist(); });
+  promptInput.addEventListener('input', () => { state.prompt = promptInput.value; persist(); });
+
+  function syncParamLabels() { $('pgTempVal').textContent = (+temp.value).toFixed(1); $('pgMaxVal').textContent = maxT.value; $('pgTopVal').textContent = (+topP.value).toFixed(2); }
+  function readParams() { state.parameters = { temperature: +temp.value, maxTokens: +maxT.value, topP: +topP.value }; persist(); }
+  [temp, maxT, topP].forEach((el) => el.addEventListener('input', () => { syncParamLabels(); readParams(); }));
+  $('pgResetParams').addEventListener('click', () => { temp.value = 0.7; maxT.value = 1024; topP.value = 1; syncParamLabels(); readParams(); });
+
+  modelInput.value = state.model || '';
+  systemInput.value = state.systemPrompt || '';
+  promptInput.value = state.prompt || '';
+  temp.value = state.parameters.temperature; maxT.value = state.parameters.maxTokens; topP.value = state.parameters.topP;
+  syncParamLabels();
+  setSource(state.source || 'cloud');
+
+  function persist() { historyStore.saveDraft(state); }
+
+  function buildReq() {
+    const base = {
+      source: state.source,
+      model: state.model || '',
+      systemPrompt: state.systemPrompt || '',
+      prompt: promptInput.value,
+      parameters: { ...state.parameters },
+      stream: true,
+    };
+    if (state.source === 'cloud') { base.providerId = providerSel.value; base.key = Storage.getKey(providerSel.value) || ''; }
+    else { base.runtimeId = runtimeSel.value; }
+    return base;
+  }
+
+  let valTimer = null;
+  function scheduleValidate() { clearTimeout(valTimer); valTimer = setTimeout(updateStatus, 350); }
+  async function updateStatus() {
+    const req = buildReq();
+    statusEl.className = 'pg-status';
+    statusEl.innerHTML = '<div class="muted">Checking…</div>';
+    try {
+      const v = await playgroundService.validate(req);
+      statusEl.className = 'pg-status lv-' + (v.level || 'unsupported');
+      const items = [];
+      (v.reasons || []).forEach((r) => items.push(`<li class="ok">${esc(r)}</li>`));
+      (v.warnings || []).forEach((r) => items.push(`<li class="warn">${esc(r)}</li>`));
+      (v.limitations || []).forEach((r) => items.push(`<li class="lim">${esc(r)}</li>`));
+      (v.requiredConfiguration || []).forEach((r) => items.push(`<li class="need">${esc(r)}</li>`));
+      const head = `<div class="pg-status-head"><b>Compatibility</b> · score <span class="pg-score">${v.score ?? 0}</span> · <span class="pg-level">${esc(v.level)}</span></div>`;
+      statusEl.innerHTML = head + (items.length ? `<ul class="pg-check">${items.join('')}</ul>` : '');
+      return v;
+    } catch (e) { statusEl.innerHTML = `<div class="muted">Validation error: ${esc(e.message)}</div>`; return null; }
+  }
+
+  function renderMetrics(m, usage) {
+    if (!m) return;
+    const rows = [];
+    if (m.totalDurationMs != null) rows.push(['Duration', fmtMs(m.totalDurationMs)]);
+    if (m.timeToFirstTokenMs != null) rows.push(['Time to first token', fmtMs(m.timeToFirstTokenMs)]);
+    if (m.inputTokens != null) rows.push(['Input tokens', m.inputTokens]);
+    if (m.outputTokens != null) rows.push(['Output tokens', m.outputTokens]);
+    if (m.tokensPerSecond != null) rows.push(['Speed', m.tokensPerSecond.toFixed(1) + ' tok/s']);
+    if (usage && usage.latencyMs != null && m.providerReportedLatencyMs == null) rows.push(['Provider latency', fmtMs(usage.latencyMs)]);
+    metricsEl.hidden = false;
+    metricsEl.innerHTML = `<div class="pg-metrics-head">Metrics</div><div class="pg-metrics-grid">${rows.map((r) => `<div class="pg-metric"><span>${esc(r[0])}</span><b>${esc(String(r[1]))}</b></div>`).join('')}</div>`;
+  }
+
+  function finishRun(success) {
+    if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+    if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
+    stopBtn.hidden = true; runBtn.disabled = false; runBtn.classList.remove('spinning');
+    [copyBtn, retryBtn, useCfgBtn, saveProfBtn, compareBtn].forEach((b) => (b.hidden = false));
+    if (success) notify.toast('Execution complete', 'success');
+  }
+
+  async function run() {
+    const prompt = promptInput.value.trim();
+    if (!prompt) { notify.toast('Enter a prompt first', 'warning'); return; }
+    persist();
+    const req = buildReq();
+    runBtn.disabled = true; runBtn.classList.add('spinning');
+    stopBtn.hidden = false;
+    contentEl.className = 'pg-content streaming'; contentEl.textContent = '';
+    metricsEl.hidden = false;
+    metricsEl.innerHTML = `<div class="pg-metrics-head"><span class="pg-live-dot"></span>Live</div><div class="pg-metrics-grid"><div class="pg-metric"><span>Elapsed</span><b id="pgLiveDur">0ms</b></div><div class="pg-metric"><span>Speed</span><b id="pgLiveSpd">measuring…</b></div></div>`;
+    [copyBtn, retryBtn, useCfgBtn, saveProfBtn, compareBtn].forEach((b) => (b.hidden = true));
+    execStream(req, {
+      onToken: (buf) => { contentEl.textContent = buf; },
+      onLive: ({ elapsedMs, speed }) => {
+        const d = document.getElementById('pgLiveDur');
+        const s = document.getElementById('pgLiveSpd');
+        if (d) d.textContent = elapsedMs >= 1000 ? (elapsedMs / 1000).toFixed(2) + 's' : Math.round(elapsedMs) + 'ms';
+        if (s) s.textContent = speed > 0 ? speed.toFixed(1) + ' tok/s (live)' : 'measuring…';
+      },
+      onDone: ({ content, metrics, usage }) => {
+        contentEl.className = 'pg-content'; contentEl.innerHTML = miniMarkdown(content);
+        renderMetrics(metrics, usage); finishRun(true);
+      },
+      onError: (validation, execFailed, msg) => {
+        contentEl.className = 'pg-content err';
+        contentEl.textContent = msg || (validation && (validation.reasons || []).join(' ')) || 'Execution failed.';
+        finishRun(false);
+      },
+    });
+  }
+
+  function stop() {
+    if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
+    if (pgExecId) playgroundService.cancel(pgExecId).catch(() => {});
+    if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; }
+    contentEl.className = 'pg-content';
+    stopBtn.hidden = true; runBtn.disabled = false; runBtn.classList.remove('spinning');
+  }
+
+  runBtn.addEventListener('click', run);
+  stopBtn.addEventListener('click', stop);
+  $('pgSend').addEventListener('click', run);
+  promptInput.addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); run(); } });
+  $('pgClear').addEventListener('click', () => { historyStore.clearDraft(); pgExecId = null; if (pgES) { try { pgES.close(); } catch { /* ignore */ } pgES = null; } notify.toast('Playground cleared', 'info'); router.navigate('playground'); });
+
+  copyBtn.addEventListener('click', () => { navigator.clipboard?.writeText(contentEl.textContent).then(() => notify.toast('Copied', 'success')).catch(() => {}); });
+  retryBtn.addEventListener('click', run);
+  useCfgBtn.addEventListener('click', () => {
+    openWorkflow({
+      initialClient: 'claude-code',
+      initialConnectionType: state.source === 'local' ? 'local' : 'cloud',
+      initialProvider: state.source === 'cloud' ? providerSel.value : null,
+      initialRuntime: state.source === 'local' ? runtimeSel.value : null,
+      initialModel: state.model || null,
+    });
+  });
+  saveProfBtn.addEventListener('click', () => {
+    const name = window.prompt('Profile name');
+    if (!name) return;
+    Storage.saveProfile({ id: 'p_' + Date.now().toString(36), name, client: 'claude-code', connectionType: state.source === 'local' ? 'local' : 'cloud', sourceType: state.source === 'local' ? 'local' : 'cloud', provider: state.source === 'cloud' ? providerSel.value : null, runtime: state.source === 'local' ? runtimeSel.value : null, model: state.model || null });
+    notify.toast(`Saved profile “${name}”`, 'success');
+  });
+  compareBtn.addEventListener('click', openCompareModal);
+
+  function openCompareModal() {
+    const targets = [{ source: state.source, providerId: state.source === 'cloud' ? providerSel.value : null, runtimeId: state.source === 'local' ? runtimeSel.value : null, model: state.model }];
+    const body = `<div class="pg-cmp">
+      <p class="muted">Compare the same prompt across multiple models. Add targets, then run.</p>
+      <div id="cmpList" class="pg-cmp-list"></div>
+      <button class="btn ghost sm" id="cmpAdd">+ Add model</button>
+      <div id="cmpAddForm" class="pg-cmp-add" hidden>
+        <select id="cmpSrc"><option value="cloud">Cloud</option><option value="local">Local</option></select>
+        <select id="cmpProv"></select>
+        <input id="cmpModel" class="inp" placeholder="model id" />
+        <button class="btn ghost sm" id="cmpAddOk">Add</button>
+      </div>
+      <div id="cmpResults" class="pg-cmp-results" hidden></div>
+    </div>`;
+    openModal({
+      title: 'Compare models', size: 'wide', bodyHTML: body,
+      onMount: (b) => {
+        const listEl = b.querySelector('#cmpList');
+        const draw = () => {
+          listEl.innerHTML = targets.map((t, i) => `<div class="pg-cmp-target"><b>#${i + 1}</b> ${esc(t.source === 'cloud' ? (t.providerId + ' / ' + (t.model || '?')) : (t.runtimeId + ' / ' + (t.model || '?')))}${targets.length > 1 ? ` <button class="btn ghost sm" data-i="${i}">remove</button>` : ''}</div>`).join('') || '<div class="muted">No targets.</div>';
+          listEl.querySelectorAll('button[data-i]').forEach((x) => x.addEventListener('click', () => { targets.splice(+x.dataset.i, 1); draw(); }));
+        };
+        draw();
+        const provSel = b.querySelector('#cmpProv');
+        provSel.innerHTML = PROVIDERS.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('');
+        b.querySelector('#cmpAdd').addEventListener('click', () => { b.querySelector('#cmpAddForm').hidden = false; });
+        b.querySelector('#cmpAddOk').addEventListener('click', () => {
+          const src = b.querySelector('#cmpSrc').value;
+          const model = b.querySelector('#cmpModel').value.trim();
+          if (!model) { notify.toast('Enter a model id', 'warning'); return; }
+          targets.push(src === 'cloud' ? { source: 'cloud', providerId: provSel.value, model } : { source: 'local', runtimeId: 'ollama', model });
+          b.querySelector('#cmpModel').value = ''; b.querySelector('#cmpAddForm').hidden = true; draw();
+        });
+        const resHost = b.querySelector('#cmpResults');
+        const runBtn2 = document.createElement('button');
+        runBtn2.className = 'btn btn-go'; runBtn2.textContent = 'Run comparison';
+        runBtn2.style.marginTop = '12px';
+        b.querySelector('.pg-cmp').appendChild(runBtn2);
+        runBtn2.addEventListener('click', async () => {
+          if (!promptInput.value.trim()) { notify.toast('Enter a prompt in the playground first', 'warning'); return; }
+          runBtn2.disabled = true; runBtn2.textContent = 'Comparing…';
+          resHost.hidden = false; resHost.innerHTML = '<div class="muted">Running comparison…</div>';
+          try {
+            const out = await playgroundService.compare({ prompt: promptInput.value, systemPrompt: state.systemPrompt, parameters: state.parameters, modelRefs: targets.map((t) => ({ source: t.source, providerId: t.providerId, runtimeId: t.runtimeId, model: t.model })) });
+            const execs = out.executions || [];
+            resHost.innerHTML = '<div class="pg-cmp-grid"></div>';
+            const grid = resHost.querySelector('.pg-cmp-grid');
+            execs.forEach((ex, i) => {
+              const col = document.createElement('div'); col.className = 'pg-cmp-col';
+              col.innerHTML = `<div class="pg-cmp-col-head">#${i + 1} · ${esc(ex.ref.model || '')}</div><div class="pg-cmp-col-body muted">Queued…</div>`;
+              grid.appendChild(col);
+              if (!ex.executionId) { col.querySelector('.pg-cmp-col-body').textContent = (ex.validation?.reasons && ex.validation.reasons[0]) || 'Not executable'; return; }
+              pollUntilDone(ex.executionId, col);
+            });
+          } catch (e) { resHost.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+          finally { runBtn2.disabled = false; runBtn2.textContent = 'Run comparison'; }
+        });
+      },
+    });
+  }
+
+  function pollUntilDone(id, col) {
+    const bodyEl = col.querySelector('.pg-cmp-col-body');
+    const tick = async () => {
+      try {
+        const rec = await playgroundService.get(id);
+        if (rec && (rec.status === 'complete' || rec.status === 'error' || rec.status === 'cancelled')) {
+          if (rec.status === 'complete') {
+            bodyEl.className = 'pg-cmp-col-body'; bodyEl.innerHTML = miniMarkdown(rec.content || '');
+            if (rec.metrics) bodyEl.insertAdjacentHTML('beforeend', `<div class="pg-cmp-metrics">${fmtMs(rec.metrics.totalDurationMs || 0)} · ${rec.metrics.outputTokens ?? '?'} out · ${rec.metrics.tokensPerSecond ? rec.metrics.tokensPerSecond.toFixed(1) + ' tok/s' : '—'}</div>`);
+          } else { bodyEl.className = 'pg-cmp-col-body err'; bodyEl.textContent = rec.error || 'Failed'; }
+          return;
+        }
+        setTimeout(tick, 700);
+      } catch { setTimeout(tick, 1000); }
+    };
+    tick();
+  }
+
+  window.openExecutionHistory = openExecutionHistory;
+  window.clearPlayground = () => { $('pgClear').click(); };
+
+  updateStatus();
 }
 

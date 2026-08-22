@@ -11,9 +11,16 @@ const execFileP = promisify(execFile);
 //  explicitly flagged as memory-based estimates.
 // ═══════════════════════════════════════════════════
 
-async function probeGpu(platform) {
-  // Honest best-effort. We only report what a probe can actually confirm;
-  // otherwise the field is null and recommendations are flagged as estimates.
+// Static hardware facts (GPU, OS name) rarely change, so cache the (slow)
+// probes for a minute — the Local AI page polls every few seconds and we
+// don't want to spawn system_profiler / WMI on every tick.
+let _gpuCache = { key: null, ts: 0, val: null };
+let _sysCache = { key: null, ts: 0, val: null };
+const STATIC_TTL = 60_000;
+
+// Worker: actually probe the GPU for a given platform. Honest best-effort —
+// we only report what a probe can confirm; otherwise the field is null.
+async function probeGpuNow(platform) {
   if (platform === 'linux') {
     try {
       const { stdout } = await execFileP('nvidia-smi', ['-L'], { timeout: 1500 });
@@ -40,7 +47,72 @@ async function probeGpu(platform) {
       return { available: null, name: null, vram: null, note: 'GPU auto-detection unavailable on this platform.' };
     }
   }
+  if (platform === 'win32') {
+    try {
+      const { stdout } = await execFileP('powershell', ['-NoProfile', '-Command',
+        'Get-CimInstance Win32_VideoController | ForEach-Object { ($_.Name + \'|\' + $_.AdapterRAM) }'], { timeout: 3000 });
+      let best = null, bestVram = -1;
+      for (const ln of stdout.split('\n')) {
+        const [n, r] = ln.trim().split('|');
+        const ram = parseInt(r, 10);
+        const vramGB = Number.isFinite(ram) && ram > 0 ? +(ram / 1073741824).toFixed(1) : null;
+        if (n && (!best || (vramGB != null && vramGB > bestVram))) { best = n.trim(); bestVram = vramGB ?? -1; }
+      }
+      if (best) return { available: true, name: best, vram: bestVram < 0 ? null : bestVram, note: 'Detected via Windows Display Adapter.' };
+      return { available: false, name: null, vram: null, note: 'No GPU reported via Windows Display Adapter.' };
+    } catch {
+      return { available: null, name: null, vram: null, note: 'GPU auto-detection unavailable on this platform.' };
+    }
+  }
   return { available: null, name: null, vram: null, note: 'GPU auto-detection is platform-limited; memory-based estimates are used.' };
+}
+
+export async function probeGpu(platform) {
+  const now = Date.now();
+  if (_gpuCache.key === platform && _gpuCache.val && now - _gpuCache.ts < STATIC_TTL) return _gpuCache.val;
+  const val = await probeGpuNow(platform);
+  _gpuCache = { key: platform, ts: now, val };
+  return val;
+}
+
+// Worker: resolve a human-friendly OS name/version per platform.
+async function getSystemVersionNow(platform) {
+  try {
+    if (platform === 'darwin') {
+      const name = (await execFileP('sw_vers', ['-productName'], { timeout: 1500 })).stdout.trim();
+      const ver = (await execFileP('sw_vers', ['-productVersion'], { timeout: 1500 })).stdout.trim();
+      const out = `${name} ${ver}`.trim();
+      if (out && out !== ' ') return out;
+    } else if (platform === 'linux') {
+      try {
+        const { stdout } = await execFileP('sh', ['-c', "cat /etc/os-release 2>/dev/null | awk -F= '/^PRETTY_NAME/{print $2}' | tr -d '\"'"], { timeout: 1500 });
+        const pretty = stdout.trim();
+        if (pretty) return pretty;
+      } catch { /* fall through */ }
+      return `Linux ${os.release()}`;
+    } else if (platform === 'win32') {
+      try {
+        const { stdout } = await execFileP('powershell', ['-NoProfile', '-Command', '(Get-CimInstance Win32_OperatingSystem).Caption'], { timeout: 3000 });
+        const cap = stdout.trim();
+        if (cap) return cap;
+      } catch {
+        try {
+          const { stdout } = await execFileP('wmic', ['os', 'get', 'Caption', '/value'], { timeout: 3000 });
+          const m = stdout.match(/Caption=(.+)/i);
+          if (m && m[1].trim()) return m[1].trim();
+        } catch { /* fall through */ }
+      }
+    }
+  } catch { /* fall through */ }
+  return `${platform} ${os.release()}`;
+}
+
+export async function getSystemVersion(platform) {
+  const now = Date.now();
+  if (_sysCache.key === platform && _sysCache.val && now - _sysCache.ts < STATIC_TTL) return _sysCache.val;
+  const val = await getSystemVersionNow(platform);
+  _sysCache = { key: platform, ts: now, val };
+  return val;
 }
 
 export function getHardwareProfile() {
@@ -144,6 +216,7 @@ export async function getDeviceInfo() {
     platform,
     arch: os.arch(),
     release: os.release(),
+    system: await getSystemVersion(platform),
     uptimeSec: Math.floor(os.uptime()),
     cpu: {
       model: cpus.length ? cpus[0].model : null,

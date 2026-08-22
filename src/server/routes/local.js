@@ -1,4 +1,5 @@
-import { detectRuntimes } from '../local/runtimes.js';
+import { detectRuntimes, startRuntime } from '../local/runtimes.js';
+import { benchmarkRuntime } from '../execution/executionService.js';
 
 // Local AI routes — report detected local runtimes. Detection of Ollama is
 // real (HTTP probe); other runtimes are reported as planned (not faked).
@@ -7,6 +8,27 @@ export function registerLocalRoutes(app) {
     try {
       const runtimes = await detectRuntimes();
       res.json({ runtimes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Start a local runtime that is offline. Uses a safe, allowlisted command
+  // per runtime — never arbitrary shell input.
+  app.post('/api/local-runtimes/:id/start', (req, res) => {
+    try {
+      res.json(startRuntime(req.params.id));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Benchmark a local model: runs a fixed prompt and returns honest metrics
+  // (duration, time-to-first-token, tokens, speed). No secrets involved.
+  app.post('/api/local-runtimes/:id/benchmark', async (req, res) => {
+    try {
+      const result = await benchmarkRuntime({ runtimeId: req.params.id, ...(req.body || {}) });
+      res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
