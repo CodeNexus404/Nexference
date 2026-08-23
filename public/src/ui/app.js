@@ -536,27 +536,52 @@ async function fetchEnvironment(force) {
 async function loadRecentExecutions() {
   const host = document.getElementById('wsRecent');
   if (!host) return;
+  const relTime = (iso) => {
+    const d = new Date(iso); if (isNaN(d)) return '';
+    const s = (Date.now() - d) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return d.toLocaleDateString();
+  };
   try {
     const res = await fetch('/api/executions');
     const { executions } = await res.json();
-    if (!executions || !executions.length) { host.hidden = true; host.innerHTML = ''; return; }
+    if (!executions || !executions.length) {
+      host.hidden = false;
+      host.innerHTML = `<div class="empty-state">
+        <div class="empty-ico">◷</div>
+        <h3>No workspace activity yet</h3>
+        <p>Executions you run in the Playground will appear here.</p>
+        <button class="btn btn2" onclick="navigate('playground')">Open Playground</button>
+      </div>`;
+      return;
+    }
     host.hidden = false;
-    host.innerHTML = `
-      <div class="ws-recent-head">
-        <h3>Recent Executions</h3>
-        <button class="btn ghost sm" onclick="openExecutionHistory()">View all</button>
-      </div>
-      <div class="ws-recent-list">
-        ${executions.slice(0, 5).map((e) => `
+    const today = [], earlier = [];
+    executions.forEach((e) => {
+      const d = e.createdAt ? new Date(e.createdAt) : null;
+      (d && d.toDateString() === new Date().toDateString() ? today : earlier).push(e);
+    });
+    const group = (title, list) => list.length ? `
+      <div class="ws-recent-group">
+        <div class="ws-recent-group-h">${title}</div>
+        ${list.slice(0, 5).map((e) => `
           <div class="ws-recent-item">
             <span class="dot ${e.success ? 'ok' : 'bad'}"></span>
             <div class="ws-recent-main">
               <b>${esc(e.model || '—')}</b>
               <span class="ws-recent-sub">${esc(e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || ''))}</span>
             </div>
-            <span class="ws-recent-time">${e.createdAt ? new Date(e.createdAt).toLocaleDateString() : ''}</span>
+            <span class="ws-recent-time">${relTime(e.createdAt)}</span>
           </div>`).join('')}
-      </div>`;
+      </div>` : '';
+    host.innerHTML = `
+      <div class="ws-recent-head">
+        <h3>Recent Activity</h3>
+        <button class="btn ghost sm" onclick="openExecutionHistory()">View all</button>
+      </div>
+      ${group('Today', today)}${group('Earlier', earlier)}`;
   } catch {
     host.hidden = true;
   }
@@ -600,6 +625,21 @@ function renderWorkspaceFromEnv(env) {
   (hw.recommendations || []).forEach((r) => recs.push(r));
   (hw.warnings || []).forEach((w) => recs.push(w));
 
+  // ── Contextual health headline + action (data-derived only) ──
+  const healthStatus = health.status || 'unknown';
+  const healthHeadline = ({
+    healthy: 'Your workspace is ready for Claude Code.',
+    attention: 'Configuration is needed before you can use Claude Code.',
+    'config-required': 'Configuration is needed before you can use Claude Code.',
+    partial: 'Some capabilities are unavailable — review them below.',
+    offline: 'Your environment appears to be offline.',
+    critical: 'Critical issues are blocking a working setup.',
+    unknown: 'Workspace state is still being determined.'
+  })[healthStatus] || 'Review your workspace state below.';
+  let healthAction = '';
+  if (!cfgValid) healthAction = '<div class="ws-health-action"><button class="btn btn-go sm" onclick="openWorkflow()">Configure…</button></div>';
+  else if (healthStatus !== 'healthy') healthAction = '<div class="ws-health-action"><button class="btn ghost sm" onclick="openHealthModal()">Review details</button></div>';
+
   body.innerHTML = `
     <div class="ws-hero">
       <div class="ws-kpi reveal-f" style="--d:.04s"><span class="kpi-ico">⌘</span><b>${installedClients.length}</b><span>Clients</span><small>installed &amp; detected</small></div>
@@ -608,13 +648,39 @@ function renderWorkspaceFromEnv(env) {
       <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">◈</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
     </div>
 
+    <div class="panel ws-quick reveal" style="--d:.07s">
+      <span class="ws-eyebrow">Quick Actions</span>
+      <div class="qa-grid">
+        <button class="qa-card" onclick="openWorkflow()">
+          <span class="qa-ico">⚙</span>
+          <span class="qa-text"><b>Configure Client</b><small>Open the guided configuration workspace</small></span>
+        </button>
+        <button class="qa-card" onclick="navigate('models')">
+          <span class="qa-ico">◈</span>
+          <span class="qa-text"><b>Explore Models</b><small>Browse the cloud and local catalogue</small></span>
+        </button>
+        <button class="qa-card" onclick="navigate('playground')">
+          <span class="qa-ico">▶</span>
+          <span class="qa-text"><b>Test Playground</b><small>Run a model and inspect metrics</small></span>
+        </button>
+        <button class="qa-card" onclick="navigate('localai')">
+          <span class="qa-ico">▦</span>
+          <span class="qa-text"><b>Local Runtime</b><small>Manage Ollama / LM Studio</small></span>
+        </button>
+      </div>
+    </div>
+
     <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
       <div class="ws-health-head">
-        <span class="ws-eyebrow">Environment Health</span>
-        <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+        <div>
+          <span class="ws-eyebrow">Environment Health</span>
+          <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+        </div>
         <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
       </div>
+      <p class="ws-health-headline">${esc(healthHeadline)}</p>
       <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
+      ${healthAction}
       <div class="health-factors">
         ${(health.factors || []).map((f) => `<div class="health-factor ${f.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`).join('')}
       </div>
@@ -626,13 +692,13 @@ function renderWorkspaceFromEnv(env) {
         <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
       </div>
       <div class="ws-chain">
-        <div class="chain-node"><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Clients" aria-label="Open Clients page" onclick="navigate('clients')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node"><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Configuration" aria-label="Open Configuration" onclick="navigate('configuration')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node"><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" aria-label="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" onclick="navigate('${activeProvider ? 'cloud-providers' : (activeRuntime ? 'localai' : 'cloud-providers')}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node"><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Model Library" aria-label="Open Model Library" onclick="navigate('models')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
       </div>
       <div class="ws-config-path muted">Config: <span class="mono">${esc(client.configPath || '~/.claude/settings.json')}</span></div>
       <div class="ws-actions-row">

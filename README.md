@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.2.0 — Modern Web Application UI & Experience** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.3.0 — Product UI Refinement & Interactive Experience** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -32,6 +32,20 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
 ---
+
+## What's new in v1.3.0
+
+A product-level UI/UX refinement pass that makes Nexference feel like an application rather than a set of static dashboards — without changing architecture, behavior, or the safety-critical configuration pipeline.
+
+- **Workspace feels alive** — the "Current Setup" chain (Client → Source → Provider/Runtime → Model) is now interactive: each node is keyboard-accessible and navigates to the relevant page.
+- **Contextual health** — the health card shows a plain-language headline (e.g. "Your workspace is ready for Claude Code.") plus a contextual action (Configure… / Review details) derived only from real health and config state.
+- **Quick Actions** — a compact, application-like action area (Configure Client, Explore Models, Test Playground, Local Runtime) with icon, description, hover, and focus affordances.
+- **Recent Activity** — executions are now grouped into Today / Earlier with relative timestamps, and show a meaningful empty state when nothing has been recorded.
+- **Reusable empty states** — a shared `.empty-state` component for honest, action-oriented "nothing here yet" messaging.
+- **Microinteractions** — animated tab/segment indicator; existing button/card/modal motion retained and `prefers-reduced-motion` respected.
+- **Version** — bumped to `1.3.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ## What's new in v1.2.0
 
