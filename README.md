@@ -106,7 +106,8 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
               Workspace Health  ◆  Activity Feed  (observability overlay)
 ```
 
-**Backend** (Node + Express 5, ESM): thin route handlers over services; provider/runtime/client behavior lives behind adapters. **Frontend** (vanilla ES modules): a lightweight router + central state, no framework.
+**Backend** (Node + Express 5, ESM): thin route handlers over services; provider/runtime/client behavior lives behind adapters. 
+**Frontend** (vanilla ES modules): a lightweight router + central state, no framework.
 
 ---
 

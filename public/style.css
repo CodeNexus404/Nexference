@@ -29,6 +29,8 @@
   --accent:      #5b8def;
   --accent-2:    #7aa6ff;
   --accent-soft: rgba(91,141,239,.12);
+  --lc-spd:   #5b8def;
+  --lc-ttft:  #f5a623;
   --accent-line: rgba(91,141,239,.30);
   --accent-glow: rgba(91,141,239,.40);
 
@@ -980,14 +982,16 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 .ws-config-head{display:flex;align-items:center;justify-content:space-between}
 .ws-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-3)}
 .ws-chain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
-.chain-node{flex:1 1 130px;min-width:0;padding:10px 12px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+.chain-node{flex:1 1 130px;min-width:0;padding:10px 12px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.chain-ico{width:30px;height:30px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);margin-bottom:1px}
+.chain-ico svg{width:17px;height:17px}
 .chain-node .chain-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
 .chain-node b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chain-arrow{display:flex;align-items:center;color:var(--text-3);font-size:15px;flex:0 0 auto}
 .ws-config-path{font-size:12px}
 .ws-config-path .mono{font-family:var(--mono)}
 .ws-actions-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
-.ws-quick .qa-grid{grid-template-columns:1fr 1fr}
+.ws-quick .qa-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
 .stat-row{display:flex;gap:10px;margin-top:6px}
 .stat-row .stat{flex:1;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);text-align:center}
 .stat-row .stat b{display:block;font-family:var(--display);font-size:22px;color:var(--text)}
@@ -1015,6 +1019,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 .ws-kpi:hover{transform:translateY(-3px);box-shadow:var(--shadow-2);border-color:var(--border-strong)}
 .ws-kpi .kpi-ico{position:absolute;right:12px;top:12px;width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
   background:var(--accent-soft);color:var(--accent);font-size:16px}
+  .ws-kpi .kpi-ico svg{width:18px;height:18px}
 .ws-kpi b{display:block;font-family:var(--display);font-size:30px;line-height:1;font-weight:700;letter-spacing:-.02em}
 .ws-kpi span{display:block;margin-top:7px;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--text-3)}
 .ws-kpi small{display:block;margin-top:6px;font-size:11.5px;color:var(--text-2)}
@@ -1577,12 +1582,13 @@ body.modal-open{overflow:hidden}
 
 /* — Workspace: application-like quick actions — */
 .ws-quick{grid-column:1/-1}
-.qa-card{display:flex;align-items:center;gap:12px;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-2);cursor:pointer;
+.qa-card{display:flex;align-items:center;gap:11px;text-align:left;width:100%;padding:11px 13px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-2);cursor:pointer;font:inherit;color:inherit;appearance:none;-webkit-appearance:none;
   transition:transform var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)}
 .qa-card:hover{transform:translateY(-3px);border-color:var(--accent-line);box-shadow:var(--elev-2);background:var(--surface-3)}
 .qa-card:active{transform:translateY(-1px) scale(.99)}
 .qa-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .qa-ico{width:38px;height:38px;flex:0 0 auto;border-radius:10px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);font-size:17px}
+.qa-ico svg{width:18px;height:18px}
 .qa-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 .qa-text b{font-size:13.5px;color:var(--text)}
 .qa-text small{font-size:11.5px;color:var(--text-3);line-height:1.35}
@@ -1601,3 +1607,57 @@ body.modal-open{overflow:hidden}
 .cfg-tab{position:relative}
 .cfg-tab.on::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;border-radius:2px;background:var(--accent);animation:tabIn var(--dur-fast) var(--ease)}
 @keyframes tabIn{from{transform:scaleX(0);opacity:.6}to{transform:scaleX(1);opacity:1}}
+
+/* — Execution history modal header — */
+.pg-hist-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+.pg-hist-count{font-family:var(--mono);font-size:12px;color:var(--text-3)}
+
+/* — Local AI benchmark results (bar-graph style) — */
+.lai-bench{margin-top:16px}
+.lai-bench-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:4px}
+.lai-bench-head .muted{margin:4px 0 0;font-size:12.5px;line-height:1.45}
+.bench-charts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
+.bench-chart-h{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:10px}
+.bar-chart{display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:150px 1fr auto;gap:10px;align-items:center}
+.bar-label{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-track{height:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.bar-fill{display:block;height:100%;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,var(--accent-2)));border-radius:999px;transition:width .5s var(--ease)}
+.bar-val{font-family:var(--mono);font-size:12px;color:var(--text)}
+.bench-saved{margin-top:8px;font-size:12px;color:var(--success)}
+
+/* — Benchmark modal error (graph-like card, not a bare line) — */
+.bench-result-card{display:flex;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);margin-top:4px}
+.bench-result-err{border-color:color-mix(in srgb,var(--error) 45%,var(--border));background:var(--error-soft)}
+.bench-result-err-ico{width:22px;height:22px;flex:0 0 auto;border-radius:50%;display:grid;place-items:center;background:var(--error);color:#fff;font-weight:700;font-size:14px;line-height:1}
+.bench-result-err-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.bench-result-err-body b{font-size:13px;color:var(--text)}
+.bench-result-err-body span{font-size:12px;color:var(--text-3)}
+
+/* — Benchmark graph: failed-run rows (honest, graph-like error format) — */
+.bench-failed{margin-top:14px}
+.bar-row-err .bar-label{color:var(--text-3)}
+.bar-fill-err{background:var(--error);opacity:.72}
+.err-val{color:var(--error)}
+
+/* — Benchmark line graph (graph-like: X=models, dual Y: speed + TTFT) — */
+.bench-linechart{margin-top:12px}
+.lc-svg{width:100%;height:auto;display:block}
+.lc-grid{stroke:var(--border);stroke-width:1}
+.lc-axis{stroke:var(--text-3);stroke-width:1.2}
+.lc-yla,.lc-yra,.lc-xla{fill:var(--text-3);font-size:11px;font-family:var(--mono)}
+.lc-axis-title{fill:var(--text-2);font-size:11px;font-weight:600;font-family:var(--mono)}
+.lc-line-spd{fill:none;stroke:var(--lc-spd);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.lc-line-ttft{fill:none;stroke:var(--lc-ttft);stroke-width:2.5;stroke-dasharray:6 4;stroke-linejoin:round;stroke-linecap:round}
+.lc-pt-spd{fill:var(--lc-spd)}
+.lc-pt-ttft{fill:var(--lc-ttft)}
+.lc-legend{display:flex;gap:18px;margin-top:8px;font-size:12px;color:var(--text-2);flex-wrap:wrap}
+.lc-key{display:inline-flex;align-items:center;gap:6px}
+.lc-swatch{width:14px;height:3px;border-radius:2px;display:inline-block}
+.lc-swatch-spd{background:var(--lc-spd)}
+.lc-swatch-ttft{background:var(--lc-ttft)}
+
+@media (max-width:860px){
+  .bench-charts{grid-template-columns:1fr}
+  .bar-row{grid-template-columns:110px 1fr auto}
+}

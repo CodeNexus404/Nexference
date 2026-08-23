@@ -16,7 +16,7 @@ import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
-import { openModal } from '../components/modal.js';
+import { openModal, confirmModal } from '../components/modal.js';
 import { credentialsStore } from '../config/credentialsStore.js';
 import { recordActivity, getActivities } from '../core/activityStore.js';
 import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
@@ -501,7 +501,7 @@ export function renderWorkspace() {
         <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
       </div>
     </div>
-    <div id="wsRecent" class="ws-recent" hidden></div>`;
+`;
 
   fetchEnvironment();
   updateShellStatus();
@@ -525,67 +525,12 @@ async function fetchEnvironment(force) {
     const res = await fetch('/api/environment' + (force ? '/refresh' : ''));
     const env = await res.json();
     renderWorkspaceFromEnv(env);
-    loadRecentExecutions();
+
   } catch {
     body.innerHTML = '<div class="panel"><div class="muted">Could not load environment state.</div></div>';
   }
 }
 
-// Workspace "Recent Executions" — a live read of the v0.9.0 run history
-// (server-backed, secret-free). No content bodies are shown here.
-async function loadRecentExecutions() {
-  const host = document.getElementById('wsRecent');
-  if (!host) return;
-  const relTime = (iso) => {
-    const d = new Date(iso); if (isNaN(d)) return '';
-    const s = (Date.now() - d) / 1000;
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return d.toLocaleDateString();
-  };
-  try {
-    const res = await fetch('/api/executions');
-    const { executions } = await res.json();
-    if (!executions || !executions.length) {
-      host.hidden = false;
-      host.innerHTML = `<div class="empty-state">
-        <div class="empty-ico">◷</div>
-        <h3>No workspace activity yet</h3>
-        <p>Executions you run in the Playground will appear here.</p>
-        <button class="btn btn2" onclick="navigate('playground')">Open Playground</button>
-      </div>`;
-      return;
-    }
-    host.hidden = false;
-    const today = [], earlier = [];
-    executions.forEach((e) => {
-      const d = e.createdAt ? new Date(e.createdAt) : null;
-      (d && d.toDateString() === new Date().toDateString() ? today : earlier).push(e);
-    });
-    const group = (title, list) => list.length ? `
-      <div class="ws-recent-group">
-        <div class="ws-recent-group-h">${title}</div>
-        ${list.slice(0, 5).map((e) => `
-          <div class="ws-recent-item">
-            <span class="dot ${e.success ? 'ok' : 'bad'}"></span>
-            <div class="ws-recent-main">
-              <b>${esc(e.model || '—')}</b>
-              <span class="ws-recent-sub">${esc(e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || ''))}</span>
-            </div>
-            <span class="ws-recent-time">${relTime(e.createdAt)}</span>
-          </div>`).join('')}
-      </div>` : '';
-    host.innerHTML = `
-      <div class="ws-recent-head">
-        <h3>Recent Activity</h3>
-        <button class="btn ghost sm" onclick="openExecutionHistory()">View all</button>
-      </div>
-      ${group('Today', today)}${group('Earlier', earlier)}`;
-  } catch {
-    host.hidden = true;
-  }
-}
 
 function renderWorkspaceFromEnv(env) {
   const body = document.getElementById('wsBody');
@@ -612,6 +557,17 @@ function renderWorkspaceFromEnv(env) {
   const cfgValid = !!cfg.file?.valid;
   const cfgModel = cfg.file?.model || activeModel || null;
   const cfgSource = cfg.file?.baseUrl ? 'cloud' : 'unknown';
+
+  // Inline SVG icon set (consistent, currentColor-driven)
+  const ICON = {
+    client: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 4h16v16H4z'/><path d='m8 10 3 2-3 2'/><path d='M13 14h3'/></svg>",
+    provider: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M17.5 18a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.6-1.4A4 4 0 0 0 6 18z'/></svg>",
+    runtime: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='7' y='7' width='10' height='10' rx='1.5'/><path d='M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3'/></svg>",
+    model: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3 3 8l9 5 9-5z'/><path d='M3 13l9 5 9-5'/></svg>",
+    source: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M9 15l6-6'/><path d='M11 6.5 12.5 5a3.5 3.5 0 0 1 5 5L16 11.5'/><path d='M13 17.5 11.5 19a3.5 3.5 0 0 1-5-5L8 12.5'/></svg>",
+    config: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6h11M19 6h1M4 18h1M9 18h11'/><circle cx='17' cy='6' r='2'/><circle cx='7' cy='18' r='2'/></svg>",
+    play: "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M7 5l12 7-12 7z'/></svg>",
+  };
 
   // ── Recommendations: only data-derived ──
   const recs = [];
@@ -642,29 +598,29 @@ function renderWorkspaceFromEnv(env) {
 
   body.innerHTML = `
     <div class="ws-hero">
-      <div class="ws-kpi reveal-f" style="--d:.04s"><span class="kpi-ico">⌘</span><b>${installedClients.length}</b><span>Clients</span><small>installed &amp; detected</small></div>
-      <div class="ws-kpi reveal-f" style="--d:.08s"><span class="kpi-ico">☁</span><b>${providersConfigured}</b><span>Providers</span><small>API keys configured</small></div>
-      <div class="ws-kpi reveal-f" style="--d:.12s"><span class="kpi-ico">⚙</span><b>${runningRt.length}</b><span>Runtimes</span><small>running locally</small></div>
-      <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">◈</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.04s"><span class="kpi-ico">${ICON.client}</span><b>${installedClients.length}</b><span>Clients</span><small>installed &amp; detected</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.08s"><span class="kpi-ico">${ICON.provider}</span><b>${providersConfigured}</b><span>Providers</span><small>API keys configured</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.12s"><span class="kpi-ico">${ICON.runtime}</span><b>${runningRt.length}</b><span>Runtimes</span><small>running locally</small></div>
+      <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">${ICON.model}</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
     </div>
 
     <div class="panel ws-quick reveal" style="--d:.07s">
       <span class="ws-eyebrow">Quick Actions</span>
       <div class="qa-grid">
         <button class="qa-card" onclick="openWorkflow()">
-          <span class="qa-ico">⚙</span>
+          <span class="qa-ico">${ICON.config}</span>
           <span class="qa-text"><b>Configure Client</b><small>Open the guided configuration workspace</small></span>
         </button>
         <button class="qa-card" onclick="navigate('models')">
-          <span class="qa-ico">◈</span>
+          <span class="qa-ico">${ICON.model}</span>
           <span class="qa-text"><b>Explore Models</b><small>Browse the cloud and local catalogue</small></span>
         </button>
         <button class="qa-card" onclick="navigate('playground')">
-          <span class="qa-ico">▶</span>
+          <span class="qa-ico">${ICON.play}</span>
           <span class="qa-text"><b>Test Playground</b><small>Run a model and inspect metrics</small></span>
         </button>
         <button class="qa-card" onclick="navigate('localai')">
-          <span class="qa-ico">▦</span>
+          <span class="qa-ico">${ICON.runtime}</span>
           <span class="qa-text"><b>Local Runtime</b><small>Manage Ollama / LM Studio</small></span>
         </button>
       </div>
@@ -692,13 +648,13 @@ function renderWorkspaceFromEnv(env) {
         <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
       </div>
       <div class="ws-chain">
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Clients" aria-label="Open Clients page" onclick="navigate('clients')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Clients" aria-label="Open Clients page" onclick="navigate('clients')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.client}</span><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Configuration" aria-label="Open Configuration" onclick="navigate('configuration')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Configuration" aria-label="Open Configuration" onclick="navigate('configuration')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.source}</span><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" aria-label="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" onclick="navigate('${activeProvider ? 'cloud-providers' : (activeRuntime ? 'localai' : 'cloud-providers')}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" aria-label="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" onclick="navigate('${activeProvider ? 'cloud-providers' : (activeRuntime ? 'localai' : 'cloud-providers')}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${activeProvider ? ICON.provider : ICON.runtime}</span><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
         <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Model Library" aria-label="Open Model Library" onclick="navigate('models')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
+        <div class="chain-node clickable" role="button" tabindex="0" title="Open Model Library" aria-label="Open Model Library" onclick="navigate('models')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.model}</span><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
       </div>
       <div class="ws-config-path muted">Config: <span class="mono">${esc(client.configPath || '~/.claude/settings.json')}</span></div>
       <div class="ws-actions-row">
@@ -730,10 +686,7 @@ function renderWorkspaceFromEnv(env) {
       <button class="btn btn2" onclick="navigate('settings')">Manage profiles</button>
     </div>
 
-    <div class="panel ws-activity reveal" style="--d:.35s">
-      <div class="panel-h"><h3>Activity</h3><button class="term-clear" onclick="clearTerm()" title="Clear log"><span>clear</span></button></div>
-      <div class="term"><div class="term-body" id="termOut"></div></div>
-    </div>`;
+`;
 
   // Profiles (references only, no secrets)
   const wsProfiles = document.getElementById('wsProfiles');
@@ -1304,6 +1257,12 @@ export async function cfgApply() { openWorkflow(); }
 
 let deviceTimer = null;
 
+// Live-refresh bridge: every saved benchmark run dispatches 'nx-benchmark'
+// (success or failure) so the Local AI results section repaints immediately
+// without a page reload. renderLocalAI registers the reload callback below.
+let _benchReload = null;
+window.addEventListener('nx-benchmark', () => { if (_benchReload) _benchReload(); });
+
 // Benchmark modal — runs a fixed prompt against a local model and shows the
 // honest metrics returned by the backend (no fabrication on the client).
 function openBenchmarkModal(rt) {
@@ -1346,16 +1305,53 @@ function openBenchmarkModal(rt) {
               const m = metrics || {};
               const rows = [];
               if (m.totalDurationMs != null) rows.push(['Duration', fmt(m.totalDurationMs)]);
-              if (m.timeToFirstTokenMs != null) rows.push(['Time to first token', fmt(m.timeToFirstTokenMs)]);
+              if (m.ttftMs != null) rows.push(['Time to first token', fmt(m.ttftMs)]);
               if (m.inputTokens != null) rows.push(['Input tokens', m.inputTokens]);
               if (m.outputTokens != null) rows.push(['Output tokens', m.outputTokens]);
               if (m.tokensPerSecond != null) rows.push(['Speed', m.tokensPerSecond.toFixed(1) + ' tok/s']);
               resEl.innerHTML = `<div class="pg-metrics-grid">${rows.map((rr) => `<div class="pg-metric"><span>${esc(rr[0])}</span><b>${esc(String(rr[1]))}</b></div>`).join('')}</div>`;
               runBtn.disabled = false; runBtn.textContent = 'Run benchmark';
+              // Persist the real measured result so it appears in the Local AI
+              // "Benchmark Results" section. Never store anything fabricated.
+              try {
+                playgroundService.saveBenchmark({
+                  runtimeId: rt.id, runtimeName: rt.name, model,
+                  metrics: {
+                    totalDurationMs: m.totalDurationMs ?? null,
+                    ttftMs: m.ttftMs ?? null,
+                    tokensPerSecond: m.tokensPerSecond ?? null,
+                    inputTokens: m.inputTokens ?? null,
+                    outputTokens: m.outputTokens ?? null,
+                  },
+                  createdAt: new Date().toISOString(),
+                }).then(() => {
+                  const saved = document.createElement('div');
+                  saved.className = 'bench-saved';
+                  saved.textContent = '✓ Saved to Benchmark Results (Local AI)';
+                  resEl.appendChild(saved);
+                  window.dispatchEvent(new CustomEvent('nx-benchmark'));
+                }).catch(() => {});
+              } catch { /* non-fatal */ }
             },
             onError: (validation, execFailed, msg) => {
-              resEl.innerHTML = `<div class="err">${esc((validation && (validation.reasons || []).join(' ')) || msg || 'Benchmark failed')}</div>`;
+              const reason = (validation && (validation.reasons || []).join(' ')) || msg || 'Benchmark failed';
+              resEl.innerHTML = `<div class="bench-result-card bench-result-err">
+                <div class="bench-result-err-ico">!</div>
+                <div class="bench-result-err-body">
+                  <b>Benchmark failed</b>
+                  <span>${esc(reason)}</span>
+                </div>
+              </div>`;
               runBtn.disabled = false; runBtn.textContent = 'Run benchmark';
+              // Persist the failed run (real, masked) so the Local AI results
+              // graph can show it honestly instead of dropping it.
+              try {
+                playgroundService.saveBenchmark({
+                  runtimeId: rt.id, runtimeName: rt.name, model,
+                  success: false, error: reason, metrics: null,
+                  createdAt: new Date().toISOString(),
+                }).then(() => window.dispatchEvent(new CustomEvent('nx-benchmark'))).catch(() => {});
+              } catch { /* non-fatal */ }
             },
           }
         );
@@ -1440,6 +1436,16 @@ export async function renderLocalAI() {
         <span class="muted" id="rtCount">—</span>
       </div>
       <div id="rtList" class="rt-grid"><div class="muted">Detecting local runtimes…</div></div>
+      <section class="panel lai-bench" id="laiBench">
+        <div class="lai-bench-head">
+          <div>
+            <span class="ws-eyebrow">Benchmark Results</span>
+            <p class="muted">Real throughput measured from benchmark runs on local models — never estimated.</p>
+          </div>
+          <button class="btn btn2 sm" id="benchClear" type="button">Clear</button>
+        </div>
+        <div id="benchCharts"><div class="muted">No benchmarks yet — run one from a runtime's Benchmark button.</div></div>
+      </section>
     </div>`;
 
   const rtList = grid.querySelector('#rtList');
@@ -1562,9 +1568,134 @@ export async function renderLocalAI() {
     } catch { /* keep last good values */ }
   }
 
+  async function loadBenchmarksUI() {
+    const host = grid.querySelector('#benchCharts');
+    if (!host) return;
+    try {
+      const benchmarks = await playgroundService.listBenchmarks();
+      if (!benchmarks.length) { host.innerHTML = '<div class="muted">No benchmarks yet — run one from a runtime’s Benchmark button.</div>'; return; }
+      const byModel = new Map();
+      for (const b of benchmarks) {
+        const key = b.model || 'unknown';
+        if (!byModel.has(key)) byModel.set(key, { model: key, runtime: b.runtimeName || '', n: 0, okN: 0, spd: 0, ttft: 0, failN: 0, lastErr: null });
+        const g = byModel.get(key);
+        g.n++;
+        const ok = b.success !== false && b.metrics?.tokensPerSecond != null;
+        if (ok) { g.okN++; g.spd += b.metrics.tokensPerSecond; g.ttft += (b.metrics.ttftMs || 0); }
+        else { g.failN++; if (b.error) g.lastErr = b.error; }
+      }
+      const rows = [...byModel.values()].map((g) => ({
+        model: g.model, runtime: g.runtime, n: g.n, okN: g.okN, failN: g.failN, lastErr: g.lastErr,
+        spd: g.okN ? +(g.spd / g.okN).toFixed(1) : null,
+        ttft: g.okN ? Math.round(g.ttft / g.okN) : null,
+      })).sort((a, b) => (b.spd || 0) - (a.spd || 0));
+      const successRows = rows.filter((r) => r.spd != null);
+      let html = '';
+      if (successRows.length) {
+        html += renderLineChart(successRows);
+      } else {
+        html += '<div class="muted">No successful benchmark metrics recorded yet.</div>';
+      }
+      const failedRows = rows.filter((r) => r.failN > 0);
+      if (failedRows.length) {
+        html += `<div class="bench-chart bench-failed">
+          <div class="bench-chart-h">Failed runs</div>
+          <div class="bar-chart">${failedRows.map((r) => `
+            <div class="bar-row bar-row-err" title="${esc(r.lastErr || 'Failed')}">
+              <span class="bar-label" title="${esc(r.model)}">${esc(r.model)}</span>
+              <span class="bar-track"><span class="bar-fill bar-fill-err" style="width:16%"></span></span>
+              <span class="bar-val err-val">${esc(r.failN + ' failed')}</span>
+            </div>`).join('')}</div>
+        </div>`;
+      }
+      host.innerHTML = html;
+    } catch {
+      host.innerHTML = '<div class="muted">Could not load benchmark results.</div>';
+    }
+  }
+
+  // Graph-like benchmark view: a single line graph with a categorical X axis
+  // (models) and a dual Y axis — left = speed (tok/s), right = time-to-first-
+  // token (ms). Two lines (solid = speed, dashed = TTFT) connect the per-model
+  // averages; points carry the exact value in a tooltip. Pure SVG, no libs.
+  function renderLineChart(rows) {
+    const W = 660, H = 320;
+    const m = { l: 52, r: 54, t: 30, b: 58 };
+    const plotW = W - m.l - m.r;
+    const plotH = H - m.t - m.b;
+    const n = rows.length;
+    const maxSpd = Math.max(...rows.map((r) => r.spd || 0), 1) * 1.12;
+    const maxTtft = Math.max(...rows.map((r) => r.ttft || 0), 1) * 1.12;
+    const xAt = (i) => (n === 1 ? m.l + plotW / 2 : m.l + (i * plotW) / (n - 1));
+    const ySpd = (v) => m.t + plotH - (v / maxSpd) * plotH;
+    const yTtft = (v) => m.t + plotH - (v / maxTtft) * plotH;
+    const ticks = 4;
+    let grid = '', yl = '', yr = '';
+    for (let i = 0; i <= ticks; i++) {
+      const y = m.t + plotH - (i / ticks) * plotH;
+      grid += `<line x1="${m.l}" y1="${y.toFixed(1)}" x2="${m.l + plotW}" y2="${y.toFixed(1)}" class="lc-grid"/>`;
+      yl += `<text x="${m.l - 9}" y="${(y + 4).toFixed(1)}" class="lc-yla" text-anchor="end">${Math.round((maxSpd * i) / ticks)}</text>`;
+      yr += `<text x="${m.l + plotW + 9}" y="${(y + 4).toFixed(1)}" class="lc-yra" text-anchor="start">${Math.round((maxTtft * i) / ticks)}</text>`;
+    }
+    // Distinct per-model colour so each model's name + points are identifiable.
+    // Kept off-purple to respect the graphite/azure design language.
+    const PALETTE = ['#5b8def', '#f5a623', '#34d399', '#22d3ee', '#fb7185', '#a3e635', '#f97316', '#38bdf8'];
+    let xl = '', spdPts = [], ttftPts = [], circ = '';
+    rows.forEach((r, i) => {
+      const col = PALETTE[i % PALETTE.length];
+      const x = xAt(i);
+      const label = r.model && r.model.length > 12 ? r.model.slice(0, 11) + '…' : (r.model || '?');
+      xl += `<text x="${x.toFixed(1)}" y="${m.t + plotH + 20}" class="lc-xla" style="fill:${col}" text-anchor="middle">${esc(label)}</text>`;
+      if (r.spd != null) {
+        spdPts.push(`${x.toFixed(1)},${ySpd(r.spd).toFixed(1)}`);
+        circ += `<circle cx="${x.toFixed(1)}" cy="${ySpd(r.spd).toFixed(1)}" r="4" style="fill:${col}" stroke="var(--surface)" stroke-width="1.2"><title>${esc(r.model)}: ${r.spd} tok/s</title></circle>`;
+      }
+      if (r.ttft != null) {
+        ttftPts.push(`${x.toFixed(1)},${yTtft(r.ttft).toFixed(1)}`);
+        circ += `<circle cx="${x.toFixed(1)}" cy="${yTtft(r.ttft).toFixed(1)}" r="4" style="fill:${col}" stroke="var(--surface)" stroke-width="1.2"><title>${esc(r.model)}: ${r.ttft} ms</title></circle>`;
+      }
+    });
+    return `<div class="bench-linechart">
+      <div class="bench-chart-h">Throughput &amp; latency by model</div>
+      <svg viewBox="0 0 ${W} ${H}" class="lc-svg" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Benchmark line graph: speed and time to first token per model">
+        ${grid}
+        <line x1="${m.l}" y1="${m.t}" x2="${m.l}" y2="${m.t + plotH}" class="lc-axis"/>
+        <line x1="${m.l + plotW}" y1="${m.t}" x2="${m.l + plotW}" y2="${m.t + plotH}" class="lc-axis"/>
+        <line x1="${m.l}" y1="${m.t + plotH}" x2="${m.l + plotW}" y2="${m.t + plotH}" class="lc-axis"/>
+        ${yl}${yr}${xl}
+        <text x="${m.l - 9}" y="${m.t - 14}" class="lc-axis-title" text-anchor="end">tok/s</text>
+        <text x="${m.l + plotW + 9}" y="${m.t - 14}" class="lc-axis-title" text-anchor="start">ms</text>
+        <text x="${m.l + plotW / 2}" y="${H - 10}" class="lc-axis-title" text-anchor="middle">Model</text>
+        ${spdPts.length ? `<polyline points="${spdPts.join(' ')}" class="lc-line-spd"/>` : ''}
+        ${ttftPts.length ? `<polyline points="${ttftPts.join(' ')}" class="lc-line-ttft"/>` : ''}
+        ${circ}
+      </svg>
+      <div class="lc-legend">
+        <span class="lc-key"><span class="lc-swatch lc-swatch-spd"></span>Speed (tok/s)</span>
+        <span class="lc-key"><span class="lc-swatch lc-swatch-ttft"></span>Time to first token (ms)</span>
+      </div>
+    </div>`;
+  }
+
   if (deviceTimer) clearInterval(deviceTimer);
+  _benchReload = loadBenchmarksUI;
   await loadDevice();
   await loadRuntimes();
+  await loadBenchmarksUI();
+  const benchClear = grid.querySelector('#benchClear');
+  if (benchClear && !benchClear.dataset.wired) {
+    benchClear.dataset.wired = '1';
+    benchClear.addEventListener('click', async () => {
+      const ok = await confirmModal({
+        title: 'Clear benchmark results?',
+        message: 'This removes all saved benchmark results from this device.',
+        confirmLabel: 'Clear', danger: true,
+      });
+      if (!ok) return;
+      try { await playgroundService.clearBenchmarks(); notify.toast('Benchmarks cleared', 'success'); loadBenchmarksUI(); }
+      catch { notify.toast('Could not clear benchmarks', 'error'); }
+    });
+  }
   deviceTimer = setInterval(loadDevice, 3000);
 }
 
@@ -1893,13 +2024,37 @@ const BENCH_PROMPT = 'Explain how a transformer language model works. Cover self
 // Playground page has been rendered.
 async function openExecutionHistory() {
   const execs = await historyStore.listExecutions();
-  const body = `<div class="pg-hist">${execs.length ? execs.map((e) => `
+  const body = `<div class="pg-hist-head">
+      <div class="pg-hist-count">${execs.length ? execs.length + (execs.length === 1 ? ' run' : ' runs') : 'No runs'}</div>
+      <button class="btn btn2 sm" id="pgHistClear" type="button">Clear history</button>
+    </div>
+    <div class="pg-hist">${execs.length ? execs.map((e) => `
     <div class="pg-hist-item">
       <div class="pg-hist-top"><b>${esc(e.model || '—')}</b><span class="badge ${e.success ? 'ok' : 'bad'}">${esc(e.status || '')}</span></div>
       <div class="pg-hist-meta">${esc((e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || '')))} · ${e.createdAt ? new Date(e.createdAt).toLocaleString() : ''}</div>
       <div class="pg-hist-prev">${esc((e.promptPreview || '').slice(0, 140))}</div>
     </div>`).join('') : '<div class="muted">No executions yet.</div>'}</div>`;
-  openModal({ title: 'Execution history', size: 'wide', bodyHTML: body });
+  openModal({
+    title: 'Execution history', size: 'wide', bodyHTML: body,
+    onMount: (b) => {
+      const clr = b.querySelector('#pgHistClear');
+      if (clr) clr.addEventListener('click', async () => {
+        const ok = await confirmModal({
+          title: 'Clear execution history?',
+          message: 'This permanently removes all saved runs from this device. This cannot be undone.',
+          confirmLabel: 'Clear', danger: true,
+        });
+        if (!ok) return;
+        try {
+          await playgroundService.clearHistory();
+          notify.toast('Execution history cleared', 'success');
+          openExecutionHistory();
+        } catch {
+          notify.toast('Could not clear history', 'error');
+        }
+      });
+    },
+  });
 }
 // Exposed globally so inline onclick handlers (Workspace "View all", Playground History) resolve it.
 window.openExecutionHistory = openExecutionHistory;

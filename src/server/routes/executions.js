@@ -9,6 +9,7 @@
 import {
   createExecution, compareExecutions, getExecution, listExecutions,
   streamExecution, cancelExecution, getCapabilities,
+  saveBenchmark, listBenchmarks, clearBenchmarks, clearExecutions,
 } from '../execution/executionService.js';
 import { validateExecution } from '../execution/executionValidation.js';
 
@@ -45,6 +46,31 @@ export function registerExecutionRoutes(app) {
   // History list (no content bodies, no secrets).
   app.get('/api/executions', (req, res) => {
     res.json({ executions: listExecutions() });
+  });
+
+  // Clear all execution history (no secrets are stored anyway).
+  app.delete('/api/executions', (req, res) => {
+    res.json(clearExecutions());
+  });
+
+  // Persist a real measured benchmark result.
+  app.post('/api/benchmarks', async (req, res) => {
+    try {
+      const rec = await saveBenchmark(req.body || {});
+      res.json({ ok: true, benchmark: rec });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // List benchmark results.
+  app.get('/api/benchmarks', (req, res) => {
+    res.json({ benchmarks: listBenchmarks() });
+  });
+
+  // Clear all benchmark results.
+  app.delete('/api/benchmarks', (req, res) => {
+    res.json(clearBenchmarks());
   });
 
   // Honest support matrix.

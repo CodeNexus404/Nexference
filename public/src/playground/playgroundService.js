@@ -74,4 +74,26 @@ export const playgroundService = {
   async compare(req) {
     return post('/api/executions/compare', req);
   },
+
+  // Clear all execution history (server-backed, secret-free).
+  async clearHistory() {
+    const res = await fetch('/api/executions', { method: 'DELETE' });
+    return res.json().catch(() => ({}));
+  },
+
+  // Persist a real measured benchmark result.
+  async saveBenchmark(rec) {
+    return post('/api/benchmarks', rec);
+  },
+
+  async listBenchmarks() {
+    const res = await fetch('/api/benchmarks');
+    const data = await res.json().catch(() => ({}));
+    return data.benchmarks || [];
+  },
+
+  async clearBenchmarks() {
+    const res = await fetch('/api/benchmarks', { method: 'DELETE' });
+    return res.json().catch(() => ({}));
+  },
 };

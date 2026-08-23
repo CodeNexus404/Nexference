@@ -61,26 +61,6 @@ export const CLIENTS = [
     note: 'Gemini CLI uses the Gemini API. Auto-configure guidance only.',
   },
   {
-    id: 'aider', name: 'Aider', logo: '/clients/aider.png', support: 'unsupported', level: 3, adapter: null,
-    connectionTypes: [], configPath: '~/.aider.conf.yml',
-    capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
-  },
-  {
-    id: 'cline', name: 'Cline', logo: '/clients/cline.png', support: 'unsupported', level: 3, adapter: null,
-    connectionTypes: [], configPath: 'VS Code settings',
-    capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
-  },
-  {
-    id: 'continue', name: 'Continue', logo: '/clients/continue.png', support: 'unsupported', level: 3, adapter: null,
-    connectionTypes: [], configPath: '~/.continue/config.json',
-    capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
-  },
-  {
-    id: 'roo', name: 'Roo Code', logo: '/clients/roo.svg', support: 'unsupported', level: 3, adapter: null,
-    connectionTypes: [], configPath: 'VS Code settings',
-    capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
-  },
-  {
     id: 'cursor', name: 'Cursor', logo: '/clients/cursor.svg', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: '~/.cursor/config.json',
     capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',

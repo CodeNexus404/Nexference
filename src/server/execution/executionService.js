@@ -33,6 +33,17 @@ function saveHistory() {
   try { mkdirSync(HISTORY_DIR, { recursive: true }); writeFileSync(HISTORY_PATH, JSON.stringify(history.slice(0, MAX_HISTORY), null, 2)); } catch { /* best effort */ }
 }
 
+// ── Local benchmark results (real measured metrics only; no secrets) ──
+const BENCH_PATH = join(HISTORY_DIR, 'benchmarks.json');
+const MAX_BENCHMARKS = 200;
+let benchmarks = loadBenchmarks();
+function loadBenchmarks() {
+  try { return JSON.parse(readFileSync(BENCH_PATH, 'utf8')) || []; } catch { return []; }
+}
+function saveBenchmarks() {
+  try { mkdirSync(HISTORY_DIR, { recursive: true }); writeFileSync(BENCH_PATH, JSON.stringify(benchmarks.slice(0, MAX_BENCHMARKS), null, 2)); } catch { /* best effort */ }
+}
+
 export function getCapabilities() { return getExecutionCapabilities(); }
 
 function maskSecrets(text = '') {
@@ -285,6 +296,43 @@ export function getExecution(id) {
 
 export function listExecutions() {
   return history.map((h) => ({ ...h, content: undefined }));
+}
+
+// Persist a real measured benchmark result (no fabrication, no secrets).
+// Failed runs are kept too (success:false + a masked error) so the Local AI
+// results graph can show failures honestly instead of silently dropping them.
+export function saveBenchmark(rec = {}) {
+  const entry = {
+    id: randomUUID(),
+    runtimeId: rec.runtimeId || null,
+    runtimeName: rec.runtimeName || null,
+    model: rec.model || null,
+    success: rec.success ?? null,
+    error: rec.error ? maskSecrets(String(rec.error)) : null,
+    metrics: rec.metrics || null,
+    usage: rec.usage || null,
+    createdAt: rec.createdAt || new Date().toISOString(),
+  };
+  benchmarks.push(entry);
+  if (benchmarks.length > MAX_BENCHMARKS) benchmarks = benchmarks.slice(-MAX_BENCHMARKS);
+  saveBenchmarks();
+  return entry;
+}
+
+export function listBenchmarks() {
+  return benchmarks.map((b) => ({ ...b }));
+}
+
+export function clearBenchmarks() {
+  benchmarks = [];
+  saveBenchmarks();
+  return { ok: true };
+}
+
+export function clearExecutions() {
+  history = [];
+  saveHistory();
+  return { ok: true };
 }
 
 export function streamExecution(id, req, res) {
