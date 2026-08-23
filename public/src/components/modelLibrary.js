@@ -62,7 +62,6 @@ function modelRowHTML(m, currentId) {
       </div>
       <div class="ml-row-acts">
         <button class="btn btn2 ml-use" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">Use</button>
-        <button class="btn btn2 ml-det" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">Details</button>
       </div>
     </div>`;
 }
@@ -85,31 +84,61 @@ async function showDetails(providerId, modelId) {
   const caps = detail.capabilities || {};
   const prov2 = detail.provenance || {};
   const fetched = prov2.fetchedAt ? new Date(prov2.fetchedAt).toLocaleString() : DASH;
+
+  // Only render fields that actually carry data — no "—" clutter.
+  const rows = [];
+  const addRow = (label, valueHTML) => {
+    if (valueHTML == null || valueHTML === '') return;
+    rows.push(`<div class="kv"><span>${esc(label)}</span><b>${valueHTML}</b></div>`);
+  };
+  addRow('Provider', esc(detail.providerName || detail.providerId || DASH));
+  if (detail.kind) addRow('Kind', esc(detail.kind));
+  if (detail.source || detail.sourceStatus) addRow('Source', `${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus)}`);
+  if (detail.pricing) addRow('Pricing', esc(typeof detail.pricing === 'string' ? detail.pricing : JSON.stringify(detail.pricing)));
+  if (detail.isFree === true || detail.isPaid === true) addRow('Free', detail.isFree ? 'Yes' : 'No');
+  if (detail.contextLength != null) addRow('Context length', fmt(detail.contextLength));
+  if (detail.parameters) addRow('Parameters', esc(typeof detail.parameters === 'string' ? detail.parameters : JSON.stringify(detail.parameters)));
+  if (detail.size) addRow('Size', esc(detail.size));
+  if (detail.quantization) addRow('Quantization', esc(detail.quantization));
+  if (detail.installed === true || detail.installed === false) addRow('Installed', detail.installed ? 'Yes' : 'No');
+
   const capBadges = ['chat', 'vision', 'reasoning', 'tools', 'embeddings']
     .map((c) => capBadge(c, caps[c])).join('');
+  const capHTML = capBadges || '<span class="muted">No capability data reported.</span>';
+  const provHTML = `<div class="muted">Last fetched: ${esc(fetched)} · total in catalogue: ${esc(prov2.total != null ? prov2.total : DASH)} · source: ${esc(prov2.source || DASH)}</div>`;
+  const recHTML = detail.recommendationReason ? `<div class="ml-rec-note">★ ${esc(detail.recommendationReason)}</div>` : '';
+
   const bodyHTML = `
     <div class="ml-detail">
       <div class="ml-detail-head">
         <h4 class="mono">${esc(detail.name || detail.id)}</h4>
         <span class="ml-id">${esc(detail.id)}</span>
       </div>
-      <div class="kv"><span>Provider</span><b>${esc(detail.providerName || detail.providerId || DASH)}</b></div>
-      <div class="kv"><span>Kind</span><b>${esc(detail.kind || DASH)}</b></div>
-      <div class="kv"><span>Source</span><b>${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus)}</b></div>
-      <div class="kv"><span>Pricing</span><b>${detail.pricing ? esc(typeof detail.pricing === 'string' ? detail.pricing : JSON.stringify(detail.pricing)) : DASH}</b></div>
-      <div class="kv"><span>Free</span><b>${detail.isFree ? 'Yes' : (detail.isPaid ? 'No' : DASH)}</b></div>
-      <div class="kv"><span>Context length</span><b>${fmt(detail.contextLength)}</b></div>
-      <div class="kv"><span>Parameters</span><b>${fmt(detail.parameters)}</b></div>
-      <div class="kv"><span>Size</span><b>${fmt(detail.size)}</b></div>
-      <div class="kv"><span>Quantization</span><b>${fmt(detail.quantization)}</b></div>
-      <div class="kv"><span>Installed</span><b>${detail.installed === true ? 'Yes' : (detail.installed === false ? 'No' : DASH)}</b></div>
+      ${rows.join('')}
       <h4 style="margin:14px 0 6px">Capabilities</h4>
-      <div class="ml-caps">${capBadges || '<span class="muted">No capability data reported.</span>'}</div>
+      <div class="ml-caps">${capHTML}</div>
       <h4 style="margin:14px 0 6px">Provenance</h4>
-      <div class="muted">Last fetched: ${esc(fetched)} · total in catalogue: ${esc(prov2.total != null ? prov2.total : DASH)} · source: ${esc(prov2.source || DASH)}</div>
-      ${detail.recommendationReason ? `<div class="ml-rec-note">★ ${esc(detail.recommendationReason)}</div>` : ''}
+      ${provHTML}
+      ${recHTML}
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn2" id="mlDetClose" type="button">Close</button>
+      <button class="btn btn-go" id="mlDetUse" type="button">Use this model</button>
     </div>`;
-  openModal({ title: 'Model details', subtitle: `${esc(prov ? prov.name : detail.providerId)} · honest metadata only`, size: 'wide', bodyHTML });
+
+  openModal({
+    title: 'Model details',
+    subtitle: `${esc(prov ? prov.name : detail.providerId)} · honest metadata only`,
+    size: 'wide',
+    bodyHTML,
+    onMount: (body, ctrl) => {
+      body.querySelector('#mlDetClose').addEventListener('click', () => ctrl.close());
+      body.querySelector('#mlDetUse').addEventListener('click', () => {
+        if (window.useModel) window.useModel(providerId, modelId);
+        ctrl.close();
+      });
+    },
+  });
 }
 
 // ── Main explorer ──
@@ -161,12 +190,10 @@ export async function renderModelLibrary(host) {
     return list;
   }
 
-  function draw() {
-    const list = applyFilter();
-    const groups = groupByProvider(list);
-    const recSet = new Set(recommended.map((r) => r.providerId + '::' + r.id));
-    const cur = { ...currentSelection() };
-
+  // Render the (stateful) toolbar + filters ONCE. The model list lives in
+  // #mlDyn and is the only part re-rendered on filter changes, so the search
+  // box keeps focus/text and the toggle/segment state is preserved.
+  function buildShell() {
     const statsChips = stats ? `
       <div class="ml-stats">
         <span class="ml-chip"><b>${stats.cloudTotal}</b> cloud</span>
@@ -175,6 +202,32 @@ export async function renderModelLibrary(host) {
         <span class="ml-chip"><b>${stats.localTotal}</b> local</span>
         <span class="ml-chip"><b>${stats.providersWithModels}</b> providers</span>
       </div>` : '';
+    host.innerHTML = `
+      <div class="ml-toolbar">
+        <div class="ml-stats-wrap">${statsChips}</div>
+        <button class="btn btn2 ml-refresh" id="mlRefresh">↻ Refresh catalogue</button>
+      </div>
+      <div class="ml-filters">
+        <input class="inp ml-search" placeholder="Search models across providers…" aria-label="Search models" value="${esc(filterState.q)}" />
+        <div class="ml-seg">
+          <button class="ml-seg-btn ${filterState.type === 'all' ? 'on' : ''}" data-type="all">All</button>
+          <button class="ml-seg-btn ${filterState.type === 'cloud' ? 'on' : ''}" data-type="cloud">Cloud</button>
+          <button class="ml-seg-btn ${filterState.type === 'local' ? 'on' : ''}" data-type="local">Local</button>
+        </div>
+        <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+        <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
+        <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
+      </div>
+      <div id="mlDyn"></div>`;
+    wireStatic(host);
+  }
+
+  // Re-render only the dynamic list (search/segment/toggle state lives in the
+  // persistent filter controls, so it is never wiped).
+  function draw() {
+    const list = applyFilter();
+    const groups = groupByProvider(list);
+    const cur = { ...currentSelection() };
 
     const recHTML = recommended.length ? `
       <div class="ml-section">
@@ -215,30 +268,14 @@ export async function renderModelLibrary(host) {
       </div>`;
     }).join('') : '<div class="muted">No models match your filters.</div>';
 
-    host.innerHTML = `
-      <div class="ml-toolbar">
-        <div class="ml-stats-wrap">${statsChips}</div>
-        <button class="btn btn2 ml-refresh" id="mlRefresh">↻ Refresh catalogue</button>
-      </div>
-      <div class="ml-filters">
-        <input class="inp ml-search" placeholder="Search models across providers…" aria-label="Search models" />
-        <div class="ml-seg">
-          <button class="ml-seg-btn on" data-type="all">All</button>
-          <button class="ml-seg-btn" data-type="cloud">Cloud</button>
-          <button class="ml-seg-btn" data-type="local">Local</button>
-        </div>
-        <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
-        <label class="ml-toggle"><input type="checkbox" class="ml-free-chk"> Free only</label>
-        <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk"> Chat</label>
-      </div>
-      ${recHTML}
-      ${recentHTML}
-      <div class="ml-list">${listHTML}</div>`;
-
-    wire(host, list);
+    const dyn = host.querySelector('#mlDyn');
+    if (!dyn) return;
+    dyn.innerHTML = `${recHTML}${recentHTML}<div class="ml-list">${listHTML}</div>`;
+    wireDyn(dyn);
   }
 
-  function wire(root, list) {
+  // Listeners bound once to the persistent filter controls.
+  function wireStatic(root) {
     const search = root.querySelector('.ml-search');
     search.addEventListener('input', (e) => { filterState.q = e.target.value; draw(); });
     root.querySelectorAll('.ml-seg-btn').forEach((b) => b.addEventListener('click', () => {
@@ -257,22 +294,18 @@ export async function renderModelLibrary(host) {
         recommended = await modelService.getRecommended();
         stats = await modelService.getStats();
         notify.toast('Model catalogue refreshed', 'success');
-        draw();
+        buildShell(); draw();
       } catch { notify.toast('Refresh failed', 'error'); }
       finally { btn.disabled = false; btn.classList.remove('spinning'); }
     });
+  }
 
+  // Listeners bound to the dynamic list after each draw().
+  function wireDyn(root) {
     root.querySelectorAll('.ml-row, .ml-rec-card, .ml-recent-chip').forEach((el) => {
       if (el.classList.contains('ml-recent-clear')) return;
-      el.addEventListener('click', (e) => {
-        if (e.target.closest('.ml-det')) { showDetails(el.dataset.p, el.dataset.id); return; }
-        if (e.target.closest('.ml-use')) { useModel(el.dataset.p, el.dataset.id); return; }
-        // Clicking the row opens details (unless it's an action button).
-        if (e.target.closest('.ml-use') || e.target.closest('.ml-det')) return;
-        showDetails(el.dataset.p, el.dataset.id);
-      });
+      el.addEventListener('click', () => showDetails(el.dataset.p, el.dataset.id));
     });
-    root.querySelectorAll('.ml-det').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); showDetails(b.dataset.p, b.dataset.id); }));
     root.querySelectorAll('.ml-use').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); useModel(b.dataset.p, b.dataset.id); }));
     const clearBtn = root.querySelector('.ml-recent-clear');
     if (clearBtn) clearBtn.addEventListener('click', (e) => { e.stopPropagation(); modelService.clearRecent(); notify.toast('Recent cleared', 'info'); draw(); });
@@ -297,6 +330,7 @@ export async function renderModelLibrary(host) {
     draw();
   }
 
+  buildShell();
   draw();
 }
 

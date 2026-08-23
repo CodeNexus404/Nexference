@@ -27,17 +27,6 @@ router.register('settings', UI.renderSettings);
 
 // Keep the shell in sync with the active route (no flash: inline script already
 // set data-page before paint; this stays consistent on every navigation).
-const PAGE_TITLES = {
-  workspace: 'Workspace',
-  'cloud-providers': 'Cloud Providers',
-  localai: 'Local AI',
-  models: 'Models',
-  clients: 'Clients',
-  configuration: 'Configuration',
-  playground: 'Playground',
-  settings: 'Settings',
-};
-
 router.onRouteChange((name) => {
   document.body.dataset.page = name;
   document.querySelectorAll('.nav-item').forEach((el) => {

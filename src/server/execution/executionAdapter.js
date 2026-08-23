@@ -38,6 +38,12 @@ async function readOpenAISSE(res, onToken) {
       if (!data || data === '[DONE]') continue;
       try {
         const j = JSON.parse(data);
+        // LM Studio streams failures as `event: error` → `data: {error:…}`; surface
+        // those honestly instead of silently yielding empty output.
+        if (j.error) {
+          const msg = typeof j.error === 'string' ? j.error : (j.error.message || 'Local runtime stream error');
+          throw new Error('LMSTUDIO_STREAM_ERROR:' + msg);
+        }
         // Captures both normal output (`content`) and reasoning-model thinking
         // (`reasoning_content` / `reasoning`), so reasoning models still surface
         // visible output instead of an empty stream.
@@ -45,7 +51,10 @@ async function readOpenAISSE(res, onToken) {
         const piece = delta.content || delta.reasoning_content || delta.reasoning || '';
         if (piece) { content += piece; onToken && onToken(piece); }
         if (j.usage) usage = { inputTokens: j.usage.prompt_tokens ?? null, outputTokens: j.usage.completion_tokens ?? null };
-      } catch { /* ignore malformed chunk */ }
+      } catch (e) {
+        if (e.message && e.message.startsWith('LMSTUDIO_STREAM_ERROR:')) throw new Error(e.message.slice('LMSTUDIO_STREAM_ERROR:'.length));
+        /* ignore malformed chunk */
+      }
     }
   }
   return { content, usage };
@@ -132,6 +141,7 @@ async function executeOpenAILocal({ runtimeId, model, messages, systemPrompt, pa
   const body = JSON.stringify({
     model, messages: msgs, stream: !!stream,
     temperature: parameters?.temperature, max_tokens: parameters?.maxTokens, top_p: parameters?.topP,
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
   });
   const res = await fetch(endpoint, { method: 'POST', headers, body, signal });
   if (!res.ok) {

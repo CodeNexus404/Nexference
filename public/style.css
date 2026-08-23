@@ -570,12 +570,25 @@ body{background:var(--bg);background-image:radial-gradient(1200px 600px at 80% -
 .nav-item:hover{background:var(--surface-2);color:var(--text)}
 .nav-item.active{background:var(--accent-soft);color:var(--text);border-color:var(--accent-line);box-shadow:inset 3px 0 0 var(--accent)}
 .nav-item.active .ni{opacity:1}
+.nav-group{display:flex;flex-direction:column;gap:4px}
+.nav-group + .nav-group{margin-top:16px}
+.nav-group-label{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);padding:2px 13px;margin-bottom:2px}
 .sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
 .ver{font-size:11px;color:var(--text-3);padding-left:8px;letter-spacing:.4px}
 
 /* Content */
 .content{padding:20px 26px 40px;max-width:1200px;width:100%}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px;position:sticky;top:0;z-index:30;padding:10px 0 12px;background:linear-gradient(180deg,var(--bg) 62%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border-faint)}
+.cfg-status{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:100px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--surface-2);color:var(--text-2);white-space:nowrap}
+.cfg-status .dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);box-shadow:0 0 0 3px color-mix(in srgb,var(--text-3) 22%,transparent);flex:0 0 auto}
+.cfg-status.needs{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 38%,transparent);background:var(--warning-soft)}
+.cfg-status.needs .dot{background:var(--warning);box-shadow:0 0 0 3px color-mix(in srgb,var(--warning) 24%,transparent)}
+.cfg-status.ok{color:var(--success);border-color:color-mix(in srgb,var(--success) 38%,transparent);background:var(--success-soft)}
+.cfg-status.ok .dot{background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 24%,transparent)}
+.cfg-status.unsaved{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+.cfg-status.unsaved .dot{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.cfg-status.copy{color:var(--text-2);border-color:var(--border-strong);background:var(--surface-3)}
+.cfg-status.copy .dot{background:var(--text-2)}
 .crumb{font-family:var(--display);font-weight:700;font-size:13px;color:var(--text-2);letter-spacing:.3px;display:flex;align-items:center}
 .crumb-home{cursor:pointer;color:var(--text-3);transition:color var(--fast) var(--ease)}
 .crumb-home:hover{color:var(--accent)}
@@ -833,38 +846,8 @@ body[data-page="configuration"] #page-configuration{display:block}
 .rec-item:last-child,.ws-next-item:last-child{border-bottom:none}
 
 /* Responsive */
-@media (max-width:880px){
-  /* On small screens the sidebar becomes a horizontal top bar in BOTH states,
-     so the collapsed 74px rail must be neutralised here (its specificity would
-     otherwise win and leave a broken 74px column). */
-  .app-shell{grid-template-columns:1fr}
-  html.sidebar-collapsed .app-shell{grid-template-columns:1fr}
-  .sidebar{
-    position:relative;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:12px;
-    padding:12px 16px;border-right:none;border-bottom:1px solid var(--border);overflow:visible;
-  }
-  .brand{flex-direction:row;gap:10px;padding:0}
-  .brand-txt{display:block}
-  .nav{flex-direction:row;flex-wrap:wrap;margin-top:0;flex:1 1 auto}
-  .nav-toggle{margin-left:auto}
-  .nav-item{justify-content:flex-start;padding:9px 12px}
-  .nav-item .ni{width:20px;flex:0 0 20px}
-  .nav-item .ni svg{width:19px;height:19px}
-  .sidebar-foot{margin-top:0;flex-direction:row;margin-left:auto;flex:0 0 auto;padding-left:0;align-items:center}
-  .ver{display:block;padding-left:0}
-  /* Collapsed on mobile: compact icon-only horizontal bar (labels hidden). */
-  html.sidebar-collapsed .brand{flex-direction:row}
-  html.sidebar-collapsed .brand-txt,
-  html.sidebar-collapsed .nav-label,
-  html.sidebar-collapsed .ver{display:none}
-  html.sidebar-collapsed .nav-item{justify-content:center;padding:9px 12px}
-  html.sidebar-collapsed .nav-item .ni{width:20px;flex:0 0 20px}
-  html.sidebar-collapsed .nav-item .ni svg{width:19px;height:19px}
-  html.sidebar-collapsed .sidebar-foot{align-items:center}
-  .content{padding:16px 16px 32px}
-  .ws-grid,.cfg-wrap,.settings-grid{grid-template-columns:1fr}
-  .provider-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-}
+/* (The max-width:880px mobile pass is consolidated into the single block
+   near the end of this responsive section.) */
 
 /* Medium screens: keep the rail usable but give content more room when expanded. */
 @media (min-width:881px) and (max-width:1080px){
@@ -895,6 +878,7 @@ html.sidebar-collapsed .sidebar{padding:18px 10px;overflow:hidden}
 html.sidebar-collapsed .brand{flex-direction:column;gap:10px;justify-content:center;padding:4px 0}
 html.sidebar-collapsed .brand-txt,
 html.sidebar-collapsed .nav-label,
+html.sidebar-collapsed .nav-group-label,
 html.sidebar-collapsed .ver,
 html.sidebar-collapsed #pathText{display:none}
 html.sidebar-collapsed .nav-toggle{margin-left:0}
@@ -1007,10 +991,13 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 .ws-config{display:flex;flex-direction:column;gap:14px}
 .ws-config-head{display:flex;align-items:center;justify-content:space-between}
 .ws-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-3)}
-.ws-config-body{display:flex;flex-direction:column;gap:2px}
-.ws-config-body .kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border-faint);font-size:14px}
-.ws-config-body .kv span{color:var(--text-3)}
-.ws-config-body .kv b{font-weight:600}
+.ws-chain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
+.chain-node{flex:1 1 130px;min-width:0;padding:10px 12px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);display:flex;flex-direction:column;gap:3px}
+.chain-node .chain-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
+.chain-node b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chain-arrow{display:flex;align-items:center;color:var(--text-3);font-size:15px;flex:0 0 auto}
+.ws-config-path{font-size:12px}
+.ws-config-path .mono{font-family:var(--mono)}
 .ws-actions-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
 .ws-quick .qa-grid{grid-template-columns:1fr 1fr}
 .stat-row{display:flex;gap:10px;margin-top:6px}
@@ -1204,8 +1191,8 @@ body.modal-open{overflow:hidden}
 @media (max-width:520px){
   .lai-kpis{grid-template-columns:1fr}
 }
-@media (min-width:1280px){ .content{max-width:1280px} }
-@media (min-width:1440px){ .content{max-width:1360px} }
+@media (min-width:1280px){ .content{max-width:1280px;margin:0 auto} }
+@media (min-width:1440px){ .content{max-width:1360px;margin:0 auto} }
 @media (min-width:1920px){ .content{max-width:1500px;margin:0 auto} }
 
 /* ════════════════════════════════════════════════════════════════
@@ -1213,6 +1200,8 @@ body.modal-open{overflow:hidden}
    rail rules above at small widths (both expanded & collapsed states).
    ═════════════════════════════════════════════════════════════════ */
 @media (max-width:880px){
+  /* Neutralise the persisted collapsed rail so the sidebar becomes a
+     horizontal top bar in BOTH states at small widths. */
   .app-shell{grid-template-columns:1fr !important}
   html.sidebar-collapsed .app-shell{grid-template-columns:1fr !important}
   .sidebar{
@@ -1221,24 +1210,26 @@ body.modal-open{overflow:hidden}
   }
   .brand{flex-direction:row;gap:10px;padding:0}
   .brand-txt{display:block}
-  .nav{flex-direction:row;flex-wrap:wrap;margin-top:0;flex:1 1 auto}
   .nav-toggle{margin-left:auto}
-  .nav-item{justify-content:flex-start;padding:9px 12px}
+  /* Horizontal, scrollable nav bar (item labels kept, group labels hidden). */
+  .nav{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;gap:8px;margin-top:0;flex:1 1 100%;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .nav-group{flex-direction:row;align-items:center;gap:6px;flex:0 0 auto}
+  .nav-group-label{display:none}
+  .nav-item{justify-content:flex-start;padding:9px 12px;flex:0 0 auto;white-space:nowrap}
   .nav-item .ni{width:20px;flex:0 0 20px}
   .nav-item .ni svg{width:19px;height:19px}
-  .sidebar-foot{margin-top:0;flex-direction:row;margin-left:auto;flex:0 0 auto;padding-left:0;align-items:center}
-  .ver{display:block;padding-left:0}
+  .sidebar-foot{display:none}
 
   /* Collapsed on mobile: compact icon-only horizontal bar. */
   html.sidebar-collapsed .sidebar{overflow:visible;padding:12px 16px;flex-direction:row}
   html.sidebar-collapsed .brand{flex-direction:row}
   html.sidebar-collapsed .brand-txt,
   html.sidebar-collapsed .nav-label,
+  html.sidebar-collapsed .nav-group-label,
   html.sidebar-collapsed .ver{display:none}
   html.sidebar-collapsed .nav-item{justify-content:center;padding:9px 12px}
   html.sidebar-collapsed .nav-item .ni{width:20px;flex:0 0 20px}
   html.sidebar-collapsed .nav-item .ni svg{width:19px;height:19px}
-  html.sidebar-collapsed .sidebar-foot{align-items:center}
 
   .content{padding:16px 16px 32px}
   .ws-grid,.cfg-wrap,.settings-grid{grid-template-columns:1fr}
@@ -1246,9 +1237,29 @@ body.modal-open{overflow:hidden}
   .cp-toolbar{flex-direction:column;align-items:stretch}
   .cp-toolbar .gsearch{width:100%}
   .topbar{flex-wrap:wrap;gap:10px}
-  .topbar-right{flex-wrap:wrap}
+  .topbar-right{flex-wrap:wrap;gap:8px}
   .crumb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cmd-trigger{width:100%;max-width:none;min-width:0;flex:1 1 100%}
+  .cmd-trigger{flex:1 1 auto;min-width:160px;max-width:none}
+  .btn{flex:0 0 auto}
+  .modal-overlay{padding:12px}
+  .modal-card{max-height:92vh}
+  .modal-actions,.cfg-current-actions,.ws-actions-row,.pg-prompt-actions,.ml-row-acts{flex-wrap:wrap}
+}
+
+/* Deep-mobile pass: single-column model rows, tighter chrome, icon-only search. */
+@media (max-width:640px){
+  .content{padding:14px 12px 28px}
+  .ml-row{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+  .ml-row-meta{flex-wrap:wrap;gap:8px}
+  .ml-row-acts{justify-content:flex-end}
+  .model-row{grid-template-columns:1fr;row-gap:8px}
+  .ml-filters .ml-search{flex:1 1 100%}
+  .ws-hero{grid-template-columns:repeat(2,1fr)}
+  .pg-prompt-actions .btn,.pg-actions .btn-go,
+  .cfg-current-actions .btn,.ws-actions-row .btn{flex:1 1 auto}
+  .modal-card-body{padding:8px 14px 16px}
+  .topbar{gap:8px}
+  .cmd-trigger .cmd-k{display:none}
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -1319,6 +1330,7 @@ body.modal-open{overflow:hidden}
 .ml-seg-btn.on{ background:var(--accent-soft); color:var(--accent); }
 .ml-prov-sel{ min-width:170px; }
 .ml-toggle{ display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer; }
+.ml-toggle input{ width:15px; height:15px; accent-color:var(--accent); cursor:pointer; }
 
 .ml-section{ margin:6px 0 18px; }
 .ml-h{ font-size:14px; letter-spacing:.02em; text-transform:uppercase; color:var(--text-3); margin:0 0 8px; }

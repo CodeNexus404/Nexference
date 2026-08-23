@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.0.0 — Production-Ready Workspace & System Reliability** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.1.0 — Cohesive Premium Workspace** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -33,6 +33,12 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 
 ---
 
+## What's new in v1.1.0
+
+- **Information architecture** — the sidebar is now grouped into Workspace / Configure / Explore / Test / Manage, so the eight surfaces read as one coherent product instead of a flat list.
+- **Workspace status indicator** — the top bar shows a live configuration-state chip (Needs setup / Copyable config / Configured / Unsaved changes), derived from the real applied state on every navigation.
+- **Versioned release** — bumped to `1.1.0` across `package.json`, the UI, and this document.
+
 ## What's new in v1.0.0
 
 - **Workspace Health** — a single honest report across configuration, clients, runtimes, providers, and execution (`GET /api/health`), with explicit states (`healthy`, `attention`, `config-required`, `partial`, `offline`, `unknown`) and a 0–100 score. Partial failures are never hidden behind a green status.
@@ -47,9 +53,9 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 ## Architecture
 
 ```
-                          ┌─────────────────────────────┐
+                          ┌──────────────────────────────┐
                           │      Environment Service     │
-                          └───────────────┬───────────────┘
+                          └───────────────┬──────────────┘
         ┌──────────────┬─────────────────┼─────────────────┬──────────────┐
      Clients        Providers        Local Runtimes       Models      Hardware
         └──────────────┴─────────────────┼─────────────────┴──────────────┘
@@ -175,4 +181,6 @@ public/src/
 
 ## License
 
-MIT
+MIT License — Copyright (c) 2026 CodeNexus404.
+
+See the [LICENSE](LICENSE) file for the full text.

@@ -625,13 +625,16 @@ function renderWorkspaceFromEnv(env) {
         <span class="ws-eyebrow">Current Workspace</span>
         <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
       </div>
-      <div class="ws-config-body">
-        <div class="kv"><span>Active Client</span><b>${esc(client.name)}</b></div>
-        <div class="kv"><span>AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
-        <div class="kv"><span>Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
-        <div class="kv"><span>Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
-        <div class="kv"><span>Config path</span><b class="mono">${esc(client.configPath || '~/.claude/settings.json')}</b></div>
+      <div class="ws-chain">
+        <div class="chain-node"><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
+        <span class="chain-arrow" aria-hidden="true">→</span>
+        <div class="chain-node"><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
+        <span class="chain-arrow" aria-hidden="true">→</span>
+        <div class="chain-node"><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
+        <span class="chain-arrow" aria-hidden="true">→</span>
+        <div class="chain-node"><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
       </div>
+      <div class="ws-config-path muted">Config: <span class="mono">${esc(client.configPath || '~/.claude/settings.json')}</span></div>
       <div class="ws-actions-row">
         <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
         <button class="btn btn2" onclick="navigate('configuration')">Configuration</button>
@@ -1811,7 +1814,7 @@ export function useModel(providerId, modelId) {
   workspace.activeProvider = providerId;
   workspace.activeModel = modelId;
   modelService.addRecent({ providerId, id: modelId, name: modelId, providerName: getProvider(providerId)?.name || providerId });
-  notify.toast(`Selected ${modelId} (${getProvider(providerId).name})`, 'success');
+  notify.toast(`Selected ${modelId} (${getProvider(providerId)?.name || providerId})`, 'success');
 }
 
 let pgExecId = null;
