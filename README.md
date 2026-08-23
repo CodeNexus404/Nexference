@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.1.0 — Cohesive Premium Workspace** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.2.0 — Modern Web Application UI & Experience** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -32,6 +32,20 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
 ---
+
+## What's new in v1.2.0
+
+A UI/UX refinement milestone focused on making Nexference feel like a complete modern developer workspace — without changing architecture, behavior, or the safety-critical configuration pipeline.
+
+- **Design-system consolidation** — added explicit radius, elevation, and motion token scales (`--r-*`, `--elev-*`, `--dur-*`, `--ease-*`) and removed dead/duplicate CSS (legacy `.model-row`/`.mr-*`, leftover `.nav-group-label`, and a conflicting duplicate toast block).
+- **App shell polish** — refined sidebar active/hover states (integrated gradient + accent indicator, smooth transitions), a smoother route-enter animation, and accessible collapsed-mode labels via native `title` tooltips.
+- **Component consistency** — unified button hierarchy with press feedback and a `.btn-primary` helper, consistent restrained hover depth across interactive cards (providers, clients, runtimes, model rows, connection cards), a refined modal entrance with proper elevation, and accent input focus rings.
+- **Workspace presentation** — the "Current Setup" chain (Client → Source → Provider/Runtime → Model) is now a connected, state-aware strip with subtle connectors; KPI and health panels received consistent elevation and polish.
+- **Notifications** — consolidated toast styling into a single definition with an auto-dismiss progress bar.
+- **Responsiveness** — consolidated the duplicate `max-width:880px` mobile pass, added `1024 / 768 / 480` coverage, centered wide content, and kept topbar/button/model-row behavior safe across breakpoints.
+- **Version** — bumped to `1.2.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ## What's new in v1.1.0
 

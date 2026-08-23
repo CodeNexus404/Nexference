@@ -562,7 +562,7 @@ body{background:var(--bg);background-image:radial-gradient(1200px 600px at 80% -
 .brand-txt b{font-family:var(--display);font-size:17px;letter-spacing:-.4px}
 .brand-txt b em{font-style:normal;color:var(--accent)}
 .brand-txt span{display:block;font-size:11px;color:var(--text-3);letter-spacing:.4px;text-transform:uppercase}
-.nav{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding-top:14px;border-top:1px solid var(--border-faint)}
+.nav{display:flex;flex-direction:column;gap:6px;margin-top:6px;padding-top:14px;border-top:1px solid var(--border-faint)}
 .nav-item{position:relative;display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:var(--radius-sm);color:var(--text-2);font-weight:600;text-decoration:none;cursor:pointer;border:1px solid transparent;transition:background var(--fast) var(--ease),color var(--fast) var(--ease),border-color var(--fast) var(--ease)}
 .nav-item .ni{width:20px;flex:0 0 20px;display:inline-flex;align-items:center;justify-content:center;opacity:.85}
 .nav-item .ni svg{width:19px;height:19px;display:block}
@@ -570,9 +570,8 @@ body{background:var(--bg);background-image:radial-gradient(1200px 600px at 80% -
 .nav-item:hover{background:var(--surface-2);color:var(--text)}
 .nav-item.active{background:var(--accent-soft);color:var(--text);border-color:var(--accent-line);box-shadow:inset 3px 0 0 var(--accent)}
 .nav-item.active .ni{opacity:1}
-.nav-group{display:flex;flex-direction:column;gap:4px}
-.nav-group + .nav-group{margin-top:16px}
-.nav-group-label{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);padding:2px 13px;margin-bottom:2px}
+.nav-group{display:flex;flex-direction:column;gap:6px}
+.nav-group + .nav-group{margin-top:0}
 .sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
 .ver{font-size:11px;color:var(--text-3);padding-left:8px;letter-spacing:.4px}
 
@@ -876,11 +875,10 @@ body[data-page="configuration"] #page-configuration{display:block}
 html.sidebar-collapsed .app-shell{grid-template-columns:74px 1fr}
 html.sidebar-collapsed .sidebar{padding:18px 10px;overflow:hidden}
 html.sidebar-collapsed .brand{flex-direction:column;gap:10px;justify-content:center;padding:4px 0}
-html.sidebar-collapsed .brand-txt,
-html.sidebar-collapsed .nav-label,
-html.sidebar-collapsed .nav-group-label,
-html.sidebar-collapsed .ver,
-html.sidebar-collapsed #pathText{display:none}
+  html.sidebar-collapsed .brand-txt,
+  html.sidebar-collapsed .nav-label,
+  html.sidebar-collapsed .ver,
+  html.sidebar-collapsed #pathText{display:none}
 html.sidebar-collapsed .nav-toggle{margin-left:0}
 html.sidebar-collapsed .nav-item{justify-content:center;padding:11px}
 html.sidebar-collapsed .nav-item .ni{width:auto;flex:0 0 auto}
@@ -965,19 +963,9 @@ html.sidebar-collapsed .sidebar-foot{align-items:center;padding-left:0}
 .provider-compat{font-size:11.5px;color:var(--text-3);font-family:var(--mono)}
 .pc-card-foot{display:flex;align-items:center;gap:8px;margin-top:auto;flex-wrap:wrap}
 
-/* ── Models explorer ── */
-.model-explorer{margin-top:8px}
-.model-rows{display:flex;flex-direction:column;gap:2px}
-.model-row{display:grid;grid-template-columns:1fr 150px auto auto;align-items:center;gap:14px;
-  padding:11px 14px;border-radius:var(--radius-sm);border:1px solid transparent;transition:all var(--fast) var(--ease)}
-.model-row:hover{background:var(--surface);border-color:var(--border)}
-.mr-id{display:flex;flex-direction:column;min-width:0}
-.mr-id b{font-family:var(--mono);font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mr-name{font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mr-prov{font-size:13px;color:var(--text-2)}
+/* ── Model badges ── */
 .badge.free{color:var(--success);border-color:var(--success-soft);background:var(--success-soft)}
 .badge.paid{color:var(--text-3);border-color:var(--border);background:var(--surface-2)}
-.mr-btn{white-space:nowrap}
 
 /* ── Generic helpers ── */
 .mono{font-family:var(--mono)}
@@ -1164,28 +1152,11 @@ body.modal-open{overflow:hidden}
 .palette-label{font-weight:600}
 .palette-hint{font-family:var(--mono);font-size:10.5px;color:var(--text-3);border:1px solid var(--border);padding:2px 8px;border-radius:100px}
 
-/* ── Notifications: stacked toasts (override single-toast) ── */
-.toasts{position:fixed;right:22px;bottom:22px;z-index:1200;display:flex;flex-direction:column;gap:10px;
-  width:min(360px,calc(100vw - 32px));pointer-events:none}
-.toast{position:static;transform:none;left:auto;bottom:auto;max-width:100%;width:100%;
-  pointer-events:auto;opacity:0;transform:translateY(8px);transition:opacity var(--fast) var(--ease),transform var(--fast) var(--ease)}
-.toast.show{opacity:1;transform:none}
-.toast.leaving{opacity:0;transform:translateY(8px)}
-.toast::after{display:none}
-.toast-ico{flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;font-size:12px;font-weight:700}
-.toast-msg{flex:1;min-width:0;line-height:1.4}
-.toast-x{flex:0 0 auto;background:none;border:none;color:var(--text-3);font-size:18px;line-height:1;cursor:pointer;padding:0 2px}
-.toast-x:hover{color:var(--text)}
-.toast.success .toast-ico{background:var(--success-soft);color:var(--success)}
-.toast.error .toast-ico{background:var(--error-soft);color:var(--error)}
-.toast.warning .toast-ico{background:var(--warning-soft);color:var(--warning)}
-.toast.info .toast-ico{background:var(--accent-soft);color:var(--accent)}
+/* ── Toast styles consolidated into the single block above ── */
 
 /* ── Responsiveness ── */
 @media (max-width:1100px){ .ws-grid{grid-template-columns:1fr} .lai-hero{grid-template-columns:1fr} .lai-kpis{grid-template-columns:repeat(2,1fr)} }
 @media (max-width:900px){
-  .model-row{grid-template-columns:1fr auto;row-gap:4px}
-  .mr-prov{grid-column:1/-1}
   .lai-kpis{grid-template-columns:repeat(2,1fr)}
 }
 @media (max-width:520px){
@@ -1214,7 +1185,6 @@ body.modal-open{overflow:hidden}
   /* Horizontal, scrollable nav bar (item labels kept, group labels hidden). */
   .nav{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;gap:8px;margin-top:0;flex:1 1 100%;padding-bottom:2px;-webkit-overflow-scrolling:touch}
   .nav-group{flex-direction:row;align-items:center;gap:6px;flex:0 0 auto}
-  .nav-group-label{display:none}
   .nav-item{justify-content:flex-start;padding:9px 12px;flex:0 0 auto;white-space:nowrap}
   .nav-item .ni{width:20px;flex:0 0 20px}
   .nav-item .ni svg{width:19px;height:19px}
@@ -1225,7 +1195,6 @@ body.modal-open{overflow:hidden}
   html.sidebar-collapsed .brand{flex-direction:row}
   html.sidebar-collapsed .brand-txt,
   html.sidebar-collapsed .nav-label,
-  html.sidebar-collapsed .nav-group-label,
   html.sidebar-collapsed .ver{display:none}
   html.sidebar-collapsed .nav-item{justify-content:center;padding:9px 12px}
   html.sidebar-collapsed .nav-item .ni{width:20px;flex:0 0 20px}
@@ -1252,7 +1221,6 @@ body.modal-open{overflow:hidden}
   .ml-row{display:flex;flex-direction:column;align-items:stretch;gap:8px}
   .ml-row-meta{flex-wrap:wrap;gap:8px}
   .ml-row-acts{justify-content:flex-end}
-  .model-row{grid-template-columns:1fr;row-gap:8px}
   .ml-filters .ml-search{flex:1 1 100%}
   .ws-hero{grid-template-columns:repeat(2,1fr)}
   .pg-prompt-actions .btn,.pg-actions .btn-go,
@@ -1487,3 +1455,107 @@ body.modal-open{overflow:hidden}
 .ws-recent-main b{ font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ws-recent-sub{ font-size:11.5px; color:var(--text-3); }
 .ws-recent-time{ margin-left:auto; font-size:11.5px; color:var(--text-3); white-space:nowrap; }
+
+/* ════════════════════════════════════════════════════════════════
+   Nexference v1.2.0 — Modern Web Application UI & Experience
+   Refinement layer. Purely additive styling on top of the existing
+   architecture; no markup or behavior changes required.
+   ════════════════════════════════════════════════════════════════ */
+
+/* — Token scale extensions (radius / elevation / motion) — */
+:root{
+  --r-xs:6px; --r-sm:10px; --r-md:14px; --r-lg:20px; --r-xl:26px; --r-pill:100px;
+  --elev-0:0 0 0 rgba(0,0,0,0);
+  --elev-1:0 1px 2px rgba(0,0,0,.40);
+  --elev-2:0 8px 24px rgba(0,0,0,.45);
+  --elev-3:0 24px 60px rgba(0,0,0,.55);
+  --elev-modal:0 30px 80px rgba(0,0,0,.60);
+  --dur-fast:var(--fast);
+  --dur-normal:var(--med);
+  --dur-slow:var(--slow);
+  --ease-standard:var(--ease);
+  --ease-emphasized:cubic-bezier(.2,.9,.3,1);
+  --ease-enter:cubic-bezier(.16,1,.3,1);
+  --ease-exit:cubic-bezier(.4,0,.2,1);
+}
+
+/* — Motion keyframes — */
+@keyframes modalIn{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes routeEnter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* — Refined route entrance — */
+.page{animation:routeEnter var(--dur-normal) var(--ease-enter) both}
+
+/* — Sidebar: smoother, more integrated active/hover states — */
+.nav-item{transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease)}
+.nav-item:hover{background:var(--surface-2);color:var(--text)}
+.nav-item.active{
+  background:linear-gradient(90deg,var(--accent-soft),color-mix(in srgb,var(--accent) 6%,transparent));
+  color:var(--text);border-color:var(--accent-line);
+  box-shadow:inset 3px 0 0 var(--accent);
+}
+.nav-item.active .ni{opacity:1}
+.nav-item:active{transform:scale(.985)}
+
+/* — Buttons: consistent press + accessible hierarchy helpers — */
+.btn{transition:transform var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+.btn:active{transform:translateY(0) scale(.98)}
+.btn-go{transition:transform var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),filter var(--dur-fast) var(--ease)}
+.btn-go:active{transform:translateY(0) scale(.985)}
+.btn-primary{background:linear-gradient(180deg,var(--accent-2),var(--accent));border-color:transparent;color:#06101f;box-shadow:0 6px 20px var(--accent-glow)}
+.btn-primary:hover{color:#06101f;filter:brightness(1.06);box-shadow:0 10px 28px var(--accent-glow);transform:translateY(-2px)}
+.btn-primary:active{transform:translateY(0) scale(.985)}
+.icon-btn:active{transform:scale(.94)}
+.btn-icon:active{transform:scale(.95)}
+
+/* — Interactive cards: unified, restrained hover depth — */
+.provider-card,.client-card,.rt-card,.card,.ml-row,.conn-card,.ws-recent-item,.cp-card{
+  transition:transform var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease);
+}
+.provider-card:hover,.client-card:hover,.rt-card:hover,.card:hover,.ml-row:hover,.conn-card:hover,.ws-recent-item:hover,.cp-card:hover{
+  transform:translateY(-3px);border-color:var(--accent-line);box-shadow:var(--elev-2);
+}
+
+/* — Modal: refined entrance + elevation — */
+.modal-overlay.open .modal-card{animation:modalIn var(--dur-normal) var(--ease-enter) both;transform:none}
+.modal-card{border-radius:var(--r-lg);box-shadow:var(--elev-modal)}
+
+/* — Inputs: accent focus (no base restyle, preserves existing look) — */
+.inp,input,select,textarea{transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
+.inp:focus,input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* — Workspace chain: connected, state-aware, subtle motion — */
+.ws-chain{gap:10px}
+.chain-node{
+  position:relative;background:linear-gradient(180deg,var(--surface-2),var(--surface));
+  border:1px solid var(--border);box-shadow:var(--elev-1);
+  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease);
+}
+.chain-node:hover{border-color:var(--accent-line);box-shadow:var(--elev-2);transform:translateY(-2px)}
+.chain-arrow{color:var(--text-3);opacity:.85}
+
+/* — Workspace panels polish — */
+.ws-recent{background:var(--surface)}
+.ws-kpi{box-shadow:var(--elev-1)}
+.ws-kpi b{color:var(--text)}
+
+/* — Reduced motion: keep transitions/animations calm — */
+@media (prefers-reduced-motion:reduce){
+  .page,.modal-overlay.open .modal-card{animation:none}
+  *{scroll-behavior:auto !important}
+}
+
+/* — Additional responsive coverage (1024 / 768 / 480) — */
+@media (max-width:1024px){
+  .content{padding:18px 20px 36px}
+}
+@media (max-width:768px){
+  .topbar{padding:10px 14px}
+}
+@media (max-width:480px){
+  .ws-hero{grid-template-columns:1fr}
+  .content{padding:14px 12px 28px}
+  .crumb{display:none}
+  .app-ver{display:none}
+  .modal-overlay{padding:10px}
+}
