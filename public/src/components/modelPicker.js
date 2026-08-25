@@ -17,7 +17,7 @@ export function renderModelPicker(host, providerId, opts = {}) {
   wrap.className = 'model-picker';
   wrap.innerHTML = `
     ${showPaidToggle ? `<label class="paid-toggle mp-paid"><input type="checkbox" ${includePaid ? 'checked' : ''}><span class="paid-track"></span><span class="paid-text">Include paid</span></label>` : ''}
-    <input class="inp mp-input" type="text" placeholder="Search models…" aria-label="Search models" />
+    <input class="inp mp-input" type="text" placeholder="${providerId === 'custom' ? 'Enter model name…' : 'Search models…'}" aria-label="${providerId === 'custom' ? 'Enter model name' : 'Search models'}" />
     <div class="mp-list" role="listbox"></div>`;
   host.appendChild(wrap);
 
@@ -35,17 +35,19 @@ export function renderModelPicker(host, providerId, opts = {}) {
     const matches = all.filter((m) =>
       !q || (m.id || '').toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
     const freeIds = new Set(getFreeModels(providerId).map((m) => m.id));
-    // The custom gateway has no model catalogue of its own, so its empty state
-    // shouldn't inherit the generic picker styling.
-    const emptyCls = providerId === 'custom' ? '' : 'mp-empty';
+    // The custom gateway has no model catalogue of its own — the user types the
+    // model name manually, so don't show the generic empty states.
+    const isCustom = providerId === 'custom';
 
     if (!all.length) {
+      if (isCustom) { list.innerHTML = ''; return; }
       const fetching = isFetching(providerId);
-      list.innerHTML = `<div class="${emptyCls}">${fetching ? 'Loading models…' : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available')}</div>`;
+      list.innerHTML = `<div class="mp-empty">${fetching ? 'Loading models…' : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available')}</div>`;
       return;
     }
     if (!matches.length) {
-      list.innerHTML = `<div class="${emptyCls}">No models match “${esc(query)}”.</div>`;
+      if (isCustom) { list.innerHTML = ''; return; }
+      list.innerHTML = `<div class="mp-empty">No models match “${esc(query)}”.</div>`;
       return;
     }
     list.innerHTML = matches.map((m) => `
