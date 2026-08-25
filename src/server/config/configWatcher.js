@@ -81,10 +81,6 @@ export function getExternalChange() {
   return externalChange;
 }
 
-export function clearExternalChange() {
-  externalChange = null;
-}
-
 export function subscribe(fn) {
   subscribers.add(fn);
   return () => subscribers.delete(fn);

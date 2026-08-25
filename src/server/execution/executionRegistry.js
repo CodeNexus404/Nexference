@@ -91,8 +91,3 @@ export function getExecutionCapabilities() {
   });
   return { cloud, local };
 }
-
-export function providerSupportsExecution(providerId) {
-  const p = getProvider(providerId);
-  return !!p && EXEC_FORMATS.includes(p.format);
-}

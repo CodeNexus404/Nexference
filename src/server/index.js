@@ -9,6 +9,7 @@ import { registerConfigRoutes } from './routes/config.js';
 import { registerBackupRoutes } from './routes/backups.js';
 import { registerProviderRoutes } from './routes/providers.js';
 import { registerLocalRoutes } from './routes/local.js';
+import { registerLocalModelRoutes } from './routes/localModels.js';
 import { registerClientRoutes } from './routes/clients.js';
 import { registerRuntimeRoutes } from './routes/runtimes.js';
 import { registerProfileRoutes } from './routes/profiles.js';
@@ -46,6 +47,7 @@ export function createApp() {
   registerBackupRoutes(app);
   registerProviderRoutes(app);
   registerLocalRoutes(app);
+  registerLocalModelRoutes(app);
   registerClientRoutes(app);
   registerRuntimeRoutes(app);
   registerProfileRoutes(app);

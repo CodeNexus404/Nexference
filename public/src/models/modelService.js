@@ -41,6 +41,16 @@ export const modelService = {
     return res.json();
   },
 
+  // Device-aware local-model recommendations (with 1–5 star ratings computed
+  // from the host's real RAM/GPU) plus the detected device profile.
+  async getLocalRecommendations() {
+    try {
+      const res = await fetch('/api/local/models/recommendations');
+      if (!res.ok) return { models: [], device: null };
+      return await res.json();
+    } catch { return { models: [], device: null }; }
+  },
+
   async refresh(providerId) {
     const res = await fetch('/api/models/refresh', {
       method: 'POST',

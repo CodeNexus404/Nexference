@@ -90,11 +90,6 @@ export async function getRuntimeStatus(id) {
   return detectRuntime(id);
 }
 
-export async function getRuntimeVersion(id) {
-  const s = await detectRuntime(id);
-  return s.version;
-}
-
 // Models for a single runtime (basic shape used by the per-runtime route).
 export async function listRuntimeModels(id) {
   if (id !== 'ollama') return [];

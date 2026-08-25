@@ -24,8 +24,3 @@ export function resolveSelection(sel = {}) {
   }
   return comp;
 }
-
-// Convenience: just the level id for a selection, for badge colouring.
-export function resolveLevel(sel = {}) {
-  return resolveSelection(sel).level;
-}

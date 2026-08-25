@@ -211,7 +211,7 @@ let _lmCache = { ts: 0, list: null, allowCli: false };
 // `allowCli` gates the `lms` CLI, which launches LM Studio (Bionic). When false
 // (passive detection) only the non-invasive filesystem scan runs, so the app is
 // never started as a side effect of discovery.
-function getLmStudioModelList({ allowCli = false } = {}) {
+export function getLmStudioModelList({ allowCli = false } = {}) {
   const now = Date.now();
   if (_lmCache.list && _lmCache.allowCli === allowCli && now - _lmCache.ts < 4000) return _lmCache.list;
   const list = [];

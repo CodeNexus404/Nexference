@@ -15,7 +15,3 @@ export const RUNTIMES = [
 export function getRuntime(id) {
   return RUNTIMES.find((r) => r.id === id);
 }
-
-export function runtimeProtocols(id) {
-  return getRuntime(id)?.protocols || [];
-}

@@ -41,7 +41,6 @@ A product-level UI/UX refinement pass that makes Nexference feel like an applica
 - **Contextual health** — the health card shows a plain-language headline (e.g. "Your workspace is ready for Claude Code.") plus a contextual action (Configure… / Review details) derived only from real health and config state.
 - **Quick Actions** — a compact, application-like action area (Configure Client, Explore Models, Test Playground, Local Runtime) with icon, description, hover, and focus affordances.
 - **Recent Activity** — executions are now grouped into Today / Earlier with relative timestamps, and show a meaningful empty state when nothing has been recorded.
-- **Reusable empty states** — a shared `.empty-state` component for honest, action-oriented "nothing here yet" messaging.
 - **Microinteractions** — animated tab/segment indicator; existing button/card/modal motion retained and `prefers-reduced-motion` respected.
 - **Version** — bumped to `1.3.0` across `package.json`, the UI, and this document.
 

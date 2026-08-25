@@ -26,19 +26,24 @@ async function fetchOllamaTags() {
 
 function normalizeOllama(models) {
   if (!Array.isArray(models)) return [];
-  return models.map((m) => ({
-    id: m.name,
-    name: m.name,
-    runtimeId: 'ollama',
-    source: 'ollama',
-    installed: true,
-    size: m.size ?? null,
-    parameterCount: m.details?.parameter_size ?? null,
-    quantization: m.details?.quantization_level ?? null,
-    contextLength: null,
-    modifiedAt: m.modified_at ?? null,
-    capabilities: m.details?.families || (m.details?.family ? [m.details.family] : []),
-  }));
+  return models.map((m) => {
+    const fams = m.details?.families || (m.details?.family ? [m.details.family] : []);
+    const detCaps = m.details?.capabilities || [];
+    const capabilities = [...new Set([...fams, ...detCaps].map((c) => String(c).toLowerCase()))];
+    return {
+      id: m.name,
+      name: m.name,
+      runtimeId: 'ollama',
+      source: 'ollama',
+      installed: true,
+      size: m.size ?? null,
+      parameterCount: m.details?.parameter_size ?? null,
+      quantization: m.details?.quantization_level ?? null,
+      contextLength: null,
+      modifiedAt: m.modified_at ?? null,
+      capabilities,
+    };
+  });
 }
 
 // Full discovery across all supported running runtimes.
@@ -55,9 +60,4 @@ export async function discoverModels() {
     }
   }
   return out;
-}
-
-export async function getOllamaModelsDetailed() {
-  const tags = await fetchOllamaTags();
-  return tags ? normalizeOllama(tags) : [];
 }

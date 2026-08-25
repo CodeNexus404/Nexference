@@ -201,18 +201,3 @@ export function providerProtocols(p) {
   if (p.format === 'gemini') return ['gemini'];
   return [];
 }
-
-// Capability flags feed the compatibility resolver + model filtering. Defaults
-// are sensible; providers can override individual flags if needed.
-export function providerCapabilities(p) {
-  if (!p) return null;
-  return {
-    chat: true,
-    streaming: true,
-    vision: p.id === 'gemini' || !!p.vision,
-    reasoning: !!p.reasoning,
-    tools: true,
-    embeddings: !!p.embeddings,
-    protocols: providerProtocols(p),
-  };
-}

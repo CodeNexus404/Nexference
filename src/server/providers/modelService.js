@@ -66,6 +66,9 @@ async function fetchModelsForProvider(provider, key = '') {
         id: m.id,
         name: m.display_name || m.name || m.id,
         pricing: m.pricing || null,
+        capabilities: m.capabilities || null,
+        architecture: m.architecture || null,
+        context_length: m.context_length || m.contextLength || null,
       }));
     }
   }

@@ -3,17 +3,23 @@ import { openModal } from '../components/modal.js';
 import { modelService } from '../models/modelService.js';
 import { getProvider } from '../providers/registry.js';
 import { notify } from '../core/notifications.js';
+import { historyStore } from '../playground/historyStore.js';
 
-// ═══════════════════════════════════════════════════════════════
-//  Model Library (v0.8.0) — the enhanced Models explorer.
+// ═══════════════════════════════════════════════════
+//  Model Library (v0.9.0) — the enhanced Models explorer.
 //
-//  A single, searchable, filterable view over the unified model catalogue
+//  A single, searchable, filterable gallery over the unified model catalogue
 //  (cloud + local). Every model carries an honest source-status badge
 //  (LIVE / FALLBACK / CACHED / INSTALLED), free/paid marking, capability
 //  flags, and a Details view. Plus workspace-aware Recommendations and a
-//  secret-free Recent list. Also exports a unified picker for the config
-//  workflow's model step.
-// ═══════════════════════════════════════════════════════════════
+//  secret-free Recent list.
+//
+//  Buttons are functional, not decorative:
+//    • Use        → selects the model as active AND opens the Playground
+//                   preloaded with it (so it is immediately runnable).
+//    • Details    → opens the honest-metadata modal, which also offers
+//                   "Open in Playground".
+// ═══════════════════════════════════════════════════
 
 function relTime(iso) {
   if (!iso) return '—';
@@ -42,37 +48,24 @@ function capBadge(cap, val) {
   return ''; // unknown → omit rather than show a misleading "?"
 }
 
-function modelRowHTML(m, currentId) {
-  const freeBadge = m.isFree
-    ? '<span class="badge free">free</span>'
-    : (m.isPaid ? '<span class="badge paid">paid</span>' : '');
-  const rec = m.recommended ? '<span class="ml-star" title="Recommended">★</span>' : '';
-  return `
-    <div class="ml-row ${currentId === m.id ? 'sel' : ''}" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">
-      <div class="ml-row-main">
-        <span class="ml-name mono">${esc(m.name || m.id)}</span>
-        ${rec}
-        <span class="ml-id">${esc(m.id)}</span>
-      </div>
-      <div class="ml-row-meta">
-        <span class="ml-prov">${esc(m.providerName || m.providerId)}</span>
-        ${statusBadge(m.sourceStatus)}
-        ${freeBadge}
-        ${capBadge('chat', m.capabilities && m.capabilities.chat)}
-      </div>
-      <div class="ml-row-acts">
-        <button class="btn btn2 ml-use" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">Use</button>
-      </div>
-    </div>`;
+function capChips(caps) {
+  if (!caps) return '';
+  const order = ['chat', 'vision', 'reasoning', 'tools', 'embeddings'];
+  const html = order.filter((c) => caps[c]).map((c) => `<span class="ml-cap on">${esc(c)}</span>`).join('');
+  return html ? `<div class="ml-caps">${html}</div>` : '';
 }
 
-function groupByProvider(models) {
-  const groups = new Map();
-  for (const m of models) {
-    if (!groups.has(m.providerId)) groups.set(m.providerId, { providerName: m.providerName, providerId: m.providerId, sourceStatus: m.sourceStatus, items: [] });
-    groups.get(m.providerId).items.push(m);
-  }
-  return [...groups.values()];
+function starsHTML(n) {
+  const v = Math.max(0, Math.min(5, Number(n) || 0));
+  let s = '';
+  for (let i = 1; i <= 5; i++) s += `<span class="rec-star ${i <= v ? 'on' : 'off'}">${i <= v ? '★' : '☆'}</span>`;
+  return `<span class="rec-stars" aria-label="${v} out of 5 stars">${s}</span>`;
+}
+
+function fitsBadge(fits) {
+  if (fits === true) return '<span class="ml-fit good">Fits your device</span>';
+  if (fits === false) return '<span class="ml-fit warn">May not fit</span>';
+  return '<span class="ml-fit unknown">Fit unknown</span>';
 }
 
 async function showDetails(providerId, modelId) {
@@ -84,16 +77,29 @@ async function showDetails(providerId, modelId) {
   const caps = detail.capabilities || {};
   const prov2 = detail.provenance || {};
   const fetched = prov2.fetchedAt ? new Date(prov2.fetchedAt).toLocaleString() : DASH;
+  const isLocal = detail.kind === 'local' || detail.providerFormat === 'local';
 
-  // Only render fields that actually carry data — no "—" clutter.
+  // For local models, pull the device-aware rating/reason from the
+  // recommendation engine so the dialog reflects the user's actual hardware.
+  let rec = null;
+  let devInfo = null;
+  if (isLocal) {
+    try {
+      const recData = await modelService.getLocalRecommendations();
+      devInfo = recData.device || null;
+      rec = (recData.models || []).find((r) =>
+        r.runtime === providerId && (r.id === modelId || r.installedName === modelId));
+    } catch { /* recommendations are best-effort */ }
+  }
+
+  // Only render spec rows that actually carry data — no "—" clutter.
   const rows = [];
   const addRow = (label, valueHTML) => {
     if (valueHTML == null || valueHTML === '') return;
     rows.push(`<div class="kv"><span>${esc(label)}</span><b>${valueHTML}</b></div>`);
   };
   addRow('Provider', esc(detail.providerName || detail.providerId || DASH));
-  if (detail.kind) addRow('Kind', esc(detail.kind));
-  if (detail.source || detail.sourceStatus) addRow('Source', `${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus)}`);
+  addRow('Source', `${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus || DASH)}`);
   if (detail.pricing) addRow('Pricing', esc(typeof detail.pricing === 'string' ? detail.pricing : JSON.stringify(detail.pricing)));
   if (detail.isFree === true || detail.isPaid === true) addRow('Free', detail.isFree ? 'Yes' : 'No');
   if (detail.contextLength != null) addRow('Context length', fmt(detail.contextLength));
@@ -105,25 +111,68 @@ async function showDetails(providerId, modelId) {
   const capBadges = ['chat', 'vision', 'reasoning', 'tools', 'embeddings']
     .map((c) => capBadge(c, caps[c])).join('');
   const capHTML = capBadges || '<span class="muted">No capability data reported.</span>';
+
+  // ── Recommended-for-your-device section (local models only) ──
+  let recSection = '';
+  if (isLocal && rec) {
+    const devChips = [];
+    if (devInfo && devInfo.ramGB != null) devChips.push(`<span class="ml-devchip">${esc(devInfo.ramGB)} GB RAM · ${esc(devInfo.ramTier || 'unknown')} tier</span>`);
+    if (devInfo && devInfo.gpuName) devChips.push(`<span class="ml-devchip">${esc(devInfo.gpuName)}</span>`);
+    else if (devInfo && devInfo.gpuVram != null) devChips.push(`<span class="ml-devchip">${esc(devInfo.gpuVram)} GB VRAM</span>`);
+    recSection = `
+      <section class="ml-dsec ml-dsec-rec">
+        <h4 class="ml-dsec-h">Recommended for your device</h4>
+        <div class="ml-rec-stars">${starsHTML(rec.rating)}<span class="ml-rec-rating">${esc(rec.rating != null ? rec.rating + '/5' : '—')}</span></div>
+        ${rec.reason ? `<p class="ml-rec-reason">${esc(rec.reason)}</p>` : ''}
+        <div class="ml-rec-meta">
+          ${fitsBadge(rec.fits)}
+          ${devChips.join('')}
+          ${devInfo && devInfo.estimate ? '<span class="ml-devchip muted">estimated</span>' : ''}
+        </div>
+      </section>`;
+  } else if (detail.recommendationReason) {
+    recSection = `
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Recommendation</h4>
+        <div class="ml-rec-note">★ ${esc(detail.recommendationReason)}</div>
+      </section>`;
+  }
+
   const provHTML = `<div class="muted">Last fetched: ${esc(fetched)} · total in catalogue: ${esc(prov2.total != null ? prov2.total : DASH)} · source: ${esc(prov2.source || DASH)}</div>`;
-  const recHTML = detail.recommendationReason ? `<div class="ml-rec-note">★ ${esc(detail.recommendationReason)}</div>` : '';
 
   const bodyHTML = `
     <div class="ml-detail">
       <div class="ml-detail-head">
-        <h4 class="mono">${esc(detail.name || detail.id)}</h4>
-        <span class="ml-id">${esc(detail.id)}</span>
+        <div class="ml-dh-title">
+          <h3 class="ml-dh-name">${esc(detail.name || detail.id)}</h3>
+          <code class="ml-id">${esc(detail.id)}</code>
+        </div>
+        <div class="ml-dh-badges">
+          ${statusBadge(detail.sourceStatus || DASH)}
+          ${detail.kind ? `<span class="badge">${esc(detail.kind)}</span>` : ''}
+        </div>
       </div>
-      ${rows.join('')}
-      <h4 style="margin:14px 0 6px">Capabilities</h4>
-      <div class="ml-caps">${capHTML}</div>
-      <h4 style="margin:14px 0 6px">Provenance</h4>
-      ${provHTML}
-      ${recHTML}
+
+      ${recSection}
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Specifications</h4>
+        <div class="ml-kv-grid">${rows.join('')}</div>
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Capabilities</h4>
+        <div class="ml-caps">${capHTML}</div>
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Provenance</h4>
+        ${provHTML}
+      </section>
     </div>
     <div class="modal-actions">
       <button class="btn btn2" id="mlDetClose" type="button">Close</button>
-      <button class="btn btn-go" id="mlDetUse" type="button">Use this model</button>
+      <button class="btn btn-go" id="mlDetGo" type="button">Open in Playground</button>
     </div>`;
 
   openModal({
@@ -133,12 +182,51 @@ async function showDetails(providerId, modelId) {
     bodyHTML,
     onMount: (body, ctrl) => {
       body.querySelector('#mlDetClose').addEventListener('click', () => ctrl.close());
-      body.querySelector('#mlDetUse').addEventListener('click', () => {
-        if (window.useModel) window.useModel(providerId, modelId);
-        ctrl.close();
+      body.querySelector('#mlDetGo').addEventListener('click', () => {
+        useAndGo(providerId, modelId, detail.kind, detail.runtimeId);
       });
     },
   });
+}
+
+// ── A single model as a gallery card ──
+function modelCardHTML(m, isUsing) {
+  const freeBadge = m.isFree
+    ? '<span class="badge free">free</span>'
+    : (m.isPaid ? '<span class="badge paid">paid</span>' : '');
+  const rec = m.recommended ? '<span class="ml-rec-star" title="Recommended for your setup">★</span>' : '';
+  const useLabel = isUsing ? 'Using ✓' : 'Use';
+  return `
+    <article class="ml-card ${isUsing ? 'using' : ''}" style="--d:${(m._i || 0) * 0.025}s" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}" data-kind="${esc(m.kind || 'cloud')}" data-rt="${esc(m.runtimeId || '')}">
+      <header class="ml-card-top">
+        <div class="ml-titles">
+          <h3 class="ml-name">${esc(m.name || m.id)}</h3>
+          <code class="ml-id">${esc(m.id)}</code>
+        </div>
+        ${rec}
+      </header>
+      <div class="ml-card-meta">
+        <span class="ml-prov">${esc(m.providerName || m.providerId)}</span>
+        ${statusBadge(m.sourceStatus)}
+        ${freeBadge}
+      </div>
+      ${capChips(m.capabilities)}
+      <footer class="ml-card-acts">
+        <button class="btn btn-go ml-use" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}" data-kind="${esc(m.kind || 'cloud')}" data-rt="${esc(m.runtimeId || '')}">${useLabel}</button>
+        <button class="btn btn2 ml-details" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">Details</button>
+      </footer>
+    </article>`;
+}
+
+// Select a model as active AND drop the user into the Playground with it
+// preloaded, so "Use" is a real, observable action — not a silent preference.
+async function useAndGo(providerId, modelId, kind, runtimeId) {
+  if (window.useModel) window.useModel(providerId, modelId);
+  const draft = { source: kind === 'local' ? 'local' : 'cloud', model: modelId };
+  if (kind === 'local') draft.runtimeId = runtimeId || 'ollama';
+  else draft.providerId = providerId;
+  try { historyStore.saveDraft(draft); } catch { /* ignore */ }
+  if (window.navigate) window.navigate('playground');
 }
 
 // ── Main explorer ──
@@ -185,14 +273,31 @@ export async function renderModelLibrary(host) {
     if (filterState.chat) list = list.filter((m) => m.capabilities && m.capabilities.chat === true);
     if (filterState.q) {
       const ql = filterState.q.toLowerCase();
-      list = list.filter((m) => (m.id || '').toLowerCase().includes(ql) || (m.name || '').toLowerCase().includes(ql) || (m.providerName || '').toLowerCase().includes(ql));
+      list = list.filter((m) => {
+        if ((m.id || '').toLowerCase().includes(ql)) return true;
+        if ((m.name || '').toLowerCase().includes(ql)) return true;
+        if ((m.providerName || '').toLowerCase().includes(ql)) return true;
+        const caps = m.capabilities || {};
+        if (['chat', 'vision', 'reasoning', 'tools', 'embeddings'].some((c) => caps[c] && c.includes(ql))) return true;
+        return false;
+      });
     }
     return list;
   }
 
-  // Render the (stateful) toolbar + filters ONCE. The model list lives in
-  // #mlDyn and is the only part re-rendered on filter changes, so the search
-  // box keeps focus/text and the toggle/segment state is preserved.
+  function currentSelection() {
+    const sel = {};
+    try {
+      for (const m of all) {
+        const stored = localStorage.getItem('gw_model_' + m.providerId);
+        if (stored) sel[m.providerId] = stored;
+      }
+    } catch { /* ignore */ }
+    return sel;
+  }
+
+  // Render the (stateful) toolbar + filters ONCE. The dynamic area below is the
+  // only part re-rendered on filter changes, so search keeps focus/state.
   function buildShell() {
     const statsChips = stats ? `
       <div class="ml-stats">
@@ -203,74 +308,70 @@ export async function renderModelLibrary(host) {
         <span class="ml-chip"><b>${stats.providersWithModels}</b> providers</span>
       </div>` : '';
     host.innerHTML = `
-      <div class="ml-toolbar">
-        <div class="ml-stats-wrap">${statsChips}</div>
-        <button class="btn btn2 ml-refresh" id="mlRefresh">↻ Refresh catalogue</button>
-      </div>
-      <div class="ml-filters">
-        <input class="inp ml-search" placeholder="Search models across providers…" aria-label="Search models" value="${esc(filterState.q)}" />
-        <div class="ml-seg">
-          <button class="ml-seg-btn ${filterState.type === 'all' ? 'on' : ''}" data-type="all">All</button>
-          <button class="ml-seg-btn ${filterState.type === 'cloud' ? 'on' : ''}" data-type="cloud">Cloud</button>
-          <button class="ml-seg-btn ${filterState.type === 'local' ? 'on' : ''}" data-type="local">Local</button>
+      <div class="ml-page">
+        <div class="ml-bar">
+          <div class="ml-bar-top">
+            ${statsChips}
+            <button class="btn btn2 ml-refresh" id="mlRefresh">↻ Refresh catalogue</button>
+          </div>
+          <div class="ml-filters">
+            <span class="ml-search-wrap">
+              <span class="ml-search-ico" aria-hidden="true">⌕</span>
+              <input class="inp ml-search" placeholder="Search models, providers, capabilities…" aria-label="Search models" value="${esc(filterState.q)}" />
+            </span>
+            <div class="ml-seg">
+              <button class="ml-seg-btn ${filterState.type === 'all' ? 'on' : ''}" data-type="all">All</button>
+              <button class="ml-seg-btn ${filterState.type === 'cloud' ? 'on' : ''}" data-type="cloud">Cloud</button>
+              <button class="ml-seg-btn ${filterState.type === 'local' ? 'on' : ''}" data-type="local">Local</button>
+            </div>
+            <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+            <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
+            <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
+            <button class="btn btn2 sm ml-clear-filters" id="mlClearFilters" type="button" hidden>Clear filters</button>
+          </div>
         </div>
-        <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-        <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
-        <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
-      </div>
-      <div id="mlDyn"></div>`;
+        <div id="mlDyn"></div>
+      </div>`;
     wireStatic(host);
   }
 
-  // Re-render only the dynamic list (search/segment/toggle state lives in the
-  // persistent filter controls, so it is never wiped).
+  // Re-render only the dynamic area (search/segment/toggle state persists).
   function draw() {
     const list = applyFilter();
-    const groups = groupByProvider(list);
-    const cur = { ...currentSelection() };
+    const cur = currentSelection();
+    const isUsing = (m) => cur[m.providerId] === m.id;
+    const searching = !!filterState.q;
+    const activeFilters = filterState.type !== 'all' || filterState.provider || filterState.free || filterState.chat || filterState.q;
 
-    const recHTML = recommended.length ? `
+    const recHTML = (!searching && recommended.length) ? `
       <div class="ml-section">
         <h3 class="ml-h">Recommended for your setup</h3>
-        <div class="ml-rec-row">
-          ${recommended.map((m) => `
-            <div class="ml-rec-card" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">
-              <div class="ml-rec-top"><span class="mono">${esc(m.name || m.id)}</span>${m.isFree ? '<span class="badge free">free</span>' : ''}</div>
-              <div class="muted">${esc(m.providerName || m.providerId)}</div>
-              <div class="ml-rec-reason">${esc(m.recommendationReason || '')}</div>
-            </div>`).join('')}
-        </div>
+        <div class="ml-strip">${recommended.map((m) => `
+          <div class="ml-rec-card" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">
+            <div class="ml-rec-top"><span class="mono">${esc(m.name || m.id)}</span>${m.isFree ? '<span class="badge free">free</span>' : ''}</div>
+            <div class="muted">${esc(m.providerName || m.providerId)}</div>
+            <div class="ml-rec-reason">${esc(m.recommendationReason || '')}</div>
+          </div>`).join('')}</div>
       </div>` : '';
 
-    const recentHTML = recent.length ? `
+    const recentHTML = (!searching && recent.length) ? `
       <div class="ml-section">
         <h3 class="ml-h">Recent</h3>
-        <div class="ml-recent">
-          ${recent.map((m) => `<button class="chipx ml-recent-chip" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">${esc(m.name || m.id)} <span class="muted">· ${esc(m.providerName)}</span></button>`).join('')}
-          <button class="chipx ml-recent-clear" title="Clear recent">clear</button>
-        </div>
+        <div class="ml-recent">${recent.map((m) => `<button class="chipx ml-recent-chip" data-p="${esc(m.providerId)}" data-id="${esc(m.id)}">${esc(m.name || m.id)} <span class="muted">· ${esc(m.providerName)}</span></button>`).join('')}<button class="chipx ml-recent-clear" title="Clear recent">clear</button></div>
       </div>` : '';
 
-    const listHTML = groups.length ? groups.map((g) => {
-      const test = providerTests[g.providerId];
-      const testHTML = test ? `<span class="ml-test ${test.status >= 200 && test.status < 300 ? 'ok' : 'bad'}" title="Last tested ${esc(relTime(test.at))}">${test.status >= 200 && test.status < 300 ? '✓ tested' : '✕ test failed'} · ${esc(relTime(test.at))}</span>` : '';
-      return `
-      <div class="ml-group">
-        <div class="ml-group-head">
-          <span class="ml-group-name">${esc(g.providerName)}</span>
-          ${statusBadge(g.sourceStatus)}
-          ${testHTML}
-          <span class="ml-count">${g.items.length}</span>
-        </div>
-        <div class="ml-rows">
-          ${g.items.map((m) => modelRowHTML(m, cur[m.providerId])).join('')}
-        </div>
+    const countLine = `<div class="ml-count-row">
+        <span class="ml-count">${list.length} model${list.length === 1 ? '' : 's'}${activeFilters ? ' (filtered)' : ''}</span>
       </div>`;
-    }).join('') : '<div class="muted">No models match your filters.</div>';
+    const cards = list.length
+      ? list.map((m, i) => { m._i = i; return modelCardHTML(m, isUsing(m)); }).join('')
+      : '<div class="muted ml-empty">No models match your filters.</div>';
 
     const dyn = host.querySelector('#mlDyn');
     if (!dyn) return;
-    dyn.innerHTML = `${recHTML}${recentHTML}<div class="ml-list">${listHTML}</div>`;
+    dyn.innerHTML = `${recHTML}${recentHTML}${countLine}<div class="ml-grid">${cards}</div>`;
+    const clearBtn = host.querySelector('#mlClearFilters');
+    if (clearBtn) clearBtn.hidden = !activeFilters;
     wireDyn(dyn);
   }
 
@@ -286,8 +387,8 @@ export async function renderModelLibrary(host) {
     root.querySelector('.ml-prov-sel').addEventListener('change', (e) => { filterState.provider = e.target.value; draw(); });
     root.querySelector('.ml-free-chk').addEventListener('change', (e) => { filterState.free = e.target.checked; draw(); });
     root.querySelector('.ml-chat-chk').addEventListener('change', (e) => { filterState.chat = e.target.checked; draw(); });
-    root.querySelector('#mlRefresh').addEventListener('click', async (e) => {
-      const btn = e.currentTarget; btn.disabled = true; btn.classList.add('spinning');
+    root.querySelector('#mlRefresh').addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget; btn.disabled = true; btn.classList.add('spinning');
       try {
         await modelService.refresh();
         all = await modelService.getUnified({});
@@ -298,36 +399,38 @@ export async function renderModelLibrary(host) {
       } catch { notify.toast('Refresh failed', 'error'); }
       finally { btn.disabled = false; btn.classList.remove('spinning'); }
     });
+    const clearBtn = root.querySelector('#mlClearFilters');
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      filterState.q = ''; filterState.type = 'all'; filterState.provider = ''; filterState.free = false; filterState.chat = false;
+      const s = root.querySelector('.ml-search'); if (s) s.value = '';
+      root.querySelectorAll('.ml-seg-btn').forEach((x) => x.classList.toggle('on', x.dataset.type === 'all'));
+      const sel = root.querySelector('.ml-prov-sel'); if (sel) sel.value = '';
+      const f = root.querySelector('.ml-free-chk'); if (f) f.checked = false;
+      const c = root.querySelector('.ml-chat-chk'); if (c) c.checked = false;
+      draw();
+    });
   }
 
-  // Listeners bound to the dynamic list after each draw().
+  // Listeners bound to the dynamic area after each draw().
   function wireDyn(root) {
-    root.querySelectorAll('.ml-row, .ml-rec-card, .ml-recent-chip').forEach((el) => {
-      if (el.classList.contains('ml-recent-clear')) return;
-      el.addEventListener('click', () => showDetails(el.dataset.p, el.dataset.id));
+    root.querySelectorAll('.ml-card').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('button')) return; // let button handlers own the click
+        showDetails(el.dataset.p, el.dataset.id);
+      });
     });
-    root.querySelectorAll('.ml-use').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); useModel(b.dataset.p, b.dataset.id); }));
+    root.querySelectorAll('.ml-use').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      useAndGo(b.dataset.p, b.dataset.id, b.dataset.kind, b.dataset.rt);
+    }));
+    root.querySelectorAll('.ml-details').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showDetails(b.dataset.p, b.dataset.id);
+    }));
+    root.querySelectorAll('.ml-rec-card').forEach((el) => el.addEventListener('click', () => showDetails(el.dataset.p, el.dataset.id)));
+    root.querySelectorAll('.ml-recent-chip').forEach((b) => b.addEventListener('click', () => showDetails(b.dataset.p, b.dataset.id)));
     const clearBtn = root.querySelector('.ml-recent-clear');
     if (clearBtn) clearBtn.addEventListener('click', (e) => { e.stopPropagation(); modelService.clearRecent(); notify.toast('Recent cleared', 'info'); draw(); });
-  }
-
-  function currentSelection() {
-    const sel = {};
-    try {
-      for (const m of all) {
-        const stored = localStorage.getItem('gw_model_' + m.providerId);
-        if (stored) sel[m.providerId] = stored;
-      }
-    } catch { /* ignore */ }
-    return sel;
-  }
-
-  function useModel(providerId, modelId) {
-    const model = all.find((m) => m.providerId === providerId && m.id === modelId) || { providerId, id: modelId };
-    modelService.addRecent(model);
-    if (window.useModel) window.useModel(providerId, modelId);
-    else notify.toast(`Selected ${modelId}`, 'success');
-    draw();
   }
 
   buildShell();

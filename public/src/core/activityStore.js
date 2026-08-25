@@ -38,7 +38,3 @@ export function recordActivity(kind, message, meta = {}) {
 export function getActivities() {
   return read();
 }
-
-export function clearActivities() {
-  write([]);
-}

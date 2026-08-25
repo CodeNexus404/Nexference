@@ -44,20 +44,3 @@ function outputTokensNormalize(v) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n) : null;
 }
-
-// Merge a usage object reported by a provider into the normalized shape.
-// Returns { inputTokens, outputTokens, latencyMs } — any unknown value is null.
-export function normalizeUsage(usage) {
-  if (!usage || typeof usage !== 'object') return { inputTokens: null, outputTokens: null, latencyMs: null };
-  const pick = (...keys) => {
-    for (const k of keys) {
-      if (usage[k] != null && Number.isFinite(Number(usage[k]))) return Number(usage[k]);
-    }
-    return null;
-  };
-  return {
-    inputTokens: pick('prompt_tokens', 'input_tokens', 'promptTokenCount', 'inputTokens'),
-    outputTokens: pick('completion_tokens', 'output_tokens', 'candidatesTokenCount', 'outputTokens'),
-    latencyMs: pick('latencyMs', 'latency_ms'),
-  };
-}

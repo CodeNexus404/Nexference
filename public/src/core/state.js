@@ -44,9 +44,6 @@ export const workspace = {
   _keyFetchTimers: {},
 };
 
-export function setActiveProvider(id) { workspace.activeProvider = id; }
-export function setActiveModel(id) { workspace.activeModel = id; }
-
 // ── Model selectors (read-through to the cached server model list) ──
 export function getFreeModels(providerId) {
   const cached = workspace.liveModels[providerId];

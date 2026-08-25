@@ -28,9 +28,4 @@ export const LEVELS = {
 export function level(id) { return LEVELS[id] || LEVELS.unsupported; }
 
 // Order used when composing multiple results: the most conservative level wins.
-const RANK = { UNSUPPORTED: 0, MANUAL: 1, EXPERIMENTAL: 2, SUPPORTED: 3, VERIFIED: 4 };
-export function minLevel(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  return RANK[a] <= RANK[b] ? a : b;
-}
+

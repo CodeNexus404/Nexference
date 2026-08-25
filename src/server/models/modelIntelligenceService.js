@@ -72,6 +72,17 @@ function normalizeCloudModels(providerId, entry) {
     const id = m.id;
     const nonChat = isNonChatModel(providerId, id);
     const free = isFreeModel(providerId, m);
+    // Honest capability signals: only explicit provider fields are trusted
+    // (e.g. OpenRouter's `capabilities` array + `architecture.input_modalities`).
+    const caps = Array.isArray(m.capabilities) ? m.capabilities.map((c) => String(c).toLowerCase()) : [];
+    const arch = m.architecture || {};
+    const inMod = Array.isArray(arch.input_modalities) ? arch.input_modalities.map((x) => String(x).toLowerCase()) : [];
+    const modStr = typeof arch.modality === 'string' ? arch.modality.toLowerCase() : '';
+    const hasCap = (...names) => names.some((n) => caps.includes(n));
+    const vision = inMod.some((x) => /image|vision/.test(x)) || /image|vision/.test(modStr) || hasCap('vision');
+    const reasoning = hasCap('reasoning');
+    const tools = hasCap('tools', 'function_calling', 'tool_use', 'function-calling');
+    const embeddings = nonChat ? true : (hasCap('embeddings', 'embedding') ? true : null);
     return {
       id,
       name: m.name || id,
@@ -85,16 +96,16 @@ function normalizeCloudModels(providerId, entry) {
       isPaid: !free,
       pricing: m.pricing || null,
       installed: false,
-      contextLength: null,
+      contextLength: m.context_length || m.contextLength || null,
       parameters: null,
       size: null,
       quantization: null,
       capabilities: {
         chat: !nonChat,
-        vision: null,
-        reasoning: null,
-        tools: null,
-        embeddings: nonChat ? true : null,
+        vision: vision || null,
+        reasoning: reasoning || null,
+        tools: tools || null,
+        embeddings: embeddings || null,
       },
       recommended: false,
       recommendationReason: null,
@@ -111,9 +122,11 @@ function normalizeCloudModels(providerId, entry) {
 // ─── Local (runtime) models ───
 function normalizeLocalModels(models) {
   return (models || []).map((m) => {
-    const fam = Array.isArray(m.capabilities) ? m.capabilities : [];
+    const fam = Array.isArray(m.capabilities) ? m.capabilities.map((c) => String(c).toLowerCase()) : [];
     const isEmbed = fam.includes('embedding');
-    const isClip = fam.includes('clip');
+    const isClip = fam.includes('clip') || fam.includes('vision');
+    const isTools = fam.includes('tools') || fam.includes('function_calling') || fam.includes('tool_use');
+    const isReasoning = fam.includes('reasoning');
     return {
       id: m.id,
       name: m.name || m.id,
@@ -132,10 +145,10 @@ function normalizeLocalModels(models) {
       size: m.size || null,
       quantization: m.quantization || null,
       capabilities: {
-        chat: !isEmbed && !isClip,
+        chat: !isEmbed,
         vision: isClip || null,
-        reasoning: null,
-        tools: null,
+        reasoning: isReasoning || null,
+        tools: isTools || null,
         embeddings: isEmbed || null,
       },
       recommended: false,
@@ -197,8 +210,14 @@ export async function getUnifiedModels(opts = {}) {
 export async function getModelDetails(providerId, modelId) {
   if (!providerId || !modelId) return null;
   const p = getProvider(providerId);
-  if (!p) return null;
-  if (providerId === 'ollama' || p.format === 'local') {
+  const isLocal = (p && p.format === 'local') || providerId === 'ollama' || providerId === 'lmstudio';
+  if (isLocal) {
+    const local = (await getLocalModels()).find((m) => m.providerId === providerId && m.id === modelId);
+    return local || null;
+  }
+  if (!p) {
+    // Not a registered cloud provider — may be an unlisted local runtime; try
+    // the local catalogue before giving up so installed models resolve.
     const local = (await getLocalModels()).find((m) => m.providerId === providerId && m.id === modelId);
     return local || null;
   }

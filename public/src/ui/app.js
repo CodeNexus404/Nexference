@@ -479,13 +479,23 @@ function setCrumb(name) {
   if (c) c.innerHTML = '';
 }
 
+function getGreeting(hour) {
+  if (hour < 5) return 'Good night';
+  if (hour < 8) return 'Good early morning';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Good night';
+}
+
 export function renderWorkspace() {
   updateCrumb('Workspace');
   const section = document.getElementById('page-workspace');
   if (!section) return;
 
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const now = new Date();
+  const hour = now.getHours();
+  const greet = getGreeting(hour);
 
   section.innerHTML = `
     <div class="page-head reveal-f">
@@ -1256,6 +1266,7 @@ export function cfgGenerate() { openWorkflow(); }
 export async function cfgApply() { openWorkflow(); }
 
 let deviceTimer = null;
+let recPollTimer = null;
 
 // Live-refresh bridge: every saved benchmark run dispatches 'nx-benchmark'
 // (success or failure) so the Local AI results section repaints immediately
@@ -1401,6 +1412,7 @@ export async function renderLocalAI() {
   setCrumb('Local AI');
   const grid = document.getElementById('rtGrid');
   if (!grid) return;
+  const recModelsById = new Map();
 
   grid.innerHTML = `
     <div class="lai">
@@ -1436,6 +1448,14 @@ export async function renderLocalAI() {
         <span class="muted" id="rtCount">—</span>
       </div>
       <div id="rtList" class="rt-grid"><div class="muted">Detecting local runtimes…</div></div>
+      <div class="lai-runs-head">
+        <h3>Recommended local models</h3>
+        <span class="muted" id="recDevice">—</span>
+      </div>
+      <section class="panel lai-rec">
+        <p class="muted">Suggested for your device — the star rating is an estimate from your RAM and GPU. Download from the provider to run locally, or remove models already on this device.</p>
+        <div id="laiRecList" class="rec-grid"><div class="muted">Loading recommendations…</div></div>
+      </section>
       <section class="panel lai-bench" id="laiBench">
         <div class="lai-bench-head">
           <div>
@@ -1476,7 +1496,7 @@ export async function renderLocalAI() {
           : '';
         return `<div class="panel rt-card ${running ? 'live' : ''} ${status}">
           <div class="rt-card-top">
-            <div class="rt-logo ${rt.logo ? 'has-img' : ''}" style="--rt:hsl(${rtHue(rt.id)} 68% 58%)">${logoHTML}</div>
+            <div class="rt-logo ${rt.logo ? 'has-img' : ''} rt-details" role="button" tabindex="0" data-details="${esc(rt.id)}" title="Runtime details" aria-label="Runtime details" style="--rt:hsl(${rtHue(rt.id)} 68% 58%)">${logoHTML}<span class="rt-info-i" aria-hidden="true">i</span></div>
             <div class="rt-title"><b>${esc(rt.name)}</b><span class="rt-meta">Local runtime</span></div>
             <span class="badge ${status}">${esc(badge)}</span>
             ${!running && rt.supportsStart ? (rt.installed === false ? `<span class="rt-note-sm" title="Install the app to enable auto-start">Not installed</span>` : `<button class="btn btn-ghost sm rt-start" data-start="${esc(rt.id)}" title="Start ${esc(rt.name)}">Start</button>`) : ''}
@@ -1528,6 +1548,17 @@ export async function renderLocalAI() {
           const id = btn.dataset.bench;
           const rtObj = runtimes.find((r) => r.id === id);
           if (rtObj) openBenchmarkModal(rtObj);
+        });
+      });
+      rtList.querySelectorAll('.rt-details').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = btn.dataset.details;
+          const rt = runtimes.find((r) => r.id === id);
+          if (rt) openRuntimeDetailsModal(rt);
+        });
+        btn.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
         });
       });
       const cnt = grid.querySelector('#rtCount'); if (cnt) cnt.textContent = `${runtimes.length} runtimes`;
@@ -1614,6 +1645,182 @@ export async function renderLocalAI() {
     }
   }
 
+  function starsHTML(n) {
+    let s = '';
+    for (let i = 1; i <= 5; i++) s += `<span class="rec-star ${i <= n ? 'on' : 'off'}">${i <= n ? '★' : '☆'}</span>`;
+    return s;
+  }
+
+  async function loadRecommendations() {
+    const host = grid.querySelector('#laiRecList');
+    const devEl = grid.querySelector('#recDevice');
+    if (!host) return;
+    try {
+      const data = await (await fetch('/api/local/models/recommendations')).json();
+      const dev = data.device || {};
+      if (devEl) devEl.textContent = `${dev.ramGB != null ? dev.ramGB + ' GB RAM' : '—'}${dev.gpuName ? ' · ' + dev.gpuName : ''} · ${dev.ramTier || ''} tier`;
+      const models = data.models || [];
+      if (!models.length) { host.innerHTML = '<div class="muted">No recommendations available.</div>'; return; }
+      models.forEach((m) => recModelsById.set(m.runtime + '::' + m.id, m));
+      host.innerHTML = models.map((m) => {
+        const tags = (m.tags || []).map((t) => `<span class="chipx">${esc(t)}</span>`).join('');
+        const actions = (m.installed
+          ? `<span class="rec-installed">Installed ✓</span><button class="btn btn2 danger" type="button" onclick="deleteLocalModel('${esc(m.runtime)}','${esc(m.installedName || m.id)}')">Delete</button>`
+          : `<button class="btn btn-go btn2" type="button" onclick="downloadLocalModel('${esc(m.runtime)}','${esc(m.id)}','${esc(m.downloadUrl)}')">Download</button>`)
+          + `<button class="btn btn2" type="button" onclick="openLocalModelDetails('${esc(m.runtime)}','${esc(m.id)}')">Details</button>`;
+        return `<div class="rec-card ${m.installed ? 'is-installed' : ''} ${m.rating >= 4 ? 'is-top' : ''}">
+          <div class="rec-head">
+            <div class="rec-title"><b><a href="${esc(m.downloadUrl)}" target="_blank" rel="noopener" title="Open ${esc(m.name)} on the provider site">${esc(m.name)}</a></b><span class="badge ${m.runtime}">${esc(m.runtime)}</span></div>
+            <div class="rec-stars" title="${esc(m.reason || '')}">${starsHTML(m.rating)}<span class="rec-rating">${m.rating}.0</span></div>
+          </div>
+          <div class="rec-meta"><span>${esc(m.params || '—')}</span><span>${m.sizeGB} GB</span><span>min ${m.minRamGB} GB RAM</span></div>
+          <p class="rec-desc">${esc(m.description || '')}</p>
+          <div class="rec-tags">${tags}</div>
+          <div class="rec-reason ${m.fits ? 'ok' : 'warn'}">${esc(m.reason || '')}</div>
+          <div class="rec-actions">${actions}</div>
+        </div>`;
+      }).join('');
+    } catch {
+      if (host) host.innerHTML = '<div class="muted">Could not load recommendations.</div>';
+    }
+  }
+
+  window.downloadLocalModel = async function (runtime, name, downloadUrl) {
+    if (runtime !== 'ollama') { window.open(downloadUrl, '_blank', 'noopener'); return; }
+    try {
+      const r = await (await fetch(`/api/local/models/${encodeURIComponent(runtime)}/${encodeURIComponent(name)}/download`, { method: 'POST' })).json();
+      if (r.accepted) {
+        notify.toast(r.message || 'Pull started', 'success');
+        if (recPollTimer) clearInterval(recPollTimer);
+        let tries = 0;
+        recPollTimer = setInterval(async () => {
+          tries++;
+          await loadRecommendations();
+          if (tries > 25) { clearInterval(recPollTimer); recPollTimer = null; }
+        }, 3000);
+      } else if (r.downloadUrl) {
+        window.open(r.downloadUrl, '_blank', 'noopener');
+        notify.toast(r.message || 'Open the provider page to download', 'info');
+      } else {
+        notify.toast(r.error || 'Could not start download', 'warning');
+      }
+    } catch { notify.toast('Could not start download', 'error'); }
+  };
+
+  window.deleteLocalModel = async function (runtime, name) {
+    const ok = await confirmModal({ title: 'Delete model from device?', message: `Remove "${name}" (${runtime}) from this device. This cannot be undone.`, confirmLabel: 'Delete', danger: true });
+    if (!ok) return;
+    try {
+      const r = await (await fetch(`/api/local/models/${encodeURIComponent(runtime)}/${encodeURIComponent(name)}/delete`, { method: 'POST' })).json();
+      if (r.deleted) notify.toast('Model deleted from device', 'success');
+      else notify.toast(r.error || r.message || 'Could not delete model', 'warning');
+    } catch { notify.toast('Could not delete model', 'error'); }
+    await loadRecommendations();
+  };
+
+  // Details modal for a Local AI runtime ("provider") card.
+  function openRuntimeDetailsModal(rt) {
+    if (!rt) return;
+    const planned = !!rt.planned;
+    const running = !!rt.running;
+    const status = planned ? 'planned' : (running ? 'running' : (rt.detected ? 'detected' : 'offline'));
+    const models = (rt.models || []).filter(Boolean);
+    const caps = rt.capabilities || {};
+    const capMap = { local: 'Local', openAICompatible: 'OpenAI-compatible', anthropicCompatible: 'Anthropic-compatible', supportsModelDiscovery: 'Model discovery', supportsModelDownload: 'Model download', supportsChat: 'Chat' };
+    const capList = Object.keys(capMap).filter((k) => caps[k]).map((k) => capMap[k]);
+    const add = (l, v) => `<div class="kv"><span>${esc(l)}</span><b>${v}</b></div>`;
+    const rows = [
+      add('Type', 'Local runtime'),
+      add('Status', `<span class="badge ${status}">${esc(status)}</span>`),
+      add('Installed', rt.installed === false ? 'No' : (rt.installed ? 'Yes' : 'Unknown')),
+      add('Running', running ? 'Yes' : 'No'),
+      add('Detected', rt.detected ? 'Yes' : 'No'),
+      add('Models on device', models.length ? String(models.length) : '0'),
+    ].join('');
+    const modelsHTML = models.length
+      ? `<div class="rt-detail-models">${models.slice(0, 40).map((m) => `<span class="chipx">${esc(m)}</span>`).join('')}${models.length > 40 ? `<span class="chipx">+${models.length - 40}</span>` : ''}</div>`
+      : '<div class="muted">No models detected on this device.</div>';
+    const siteHTML = rt.site ? `<a class="btn btn2" href="${esc(rt.site)}" target="_blank" rel="noopener">Open ${esc(rt.name)} site ↗</a>` : '';
+    const actions = [];
+    if (!running && rt.supportsStart) actions.push(`<button class="btn btn-go btn2" id="rtDetStart" type="button">Start runtime</button>`);
+    if (running) actions.push(`<button class="btn btn-go btn2" id="rtDetBench" type="button">Benchmark</button>`);
+    const body = `
+      <div class="ml-detail">
+        <div class="ml-detail-head"><h4 class="mono">${esc(rt.name)}</h4><span class="ml-id">${esc(rt.id)}</span></div>
+        ${rows}
+        ${capList.length ? `<h4 style="margin:14px 0 6px">Capabilities</h4><div class="ml-caps">${capList.map((c) => `<span class="ml-cap on">${esc(c)}</span>`).join('')}</div>` : ''}
+        <h4 style="margin:14px 0 6px">Models installed on this device</h4>
+        ${modelsHTML}
+        ${rt.note ? `<div class="muted" style="margin-top:10px">${esc(rt.note)}</div>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn2" id="rtDetClose" type="button">Close</button>
+        ${siteHTML}
+        ${actions.join('')}
+      </div>`;
+    openModal({
+      title: 'Runtime details',
+      subtitle: `${esc(rt.name)} · local AI provider`,
+      size: 'wide',
+      bodyHTML: body,
+      onMount: (body, ctrl) => {
+        body.querySelector('#rtDetClose')?.addEventListener('click', () => ctrl.close());
+        const startBtn = body.querySelector('#rtDetStart');
+        if (startBtn) startBtn.addEventListener('click', () => { ctrl.close(); const b = grid.querySelector(`.rt-start[data-start="${rt.id}"]`); if (b) b.click(); });
+        const benchBtn = body.querySelector('#rtDetBench');
+        if (benchBtn) benchBtn.addEventListener('click', () => { ctrl.close(); const b = grid.querySelector(`.rt-bench[data-bench="${rt.id}"]`); if (b) b.click(); });
+      },
+    });
+  }
+
+  // Details modal for a recommended local model card.
+  function openLocalModelDetails(m) {
+    if (!m) return;
+    const rows = [];
+    const add = (l, v) => { if (v == null || v === '') return; rows.push(`<div class="kv"><span>${esc(l)}</span><b>${esc(String(v))}</b></div>`); };
+    add('Runtime', m.runtime);
+    add('Size', m.sizeGB != null ? `${m.sizeGB} GB` : null);
+    add('Minimum RAM', m.minRamGB != null ? `${m.minRamGB} GB` : null);
+    add('Parameters', m.params);
+    add('Quantization', m.quant);
+    add('Installed', m.installed ? 'Yes — on this device' : 'No');
+    const body = `
+      <div class="ml-detail">
+        <div class="ml-detail-head"><h4 class="mono">${esc(m.name)}</h4><span class="ml-id">${esc(m.id)}</span></div>
+        <div class="rec-stars" style="margin:2px 0 8px">${starsHTML(m.rating)}<span class="rec-rating">${m.rating}.0</span></div>
+        <div class="ml-kv-grid">${rows.join('')}</div>
+        <h4 style="margin:14px 0 6px">Why this rating</h4>
+        <div class="rec-reason ${m.fits ? 'ok' : 'warn'}">${esc(m.reason || '')}</div>
+        <h4 style="margin:14px 0 6px">About</h4>
+        <p class="rec-desc" style="margin:0">${esc(m.description || '')}</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn2" id="lmClose" type="button">Close</button>
+        <a class="btn btn2" href="${esc(m.downloadUrl)}" target="_blank" rel="noopener">Open provider page ↗</a>
+        ${m.installed
+          ? `<button class="btn btn2 danger" id="lmDel" type="button">Delete from device</button>`
+          : `<button class="btn btn-go btn2" id="lmDl" type="button">Download</button>`}
+      </div>`;
+    openModal({
+      title: 'Local model details',
+      subtitle: `${esc(m.runtime)} · recommended for your device`,
+      size: 'wide',
+      bodyHTML: body,
+      onMount: (body, ctrl) => {
+        body.querySelector('#lmClose')?.addEventListener('click', () => ctrl.close());
+        const dl = body.querySelector('#lmDl');
+        if (dl) dl.addEventListener('click', () => { ctrl.close(); window.downloadLocalModel(m.runtime, m.id, m.downloadUrl); });
+        const del = body.querySelector('#lmDel');
+        if (del) del.addEventListener('click', () => { ctrl.close(); window.deleteLocalModel(m.runtime, m.installedName || m.id); });
+      },
+    });
+  }
+
+  window.openLocalModelDetails = (runtime, id) => {
+    const m = recModelsById.get(runtime + '::' + id);
+    if (m) openLocalModelDetails(m);
+  };
+
   // Graph-like benchmark view: a single line graph with a categorical X axis
   // (models) and a dual Y axis — left = speed (tok/s), right = time-to-first-
   // token (ms). Two lines (solid = speed, dashed = TTFT) connect the per-model
@@ -1678,10 +1885,12 @@ export async function renderLocalAI() {
   }
 
   if (deviceTimer) clearInterval(deviceTimer);
+  if (recPollTimer) { clearInterval(recPollTimer); recPollTimer = null; }
   _benchReload = loadBenchmarksUI;
   await loadDevice();
   await loadRuntimes();
   await loadBenchmarksUI();
+  await loadRecommendations();
   const benchClear = grid.querySelector('#benchClear');
   if (benchClear && !benchClear.dataset.wired) {
     benchClear.dataset.wired = '1';
@@ -2024,36 +2233,76 @@ const BENCH_PROMPT = 'Explain how a transformer language model works. Cover self
 // Playground page has been rendered.
 async function openExecutionHistory() {
   const execs = await historyStore.listExecutions();
-  const body = `<div class="pg-hist-head">
-      <div class="pg-hist-count">${execs.length ? execs.length + (execs.length === 1 ? ' run' : ' runs') : 'No runs'}</div>
-      <button class="btn btn2 sm" id="pgHistClear" type="button">Clear history</button>
-    </div>
-    <div class="pg-hist">${execs.length ? execs.map((e) => `
-    <div class="pg-hist-item">
-      <div class="pg-hist-top"><b>${esc(e.model || '—')}</b><span class="badge ${e.success ? 'ok' : 'bad'}">${esc(e.status || '')}</span></div>
-      <div class="pg-hist-meta">${esc((e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || '')))} · ${e.createdAt ? new Date(e.createdAt).toLocaleString() : ''}</div>
-      <div class="pg-hist-prev">${esc((e.promptPreview || '').slice(0, 140))}</div>
-    </div>`).join('') : '<div class="muted">No executions yet.</div>'}</div>`;
+  const state = { type: 'all' };
   openModal({
-    title: 'Execution history', size: 'wide', bodyHTML: body,
-    onMount: (b) => {
-      const clr = b.querySelector('#pgHistClear');
-      if (clr) clr.addEventListener('click', async () => {
-        const ok = await confirmModal({
-          title: 'Clear execution history?',
-          message: 'This permanently removes all saved runs from this device. This cannot be undone.',
-          confirmLabel: 'Clear', danger: true,
+    title: 'Execution history', size: 'wide', bodyHTML: '<div class="muted pg-hist-loading">Loading…</div>',
+    onMount: (body) => {
+      const passes = (e) => {
+        if (state.type === 'cloud') return e.source !== 'local';
+        if (state.type === 'local') return e.source === 'local';
+        if (state.type === 'failed') return e.status === 'failed' || e.success === false;
+        if (state.type === 'success') return e.success === true;
+        return true;
+      };
+      const rerender = () => {
+        const list = execs.filter(passes);
+        const chips = [['all', 'All'], ['cloud', 'Cloud'], ['local', 'Local'], ['success', 'Success'], ['failed', 'Failed']]
+          .map(([k, label]) => `<button class="pg-hist-chip ${state.type === k ? 'on' : ''}" data-type="${k}">${label}</button>`).join('');
+        const items = list.length ? list.map((e) => `
+          <div class="pg-hist-item clickable" data-idx="${execs.indexOf(e)}">
+            <div class="pg-hist-top"><b class="mono">${esc(e.model || '—')}</b><span class="badge ${e.success ? 'ok' : 'bad'}">${esc(e.status || '')}</span></div>
+            <div class="pg-hist-meta">${esc((e.source === 'local' ? 'local · ' + (e.runtimeId || '') : 'cloud · ' + (e.providerId || '')))} · ${e.createdAt ? new Date(e.createdAt).toLocaleString() : ''}</div>
+            <div class="pg-hist-prev">${esc((e.promptPreview || '').slice(0, 120))}</div>
+          </div>`).join('') : '<div class="muted">No executions match this filter.</div>';
+        body.innerHTML = `<div class="pg-hist-head">
+            <div class="pg-hist-count">${execs.length} total · ${list.length} shown</div>
+            <button class="btn btn2 sm" id="pgHistClear" type="button">Clear history</button>
+          </div>
+          <div class="pg-hist-filters">${chips}</div>
+          <div class="pg-hist">${items}</div>`;
+        body.querySelectorAll('.pg-hist-chip').forEach((c) => c.addEventListener('click', () => { state.type = c.dataset.type; rerender(); }));
+        body.querySelectorAll('.pg-hist-item.clickable').forEach((el) => el.addEventListener('click', () => openExecutionDetail(execs[+el.dataset.idx])));
+        const clr = body.querySelector('#pgHistClear');
+        if (clr) clr.addEventListener('click', async () => {
+          const ok = await confirmModal({
+            title: 'Clear execution history?',
+            message: 'This permanently removes all saved runs from this device. This cannot be undone.',
+            confirmLabel: 'Clear', danger: true,
+          });
+          if (!ok) return;
+          try {
+            await playgroundService.clearHistory();
+            notify.toast('Execution history cleared', 'success');
+            const fresh = await historyStore.listExecutions();
+            execs.length = 0; fresh.forEach((x) => execs.push(x));
+            rerender();
+          } catch { notify.toast('Could not clear history', 'error'); }
         });
-        if (!ok) return;
-        try {
-          await playgroundService.clearHistory();
-          notify.toast('Execution history cleared', 'success');
-          openExecutionHistory();
-        } catch {
-          notify.toast('Could not clear history', 'error');
-        }
-      });
+      };
+      rerender();
     },
+  });
+}
+
+function openExecutionDetail(e) {
+  if (!e) return;
+  const out = e.contentPreview || '(no output captured)';
+  const bodyHTML = `<div class="pg-det">
+    <div class="kv"><span>Model</span><b class="mono">${esc(e.model || '—')}</b></div>
+    <div class="kv"><span>Status</span><b><span class="badge ${e.success ? 'ok' : 'bad'}">${esc(e.status || '')}</span></b></div>
+    <div class="kv"><span>Source</span><b>${esc(e.source === 'local' ? ('local · ' + (e.runtimeId || '')) : ('cloud · ' + (e.providerId || '')))}</b></div>
+    <div class="kv"><span>When</span><b>${esc(e.createdAt ? new Date(e.createdAt).toLocaleString() : '—')}</b></div>
+    ${e.metrics ? `<div class="kv"><span>Metrics</span><b class="mono">${esc(typeof e.metrics === 'string' ? e.metrics : JSON.stringify(e.metrics))}</b></div>` : ''}
+    <h4 style="margin:14px 0 6px">Prompt</h4>
+    <pre class="pg-pre">${esc(e.promptPreview || '(none)')}</pre>
+    <h4 style="margin:14px 0 6px">Output</h4>
+    <pre class="pg-pre">${esc(out)}</pre>
+    ${e.error ? `<h4 style="margin:14px 0 6px">Error</h4><pre class="pg-pre err">${esc(e.error)}</pre>` : ''}
+  </div>
+  <div class="modal-actions"><button class="btn btn2" id="pgDetClose" type="button">Close</button></div>`;
+  openModal({
+    title: 'Run details', size: 'wide', bodyHTML,
+    onMount: (b, ctrl) => { const c = b.querySelector('#pgDetClose'); if (c) c.addEventListener('click', () => ctrl.close()); },
   });
 }
 // Exposed globally so inline onclick handlers (Workspace "View all", Playground History) resolve it.

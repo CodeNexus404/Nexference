@@ -1,5 +1,5 @@
 import { readSettings, readSettingsRaw, getStatus } from './settingsStore.js';
-import { getExternalChange, clearExternalChange } from './configWatcher.js';
+import { getExternalChange } from './configWatcher.js';
 import { listBackups } from './backupStore.js';
 import { allTests } from './credentialsStore.js';
 
@@ -19,12 +19,6 @@ export function getConfigStatus() {
     backups: listBackups().slice(0, 1).map((b) => b.id),
     providerTests: allTests().reduce((acc, t) => { acc[t.providerId] = t; return acc; }, {}),
   };
-}
-
-export function consumeExternalChange() {
-  const ext = getExternalChange();
-  clearExternalChange();
-  return ext;
 }
 
 // A structured diff between the CURRENT on-disk config and the proposed NEXT
@@ -61,12 +55,5 @@ export function diffConfigs(current, next) {
   return {
     changed: fields.some((f) => f.changed),
     fields,
-  };
-}
-
-export function getPreviewContext() {
-  return {
-    current: readSettings(),
-    currentRaw: readSettingsRaw(),
   };
 }

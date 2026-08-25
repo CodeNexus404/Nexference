@@ -13,37 +13,6 @@ export const HEALTH = {
   UNKNOWN: 'unknown',
 };
 
-// Provider status vocabulary (Phase 4).
-export const PROVIDER_STATE = {
-  CONFIGURED: 'configured',
-  AUTH_REQUIRED: 'auth-required',
-  REACHABLE: 'reachable',
-  UNAVAILABLE: 'unavailable',
-  UNKNOWN: 'unknown',
-  EXECUTION_SUPPORTED: 'execution-supported',
-  DISCOVERY_ONLY: 'discovery-only',
-};
-
-// Runtime status vocabulary (Phase 4).
-export const RUNTIME_STATE = {
-  INSTALLED: 'installed',
-  REACHABLE: 'reachable',
-  RUNNING: 'running',
-  OFFLINE: 'offline',
-  UNKNOWN: 'unknown',
-  EXECUTION_SUPPORTED: 'execution-supported',
-  DETECTION_ONLY: 'detection-only',
-};
-
-// Client status vocabulary (Phase 4).
-export const CLIENT_STATE = {
-  DETECTED: 'detected',
-  NOT_DETECTED: 'not-detected',
-  CONFIG_SUPPORTED: 'config-supported',
-  CONFIG_UNKNOWN: 'config-unknown',
-  LAUNCH_SUPPORTED: 'launch-supported',
-};
-
 const SEVERITY = {
   [HEALTH.HEALTHY]: 0,
   [HEALTH.PARTIAL]: 1,
