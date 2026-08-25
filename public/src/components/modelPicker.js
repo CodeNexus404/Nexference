@@ -35,14 +35,17 @@ export function renderModelPicker(host, providerId, opts = {}) {
     const matches = all.filter((m) =>
       !q || (m.id || '').toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
     const freeIds = new Set(getFreeModels(providerId).map((m) => m.id));
+    // The custom gateway has no model catalogue of its own, so its empty state
+    // shouldn't inherit the generic picker styling.
+    const emptyCls = providerId === 'custom' ? '' : 'mp-empty';
 
     if (!all.length) {
       const fetching = isFetching(providerId);
-      list.innerHTML = `<div class="mp-empty">${fetching ? 'Loading models…' : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available')}</div>`;
+      list.innerHTML = `<div class="${emptyCls}">${fetching ? 'Loading models…' : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available')}</div>`;
       return;
     }
     if (!matches.length) {
-      list.innerHTML = `<div class="mp-empty">No models match “${esc(query)}”.</div>`;
+      list.innerHTML = `<div class="${emptyCls}">No models match “${esc(query)}”.</div>`;
       return;
     }
     list.innerHTML = matches.map((m) => `
