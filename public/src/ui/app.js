@@ -515,6 +515,7 @@ export function renderWorkspace() {
 
   fetchEnvironment();
   updateShellStatus();
+  fetchProviderIntel().then(() => fillWsProviderIntel()).catch(() => {});
 }
 
 // Fetch the unified environment and render the workspace from it.
@@ -689,6 +690,11 @@ function renderWorkspaceFromEnv(env) {
       <div class="muted">Loading model catalogue…</div>
     </div>
 
+    <div class="panel ws-summary reveal" id="wsProviderIntel" style="--d:.27s">
+      <h3>Provider Intelligence</h3>
+      <div class="muted">Loading provider discovery…</div>
+    </div>
+
     <div class="panel ws-profiles reveal" style="--d:.30s">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
@@ -712,6 +718,7 @@ function renderWorkspaceFromEnv(env) {
   }
 
   fillWsModelIntel();
+  fillWsProviderIntel();
 }
 
 // ── Workspace Health modal (v1.0.0) ───────────────────────────────
@@ -1947,6 +1954,20 @@ export function renderSettings() {
   }
   renderProfiles();
   loadBackups();
+
+  // Provider Intelligence settings panel (v1.4.0) — manual refresh only.
+  let piPanel = document.getElementById('piSettingsPanel');
+  if (!piPanel) {
+    const grid = document.querySelector('#page-settings .settings-grid');
+    if (grid) {
+      piPanel = document.createElement('div');
+      piPanel.className = 'panel';
+      piPanel.id = 'piSettingsPanel';
+      grid.appendChild(piPanel);
+    }
+  }
+  fillProviderIntelSettings();
+  fetchProviderIntel().then(fillProviderIntelSettings).catch(() => {});
 }
 
 export function setTheme(t) {
@@ -2140,6 +2161,255 @@ export function cycleTheme() {
   setTheme(next);
 }
 
+// ── Provider Intelligence (v1.4.0) ───────────────────────────────────────
+// Bridges the on-demand provider-discovery backend to the UI. Honest by
+// construction: it only renders what the server already verified/curated; it
+// never invents live/verified/free status.
+
+const DS_LABEL = {
+  verified: 'Verified', observed: 'Observed', curated: 'Curated', stale: 'Stale',
+  unavailable: 'Unavailable', deprecated: 'Deprecated', unknown: 'Unknown',
+};
+
+function dsDotClass(ds) { return 'ds-' + (ds || 'unknown'); }
+
+function dsLabel(ds) { return DS_LABEL[ds] || ds || 'unknown'; }
+
+export async function fetchProviderIntel() {
+  if (workspace._intelLoading) return true;
+  workspace._intelLoading = true;
+  try {
+    const [pi, chg] = await Promise.all([
+      fetch('/api/provider-intelligence').then((r) => r.json()).catch(() => ({ providers: [], summary: null })),
+      fetch('/api/provider-changes/summary').then((r) => r.json()).catch(() => ({ byProvider: {} })),
+    ]);
+    workspace.providerIntel = Object.fromEntries((pi.providers || []).map((p) => [p.id, p]));
+    workspace.providerIntelSummary = pi.summary || null;
+    workspace.providerChangeCounts = (chg && chg.byProvider) || {};
+    return true;
+  } finally {
+    workspace._intelLoading = false;
+  }
+}
+
+// Update just one cloud-provider card in place (no full grid re-render).
+function patchCloudCard(providerId) {
+  const card = document.querySelector(`#cpGrid .provider-card[data-id="${providerId}"]`);
+  if (!card) return;
+  const p = getProvider(providerId);
+  if (!p) return;
+  const intel = workspace.providerIntel[providerId];
+  const ds = intel?.status?.discoveryStatus;
+  const avail = intel?.status?.availability;
+  const totalModels = intel?.models?.total ?? getModels(providerId).length;
+  const freeModelsN = intel?.models?.free ?? getFreeModels(providerId).length;
+  const srcBadge = intel ? `<span class="badge pi-src">${intel.source.type === 'official-api' ? 'verified' : 'curated'}</span>` : '';
+  const lastChecked = intel?.source?.lastCheckedAt ? relTime(intel.source.lastCheckedAt) : 'not checked';
+  const changeN = workspace.providerChangeCounts[providerId] || 0;
+  const changeBadge = changeN ? `<span class="badge pi-change" title="Recent discovery changes">${changeN} change${changeN > 1 ? 's' : ''}</span>` : '';
+  const statusText = avail === 'available' ? 'available' : (avail === 'unavailable' ? 'unavailable' : (ds === 'curated' ? 'known · curated' : 'unknown'));
+  const key = Storage.getKey(providerId);
+  const dotHTML = ds ? `<span class="pi-dot ${dsDotClass(ds)}" title="${esc(dsLabel(ds))}"></span>` : '';
+  const dot = card.querySelector('.pc-head .pi-dot');
+  if (dot) dot.outerHTML = dotHTML;
+  else if (dotHTML) { const meta = card.querySelector('.pc-head .provider-meta'); if (meta) meta.insertAdjacentHTML('afterend', dotHTML); }
+  const foot = card.querySelector('.pc-card-foot');
+  if (foot) foot.innerHTML = `<span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>${srcBadge}${changeBadge}${key ? '<span class="badge cc">configured</span>' : ''}`;
+  const intelRow = card.querySelector('.pc-intel-row');
+  if (intelRow) intelRow.innerHTML = `<span class="pi-status">${esc(statusText)}</span><span class="pi-checked">· ${esc(lastChecked)}</span>`;
+}
+
+export async function refreshProviderIntelligence(providerId) {
+  const btn = providerId
+    ? document.querySelector(`.pi-refresh[data-id="${providerId}"]`)
+    : document.getElementById('piRefreshAll');
+  if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  try {
+    const res = await fetch('/api/provider-intelligence/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(providerId ? { providerId } : {}),
+    });
+    const data = await res.json();
+    await fetchProviderIntel();
+    const page = document.body.dataset.page;
+    if (page === 'cloud-providers') {
+      if (providerId) patchCloudCard(providerId);
+      else renderCloudProviders();
+    } else if (page === 'workspace') { const el = document.getElementById('wsProviderIntel'); if (el) fillWsProviderIntel(); }
+    else if (page === 'settings') { const el = document.getElementById('piSettingsPanel'); if (el) fillProviderIntelSettings(); }
+    notify.toast(providerId ? `Refreshed ${getProvider(providerId)?.name || providerId} intelligence` : 'Provider intelligence refreshed', 'success');
+    return data;
+  } catch {
+    notify.toast('Failed to refresh provider intelligence', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+  }
+}
+
+export async function openProviderIntelligence(id) {
+  const local = workspace.providerIntel[id];
+  if (!local) { notify.toast('No intelligence for this provider yet — run a refresh', 'info'); return; }
+  const res = await fetch(`/api/provider-intelligence/${encodeURIComponent(id)}`).then((r) => r.json()).catch(() => ({ provider: local, changes: [] }));
+  const p = res.provider || local;
+  const changes = res.changes || [];
+  const st = p.status || {};
+  const acc = p.access || {};
+  const comp = p.compatibility || {};
+  const src = p.source || {};
+  const ts = p.timestamps || {};
+  const models = p.models || {};
+  const providerMeta = getProvider(p.id) || {};
+  const website = p.id === 'custom' ? null : ((p.identity && p.identity.website) || (providerMeta.sub ? 'https://' + providerMeta.sub : null));
+
+  const compatList = [
+    comp.openaiCompatible && 'OpenAI-compatible',
+    comp.anthropicCompatible && 'Anthropic-compatible',
+    comp.geminiCompatible && 'Gemini-compatible',
+  ].filter(Boolean).map((c) => `<span class="ml-cap on">${esc(c)}</span>`).join('') || '<span class="muted">no protocol data</span>';
+
+  const changeRows = changes.length
+    ? changes.slice(0, 12).map((c) => `<div class="activity-row activity-${esc(c.severity || 'info')}">
+        <span class="act-ico">${c.type === 'models_added' || c.type === 'provider_discovered' ? '✓' : (c.severity === 'warning' ? '⚠' : '•')}</span>
+        <div class="act-msg"><div>${esc(c.summary)}</div>
+        <div class="muted" style="font-size:11px">${esc(new Date(c.detectedAt).toLocaleString())}</div></div>
+      </div>`).join('')
+    : '<div class="muted">No changes recorded yet.</div>';
+
+  const bodyHTML = `
+    <div class="ml-detail">
+      <div class="ml-detail-head">
+        <h3 class="ml-dh-name">${esc(p.identity?.name || p.id)}</h3>
+        ${src.url ? `<a class="ml-id" href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.url)} ↗</a>` : ''}
+      </div>
+      <div class="pi-modal-status">
+        <span class="pi-dot ${dsDotClass(st.discoveryStatus)}"></span>
+        <b>${esc(dsLabel(st.discoveryStatus))}</b>
+        <span class="badge">${esc(st.availability || 'unknown')}</span>
+        ${st.sourceStatus ? `<span class="badge">${esc(st.sourceStatus)}</span>` : ''}
+      </div>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Source</h4>
+        <div class="ml-kv-grid">
+          <div class="kv"><span>Type</span><b>${esc(src.type || 'unknown')}</b></div>
+          <div class="kv"><span>Confidence</span><b>${esc(src.confidence || 'unknown')}</b></div>
+          <div class="kv"><span>Verified</span><b>${src.verifiedAt ? new Date(src.verifiedAt).toLocaleString() : '—'}</b></div>
+          <div class="kv"><span>Last checked</span><b>${src.lastCheckedAt ? relTime(src.lastCheckedAt) : 'never'}</b></div>
+        </div>
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Access &amp; compatibility</h4>
+        <div class="ml-kv-grid">
+          <div class="kv"><span>Requires API key</span><b>${acc.requiresApiKey ? 'Yes' : 'No'}</b></div>
+          <div class="kv"><span>Access type</span><b>${esc(acc.accessType || 'unknown')}</b></div>
+          <div class="kv"><span>Free models</span><b>${models.free ?? '—'}</b></div>
+          <div class="kv"><span>Paid models</span><b>${models.paid ?? '—'}</b></div>
+        </div>
+        <div class="ml-caps" style="margin-top:8px">${compatList}</div>
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Model summary</h4>
+        <div class="ml-kv-grid">
+          <div class="kv"><span>Total known models</span><b>${models.total ?? '—'}</b></div>
+          <div class="kv"><span>Free</span><b>${models.free ?? '—'}</b></div>
+          <div class="kv"><span>Paid</span><b>${models.paid ?? '—'}</b></div>
+          <div class="kv"><span>First seen</span><b>${ts.firstSeenAt ? relTime(ts.firstSeenAt) : '—'}</b></div>
+        </div>
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Recent changes</h4>
+        <div class="activity-list">${changeRows}</div>
+      </section>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn2" type="button">Close</button>
+      ${website ? `<button class="btn btn2 pi-visit" type="button">Visit website ↗</button>` : ''}
+      <button class="btn btn-go" type="button" onclick="refreshProviderIntelligence('${esc(p.id)}')">↻ Re-check</button>
+    </div>`;
+
+  openModal({
+    title: 'Provider intelligence',
+    subtitle: `${esc(p.identity?.name || p.id)} · honest discovery only`,
+    size: 'wide',
+    bodyHTML,
+    onMount: (body, ctrl) => {
+      const closeBtn = body.querySelector('.modal-actions .btn2');
+      if (closeBtn) closeBtn.addEventListener('click', () => ctrl.close());
+      const visitBtn = body.querySelector('.pi-visit');
+      if (visitBtn && website) visitBtn.addEventListener('click', () => window.open(website, '_blank', 'noopener'));
+    },
+  });
+}
+
+export async function openProviderChangesModal() {
+  try {
+    const res = await fetch('/api/provider-changes?limit=60').then((r) => r.json());
+    const changes = res.changes || [];
+    const rows = changes.length
+      ? changes.map((c) => `<div class="activity-row activity-${esc(c.severity || 'info')}">
+          <span class="act-ico">${c.severity === 'warning' ? '⚠' : '✓'}</span>
+          <div class="act-msg"><div>${esc(c.summary)}</div>
+          <div class="muted" style="font-size:11px">${esc(c.providerName || c.providerId)} · ${esc(new Date(c.detectedAt).toLocaleString())}</div></div>
+        </div>`).join('')
+      : '<div class="muted">No discovery changes recorded yet.</div>';
+    openModal({
+      title: 'Provider changes',
+      subtitle: 'Discovery-driven changes across all providers — secret-free.',
+      size: 'wide',
+      bodyHTML: `<div class="activity-list">${rows}</div>`,
+    });
+  } catch {
+    notify.toast('Could not load provider changes', 'error');
+  }
+}
+
+// Workspace "Provider Intelligence" panel
+function fillWsProviderIntel() {
+  const host = document.getElementById('wsProviderIntel');
+  if (!host) return;
+  const s = workspace.providerIntelSummary;
+  if (!s) { host.innerHTML = '<h3>Provider Intelligence</h3><div class="muted">Run a discovery refresh to populate provider intelligence.</div>'; return; }
+  const dot = (ds) => `<span class="pi-dot ${dsDotClass(ds)}"></span>`;
+  host.innerHTML = `
+    <h3>Provider Intelligence</h3>
+    <div class="ml-stats">
+      <span class="ml-chip"><b>${s.available}</b> available</span>
+      <span class="ml-chip"><b>${s.curated}</b> curated</span>
+      <span class="ml-chip"><b>${s.stale}</b> stale</span>
+      <span class="ml-chip"><b>${s.models?.total ?? 0}</b> models</span>
+    </div>
+    <div class="pi-ws-status">
+      ${dot('verified')}<span>Verified: ${s.byStatus?.verified || 0}</span>
+      ${dot('curated')}<span>Curated: ${s.byStatus?.curated || 0}</span>
+      ${dot('stale')}<span>Stale: ${s.stale || 0}</span>
+      ${dot('unavailable')}<span>Unavailable: ${s.unavailable || 0}</span>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn2 sm" onclick="refreshProviderIntelligence()">↻ Refresh discovery</button>
+      <button class="btn btn2 sm" onclick="openProviderChangesModal()">View changes</button>
+    </div>`;
+}
+
+// Settings "Provider Intelligence" panel
+function fillProviderIntelSettings() {
+  const host = document.getElementById('piSettingsPanel');
+  if (!host) return;
+  const s = workspace.providerIntelSummary;
+  host.innerHTML = `
+    <h3>Provider Intelligence</h3>
+    <p class="muted">On-demand discovery of provider availability, model counts and changes. Never auto-polls; always manual.</p>
+    <div class="ml-stats">
+      <span class="ml-chip"><b>${s ? s.available : 0}</b> available</span>
+      <span class="ml-chip"><b>${s ? s.stale : 0}</b> stale</span>
+      <span class="ml-chip"><b>${s ? (s.models?.total ?? 0) : 0}</b> models</span>
+    </div>
+    <div style="margin-top:10px"><button class="btn btn-go" onclick="refreshProviderIntelligence()">↻ Refresh provider intelligence</button></div>`;
+}
+
 // ── Cloud Providers explorer ──
 export function renderCloudProviders() {
   updateCrumb('Cloud Providers');
@@ -2169,7 +2439,8 @@ export function renderCloudProviders() {
   };
 
   const drawFilters = () => {
-    filtersEl.innerHTML = cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('');
+    filtersEl.innerHTML = `<button class="btn btn2 sm pi-refresh-all" id="piRefreshAll" onclick="refreshProviderIntelligence()" title="Refresh all provider intelligence">↻ Refresh</button>` +
+      cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('');
     filtersEl.querySelectorAll('.chip-filter').forEach(b => b.addEventListener('click', () => {
       activeCat = b.dataset.cat; drawFilters(); drawGrid();
     }));
@@ -2185,19 +2456,47 @@ export function renderCloudProviders() {
       const free = getFreeModels(p.id).length;
       const total = getModels(p.id).length;
       const compat = p.id === 'openrouter' ? 'Anthropic (proxy)' : (p.claudeCode ? 'Anthropic' : 'OpenAI');
+      const intel = workspace.providerIntel[p.id];
+      const ds = intel?.status?.discoveryStatus;
+      const avail = intel?.status?.availability;
+      const dot = ds ? `<span class="pi-dot ${dsDotClass(ds)}" title="${esc(dsLabel(ds))}"></span>` : '';
+      const totalModels = intel?.models?.total ?? total;
+      const freeModelsN = intel?.models?.free ?? free;
+      const srcBadge = intel ? `<span class="badge pi-src">${intel.source.type === 'official-api' ? 'verified' : 'curated'}</span>` : '';
+      const lastChecked = intel?.source?.lastCheckedAt ? relTime(intel.source.lastCheckedAt) : 'not checked';
+      const changeN = workspace.providerChangeCounts[p.id] || 0;
+      const changeBadge = changeN ? `<span class="badge pi-change" title="Recent discovery changes">${changeN} change${changeN > 1 ? 's' : ''}</span>` : '';
+      const statusText = avail === 'available' ? 'available' : (avail === 'unavailable' ? 'unavailable' : (ds === 'curated' ? 'known · curated' : 'unknown'));
       return `<div class="panel provider-card cp-card" data-id="${p.id}" role="button" tabindex="0">
-        <div class="pc-logo-sm">${logoHtml(p)}</div>
-        <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(compat)}</span></div>
+        <div class="pc-head">
+          <div class="pc-logo-sm">${logoHtml(p)}</div>
+          <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(compat)}</span></div>
+          ${dot}
+        </div>
         <div class="pc-card-foot">
-          <span class="badge cnt">${total ? (free + ' free · ' + total + ' total') : 'models…'}</span>
+          <span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>
+          ${srcBadge}
+          ${changeBadge}
           ${key ? '<span class="badge cc">configured</span>' : ''}
         </div>
+        <div class="pc-intel-row">
+          <span class="pi-status">${esc(statusText)}</span>
+          <span class="pi-checked">· ${esc(lastChecked)}</span>
+        </div>
+        ${p.id === 'custom' ? '' : `<div class="pc-actions">
+          <button class="btn btn2 sm pi-details" data-id="${p.id}" type="button">Details</button>
+          <button class="btn btn2 sm pi-refresh" data-id="${p.id}" type="button" title="Re-check this provider">↻</button>
+        </div>`}
       </div>`;
     }).join('');
     grid.querySelectorAll('.provider-card').forEach(c => {
       const open = () => openProviderConfig(c.dataset.id);
       c.addEventListener('click', open);
       c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      const det = c.querySelector('.pi-details');
+      if (det) det.addEventListener('click', (e) => { e.stopPropagation(); openProviderIntelligence(c.dataset.id); });
+      const ref = c.querySelector('.pi-refresh');
+      if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(c.dataset.id); });
     });
   };
 
@@ -2205,6 +2504,10 @@ export function renderCloudProviders() {
   if (search) search.addEventListener('input', (e) => { q = e.target.value; drawGrid(); });
   drawFilters();
   drawGrid();
+  // Populate intelligence once (no loop: only when empty), then redraw the grid.
+  if (!Object.keys(workspace.providerIntel).length) {
+    fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
+  }
 }
 
 // ── Models explorer (v0.8.0 — Model Intelligence) ──

@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   Storage.initProviderDefaults(PROVIDERS);
   await UI.fetchCachedModels();
+  await UI.fetchProviderIntel();
   await UI.loadConfig();
   navigate(workspace.currentPage || 'workspace');
 
@@ -117,6 +118,10 @@ const GLOBALS = {
   renderCloudProviders: UI.renderCloudProviders,
   renderModels: UI.renderModels,
   useModel: UI.useModel,
+  fetchProviderIntel: UI.fetchProviderIntel,
+  refreshProviderIntelligence: UI.refreshProviderIntelligence,
+  openProviderIntelligence: UI.openProviderIntelligence,
+  openProviderChangesModal: UI.openProviderChangesModal,
   renderPlayground: UI.renderPlayground,
   openProviderConfig: openProviderConfig,
   toggleCommandPalette: toggleCommandPalette,

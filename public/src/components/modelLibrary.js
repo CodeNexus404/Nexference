@@ -102,6 +102,9 @@ async function showDetails(providerId, modelId) {
   addRow('Source', `${detail.source ? esc(detail.source) + ' · ' : ''}${statusBadge(detail.sourceStatus || DASH)}`);
   if (detail.pricing) addRow('Pricing', esc(typeof detail.pricing === 'string' ? detail.pricing : JSON.stringify(detail.pricing)));
   if (detail.isFree === true || detail.isPaid === true) addRow('Free', detail.isFree ? 'Yes' : 'No');
+  addRow('Availability', detail.availability || 'unknown');
+  addRow('Access type', detail.accessType || 'unknown');
+  addRow('Lifecycle', detail.lifecycle || 'unknown');
   if (detail.contextLength != null) addRow('Context length', fmt(detail.contextLength));
   if (detail.parameters) addRow('Parameters', esc(typeof detail.parameters === 'string' ? detail.parameters : JSON.stringify(detail.parameters)));
   if (detail.size) addRow('Size', esc(detail.size));
@@ -253,7 +256,7 @@ export async function renderModelLibrary(host) {
   }
 
   const recent = modelService.getRecent();
-  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false };
+  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false, access: '', availability: '', lifecycle: '', sourceStatus: '' };
 
   function providersList() {
     return [...new Set(all.map((m) => m.providerId))]
@@ -271,6 +274,10 @@ export async function renderModelLibrary(host) {
     if (filterState.provider) list = list.filter((m) => m.providerId === filterState.provider);
     if (filterState.free) list = list.filter((m) => m.isFree);
     if (filterState.chat) list = list.filter((m) => m.capabilities && m.capabilities.chat === true);
+    if (filterState.access) list = list.filter((m) => m.accessType === filterState.access);
+    if (filterState.availability) list = list.filter((m) => m.availability === filterState.availability);
+    if (filterState.lifecycle) list = list.filter((m) => m.lifecycle === filterState.lifecycle);
+    if (filterState.sourceStatus) list = list.filter((m) => m.sourceStatus === filterState.sourceStatus);
     if (filterState.q) {
       const ql = filterState.q.toLowerCase();
       list = list.filter((m) => {
@@ -327,6 +334,18 @@ export async function renderModelLibrary(host) {
             <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
             <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
             <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
+            <select class="inp ml-access-sel" title="Access type" aria-label="Access type">
+              <option value="">Any access</option><option value="free">Free</option><option value="paid">Paid</option><option value="freemium">Freemium</option>
+            </select>
+            <select class="inp ml-avail-sel" title="Availability" aria-label="Availability">
+              <option value="">Any availability</option><option value="available">Available</option><option value="unknown">Unknown</option>
+            </select>
+            <select class="inp ml-life-sel" title="Lifecycle" aria-label="Lifecycle">
+              <option value="">Any lifecycle</option><option value="active">Active</option><option value="unknown">Unknown</option>
+            </select>
+            <select class="inp ml-src-sel" title="Source status" aria-label="Source status">
+              <option value="">Any source</option><option value="live">Live</option><option value="fallback-website">Fallback site</option><option value="fallback-static">Fallback static</option><option value="installed">Installed</option><option value="cached">Cached</option>
+            </select>
             <button class="btn btn2 sm ml-clear-filters" id="mlClearFilters" type="button" hidden>Clear filters</button>
           </div>
         </div>
@@ -341,7 +360,7 @@ export async function renderModelLibrary(host) {
     const cur = currentSelection();
     const isUsing = (m) => cur[m.providerId] === m.id;
     const searching = !!filterState.q;
-    const activeFilters = filterState.type !== 'all' || filterState.provider || filterState.free || filterState.chat || filterState.q;
+    const activeFilters = filterState.type !== 'all' || filterState.provider || filterState.free || filterState.chat || filterState.q || filterState.access || filterState.availability || filterState.lifecycle || filterState.sourceStatus;
 
     const recHTML = (!searching && recommended.length) ? `
       <div class="ml-section">
@@ -387,6 +406,10 @@ export async function renderModelLibrary(host) {
     root.querySelector('.ml-prov-sel').addEventListener('change', (e) => { filterState.provider = e.target.value; draw(); });
     root.querySelector('.ml-free-chk').addEventListener('change', (e) => { filterState.free = e.target.checked; draw(); });
     root.querySelector('.ml-chat-chk').addEventListener('change', (e) => { filterState.chat = e.target.checked; draw(); });
+    root.querySelector('.ml-access-sel').addEventListener('change', (e) => { filterState.access = e.target.value; draw(); });
+    root.querySelector('.ml-avail-sel').addEventListener('change', (e) => { filterState.availability = e.target.value; draw(); });
+    root.querySelector('.ml-life-sel').addEventListener('change', (e) => { filterState.lifecycle = e.target.value; draw(); });
+    root.querySelector('.ml-src-sel').addEventListener('change', (e) => { filterState.sourceStatus = e.target.value; draw(); });
     root.querySelector('#mlRefresh').addEventListener('click', async (ev) => {
       const btn = ev.currentTarget; btn.disabled = true; btn.classList.add('spinning');
       try {
@@ -402,11 +425,16 @@ export async function renderModelLibrary(host) {
     const clearBtn = root.querySelector('#mlClearFilters');
     if (clearBtn) clearBtn.addEventListener('click', () => {
       filterState.q = ''; filterState.type = 'all'; filterState.provider = ''; filterState.free = false; filterState.chat = false;
+      filterState.access = ''; filterState.availability = ''; filterState.lifecycle = ''; filterState.sourceStatus = '';
       const s = root.querySelector('.ml-search'); if (s) s.value = '';
       root.querySelectorAll('.ml-seg-btn').forEach((x) => x.classList.toggle('on', x.dataset.type === 'all'));
       const sel = root.querySelector('.ml-prov-sel'); if (sel) sel.value = '';
       const f = root.querySelector('.ml-free-chk'); if (f) f.checked = false;
       const c = root.querySelector('.ml-chat-chk'); if (c) c.checked = false;
+      const a = root.querySelector('.ml-access-sel'); if (a) a.value = '';
+      const av = root.querySelector('.ml-avail-sel'); if (av) av.value = '';
+      const lf = root.querySelector('.ml-life-sel'); if (lf) lf.value = '';
+      const sc = root.querySelector('.ml-src-sel'); if (sc) sc.value = '';
       draw();
     });
   }

@@ -1,7 +1,13 @@
 import { esc, norm, logoHtml, monoOf } from './util.js';
 import { workspace, getFreeModels, getModels, getModelSource, isFetching } from '../core/state.js';
 import { Storage } from '../core/storage.js';
-import { pick } from '../ui/app.js';
+import { pick, openProviderIntelligence } from '../ui/app.js';
+
+const DS_LABEL = {
+  verified: 'Verified', observed: 'Observed', curated: 'Curated', stale: 'Stale',
+  unavailable: 'Unavailable', deprecated: 'Deprecated', unknown: 'Unknown',
+};
+function dsDotClass(ds) { return 'ds-' + (ds || 'unknown'); }
 
 // Gateway card component — builds the DOM for a single provider card. Extracted
 // verbatim from the original app.js createGatewayCard; it now reads model/state
@@ -146,5 +152,33 @@ export function createGatewayCard(provider) {
       <button type="button" class="btn btn-go" onclick="event.stopPropagation(); handleApply(event, '${provider.id}')">Apply Config</button>
     </div>
   `;
+
+  // Overlay provider-discovery intelligence (v1.4.0) — honest only.
+  const intel = workspace.providerIntel[provider.id];
+  if (intel) {
+    const ds = intel.status?.discoveryStatus;
+    const changeN = workspace.providerChangeCounts[provider.id] || 0;
+    const last = intel.source?.lastCheckedAt ? relTimeLocal(intel.source.lastCheckedAt) : 'not checked';
+    const changeBadge = changeN ? `<span class="badge pi-change" title="Recent discovery changes">${changeN}</span>` : '';
+    const row = document.createElement('div');
+    row.className = 'gw-intel';
+    row.innerHTML = `<span class="pi-dot ${dsDotClass(ds)}" title="${esc(DS_LABEL[ds] || ds)}"></span>` +
+      `<span class="gw-intel-status">${esc(DS_LABEL[ds] || ds || 'unknown')}</span>` +
+      changeBadge +
+      `<span class="gw-intel-checked">· ${esc(last)}</span>` +
+      `<button class="btn btn2 sm pi-details" data-id="${esc(provider.id)}" type="button" title="Provider intelligence">Intel</button>`;
+    card.appendChild(row);
+    const det = row.querySelector('.pi-details');
+    if (det) det.addEventListener('click', (e) => { e.stopPropagation(); openProviderIntelligence(provider.id); });
+  }
+
   return card;
+}
+
+function relTimeLocal(iso) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }

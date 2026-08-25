@@ -149,7 +149,6 @@ export const PROVIDERS = [
     logo: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='4' y1='21' x2='4' y2='14'/%3E%3Cline x1='4' y1='10' x2='4' y2='3'/%3E%3Cline x1='12' y1='21' x2='12' y2='12'/%3E%3Cline x1='12' y1='8' x2='12' y2='3'/%3E%3Cline x1='20' y1='21' x2='20' y2='16'/%3E%3Cline x1='20' y1='12' x2='20' y2='3'/%3E%3Cline x1='1' y1='14' x2='7' y2='14'/%3E%3Cline x1='9' y1='8' x2='15' y2='8'/%3E%3Cline x1='17' y1='16' x2='23' y2='16'/%3E%3C/svg%3E",
     accent: '#f59e0b', glow: 'rgba(245,158,11,.18)',
     format: 'anthropic', claudeCode: true, hasCustomUrl: true,
-    baseUrl: 'https://your-gateway.com/v1/',
     desc: 'Point at any Anthropic- or OpenAI-compatible base URL.',
     signup: '', defaultKey: '', isFree: () => true,
   },

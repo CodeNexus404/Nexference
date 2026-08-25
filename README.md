@@ -17,14 +17,15 @@
 
 ## Overview
 
-**Nexference v1.3.0 — Product UI Refinement & Interactive Experience** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.4.0 — Provider Discovery & Intelligence Foundation** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
 - **Environment Intelligence** — detects installed clients, local runtimes, models, and hardware, and derives honest recommendations.
 - **Provider Intelligence** — a live, normalised cloud model catalogue with truthful source status (live / cached / fallback) and free-vs-paid detection.
+- **Provider Discovery** — a dedicated discovery layer that verifies providers against trusted sources (official public APIs, curated registry), normalises them into one honest record, tracks changes over time, and never probes keyed providers or invents "live"/"verified" status.
 - **Runtime Intelligence** — real local-runtime detection (Ollama, LM Studio, …) with status, installed models, and safe start.
-- **Model Intelligence** — one honest record per model with capability flags derived only from what a provider/runtime actually reports.
+- **Model Intelligence** — one honest record per model with capability flags, availability, access type (free/paid/freemium), and lifecycle derived only from what a provider/runtime actually reports.
 - **Client Compatibility** — a single compatibility engine answering "can client X use provider Y / runtime Z, and how?".
 
 On top of that sits a **Safe Configuration Management** pipeline and a **Unified Playground** with an honest execution engine, metrics, history, and comparison. A **Workspace Health** report and an **Activity** feed give you observability without exposing secrets.
@@ -32,6 +33,21 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
 ---
+
+## What's new in v1.4.0
+
+The **Provider Discovery & Intelligence Foundation** — Nexference learns about providers from trusted sources and keeps that knowledge honest, observable, and under your control.
+
+- **Provider Discovery service** — a clean source-adapter interface (`ProviderDiscoveryAdapter`) with two real sources shipped: a *curated-registry* source (the trusted static provider list) and an *official-api* source (a live, key-less check of a provider's public model API). More sources can be added without touching the core.
+- **Normalised provider-intelligence record** — every provider gets one honest record: identity, availability, discovery status (verified / observed / curated / stale / unavailable / deprecated / unknown), access (free/paid/freemium, requires-key), compatibility, source provenance, model summary, and first-seen / last-checked timestamps.
+- **Change detection** — a secret-free change store records provider discovered / available / unavailable / down / restored, models added/removed, free/paid shifts, and source changes. Surfaced as a count badge on each provider, a "View changes" modal, and a Workspace panel.
+- **Model Intelligence deepened** — every model record now carries `availability`, `accessType` (free / paid / freemium), and `lifecycle`, with new Model Library filters (Access, Availability, Lifecycle, Source) and detail rows.
+- **On-demand, manual discovery** — no background auto-polling. Refresh is a button (Cloud Providers, Workspace, Settings, Command Palette) and a `POST /api/provider-intelligence/refresh`.
+- **Honesty guardrails** — keyed providers are never probed (reported as "curated", not "up/down"); failed refreshes keep last-known-good data and mark it `stale`; nothing is ever labelled "live"/"verified"/"free" without a real signal; no secrets, headers, or raw pricing reach discovery or change records.
+- **APIs** — `GET/POST /api/provider-intelligence`, `GET /api/provider-intelligence/:id`, `GET /api/provider-changes`, `GET /api/provider-changes/summary`, plus `access`/`availability`/`lifecycle` query params on `/api/models`.
+- **Version** — bumped to `1.4.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ## What's new in v1.3.0
 
@@ -195,7 +211,9 @@ public/src/
 |----------|---------|
 | `/api/environment`, `/api/environment/refresh` | Unified environment state + refresh |
 | `/api/hardware/capabilities` | Hardware intelligence |
-| `/api/models`, `/api/models/detail`, `/api/models/recommended`, `/api/models/stats`, `/api/models/refresh` | Model catalogue |
+| `/api/models`, `/api/models/detail`, `/api/models/recommended`, `/api/models/stats`, `/api/models/refresh` | Model catalogue (`/api/models` supports `access`, `availability`, `lifecycle` filters) |
+| `/api/provider-intelligence`, `/api/provider-intelligence/:id`, `/api/provider-intelligence/refresh` | Provider discovery + intelligence |
+| `/api/provider-changes`, `/api/provider-changes/summary`, `/api/provider-changes/:providerId` | Provider change feed |
 | `/api/config/status`, `/api/config/preview`, `/api/config/apply`, `/api/config/events` | Safe configuration |
 | `/api/backups` | Backups list / restore / delete |
 | `/api/profiles` | Portable profiles |

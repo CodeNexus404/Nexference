@@ -40,6 +40,13 @@ export const workspace = {
   customModel: '',
   customFormat: Storage.getCustomFormat() || 'anthropic',
 
+  // Provider discovery intelligence (v1.4.0) — populated from /api/provider-intelligence.
+  // Maps providerId -> normalized intelligence record. Never contains secrets.
+  providerIntel: {},
+  providerChangeCounts: {},
+  providerIntelSummary: null,
+  _intelLoading: false,
+
   _fetching: new Set(),
   _keyFetchTimers: {},
 };

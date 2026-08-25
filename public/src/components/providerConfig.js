@@ -20,7 +20,7 @@ export function openProviderConfig(providerId) {
 
   const key = Storage.getKey(providerId) || '';
   const model = Storage.getModel(providerId) || '';
-  const baseVal = provider.hasCustomUrl ? (workspace.customUrl || provider.baseUrl) : provider.baseUrl;
+  const baseVal = provider.hasCustomUrl ? (workspace.customUrl || '') : (provider.baseUrl || '');
 
   const body = `
     <div class="pc">
@@ -28,7 +28,7 @@ export function openProviderConfig(providerId) {
         <div class="pc-logo">${logoHtml(provider)}</div>
         <div class="pc-meta">
           <div class="pc-name">${esc(provider.name)}</div>
-          <div class="pc-sub">${esc(provider.sub)}</div>
+          ${provider.id !== 'custom' && provider.sub ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" title="Open ${esc(provider.sub)}">${esc(provider.sub)}</div>` : ''}
         </div>
         <span class="badge ${provider.claudeCode ? 'cc' : 'browse'}">${provider.claudeCode ? 'Claude Code' : 'Browse · API'}</span>
       </div>
@@ -56,13 +56,20 @@ export function openProviderConfig(providerId) {
     </div>`;
 
   const { close } = openModal({
-    title: provider.name,
+    title: '',
     subtitle: 'Provider configuration',
     size: 'wide',
     bodyHTML: body,
     onMount: (b, ctrl) => {
       const keyInput = b.querySelector(`.api-key-${providerId}`);
       keyInput.addEventListener('input', () => Storage.setKey(providerId, keyInput.value));
+
+      const pcSub = b.querySelector('.pc-sub');
+      if (pcSub && provider.sub && provider.id !== 'custom') {
+        const goSite = () => window.open('https://' + provider.sub, '_blank', 'noopener');
+        pcSub.addEventListener('click', goSite);
+        pcSub.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goSite(); } });
+      }
 
       const eye = b.querySelector('[data-act="toggle"]');
       eye.addEventListener('click', () => {
@@ -88,7 +95,7 @@ export function openProviderConfig(providerId) {
         // .base-url-* selectors this modal renders). No behaviour change.
         const url = provider.hasCustomUrl
           ? (b.querySelector(`.base-url-${providerId}`)?.value || baseVal)
-          : provider.baseUrl;
+          : (provider.baseUrl || '');
         if (window.testConnection) window.testConnection(providerId, url);
         else notify.toast('Test unavailable', 'error');
       });
@@ -108,8 +115,8 @@ export function openProviderConfig(providerId) {
         if (!model) { notify.toast('Choose a model before applying.', 'warning'); return; }
         if (!provider.publicModels && !key) { notify.toast('Add an API key before applying.', 'warning'); return; }
         const baseUrl = provider.hasCustomUrl
-          ? (b.querySelector(`.base-url-${providerId}`)?.value || provider.baseUrl)
-          : provider.baseUrl;
+          ? (b.querySelector(`.base-url-${providerId}`)?.value || baseVal)
+          : (provider.baseUrl || '');
         const cfg = configEngine.buildClaudeSettings(provider, baseUrl, model, key);
 
         if (provider.claudeCode) {

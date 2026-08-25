@@ -63,6 +63,25 @@ function sourceStatus(source) {
   }
 }
 
+// Honest availability for a model record: only set when we have a real signal.
+// A model we fetched live or from a fallback is treated as available; if we
+// have no data at all it never reaches this layer. We never claim
+// "temporary"/"deprecated" without an explicit source signal.
+function availabilityFromSource(source) {
+  switch (source) {
+    case 'proxy':
+    case 'manual':
+    case 'startup':
+    case 'periodic':
+    case 'website':
+    case 'static':
+    case 'local':
+      return 'available';
+    default:
+      return 'unknown';
+  }
+}
+
 // ─── Cloud (provider) models ───
 function normalizeCloudModels(providerId, entry) {
   const p = getProvider(providerId);
@@ -92,6 +111,9 @@ function normalizeCloudModels(providerId, entry) {
       kind: 'cloud',
       source,
       sourceStatus: sourceStatus(source),
+      availability: availabilityFromSource(source),
+      accessType: free ? 'free' : 'paid',
+      lifecycle: availabilityFromSource(source) === 'available' ? 'active' : 'unknown',
       isFree: free,
       isPaid: !free,
       pricing: m.pricing || null,
@@ -113,6 +135,7 @@ function normalizeCloudModels(providerId, entry) {
         fetchedAt: entry.fetchedAt || null,
         total: entry.total || entry.models.length,
         source,
+        accessType: free ? 'free' : 'paid',
         lastFetchOk: entry.total ? entry.total > 0 : null,
       },
     };
@@ -136,6 +159,9 @@ function normalizeLocalModels(models) {
       kind: 'local',
       source: 'local',
       sourceStatus: 'installed',
+      availability: 'available',
+      accessType: 'free',
+      lifecycle: 'active',
       isFree: true,
       isPaid: false,
       pricing: null,
@@ -156,6 +182,7 @@ function normalizeLocalModels(models) {
       provenance: {
         runtimeId: m.runtimeId || null,
         modifiedAt: m.modifiedAt || null,
+        accessType: 'free',
       },
     };
   });
@@ -183,7 +210,7 @@ export async function getLocalModels() {
 }
 
 export async function getUnifiedModels(opts = {}) {
-  const { type, provider, q, free, capabilities, recommended, source } = opts;
+  const { type, provider, q, free, capabilities, recommended, source, access, availability, lifecycle } = opts;
   let records = [];
   if (type !== 'local') records.push(...getCloudModels());
   if (type !== 'cloud') records.push(...await getLocalModels());
@@ -195,6 +222,9 @@ export async function getUnifiedModels(opts = {}) {
   }
   if (free === '1' || free === true) records = records.filter((r) => r.isFree);
   if (source) records = records.filter((r) => r.sourceStatus === source || r.source === source);
+  if (access) records = records.filter((r) => r.accessType === access);
+  if (availability) records = records.filter((r) => r.availability === availability);
+  if (lifecycle) records = records.filter((r) => r.lifecycle === lifecycle);
   if (capabilities) {
     const want = (Array.isArray(capabilities) ? capabilities : String(capabilities).split(',')).filter(Boolean);
     records = records.filter((r) => want.every((cap) => r.capabilities && r.capabilities[cap] === true));

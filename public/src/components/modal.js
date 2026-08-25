@@ -30,10 +30,10 @@ export function openModal({ title = '', subtitle = '', bodyHTML = '', onMount = 
   overlay.innerHTML = `
     <div class="modal-card" role="dialog" aria-modal="true" aria-label="${esc(title || 'Dialog')}">
       <header class="modal-card-head">
-        <div class="modal-card-titles">
-          <h3 class="modal-card-title">${esc(title)}</h3>
+        ${(title || subtitle) ? `<div class="modal-card-titles">
+          ${title ? `<h3 class="modal-card-title">${esc(title)}</h3>` : ''}
           ${subtitle ? `<p class="modal-card-sub">${esc(subtitle)}</p>` : ''}
-        </div>
+        </div>` : ''}
         <button class="modal-card-x" aria-label="Close dialog" type="button">×</button>
       </header>
       <div class="modal-card-body">${bodyHTML}</div>

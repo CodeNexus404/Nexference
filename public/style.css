@@ -448,10 +448,10 @@ a:hover{color:var(--accent-2)}
 
 /* ── Notifications / toasts ──────────────────────────────────── */
 .toasts{position:fixed;right:22px;bottom:22px;z-index:1200;display:flex;flex-direction:column;gap:10px;
-  width:min(320px,calc(100vw - 32px));pointer-events:none}
+  width:min(480px,calc(100vw - 32px));pointer-events:none}
 .toast{
   position:relative;pointer-events:auto;
-  align-self:flex-end;width:fit-content;max-width:100%;
+  align-self:flex-end;width:fit-content;min-width:min(360px,100%);max-width:100%;
   display:flex;align-items:center;gap:12px;
   padding:13px 15px 15px;border-radius:20px;overflow:hidden;
   font-family:var(--sans);font-size:13.5px;font-weight:550;color:var(--text);
@@ -501,7 +501,7 @@ a:hover{color:var(--accent-2)}
 .toast.warning .toast-ico{background:var(--warning-soft);color:var(--warning)}
 .toast.info{border-color:var(--accent-line)}
 .toast.info .toast-ico{background:var(--accent-soft);color:var(--accent)}
-.toast-msg{flex:1 1 auto;min-width:0;line-height:1.4;letter-spacing:.1px}
+.toast-msg{flex:1 1 auto;min-width:0;line-height:1.4;letter-spacing:.1px;overflow-wrap:anywhere;word-break:break-word}
 .toast-x{
   flex:0 0 auto;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
   border:none;background:transparent;color:var(--text-3);font-size:18px;line-height:1;cursor:pointer;
@@ -1106,6 +1106,8 @@ body.modal-open{overflow:hidden}
 .pc-meta{flex:1;min-width:0}
 .pc-name{font-family:var(--display);font-size:16px}
 .pc-sub{font-size:11.5px;color:var(--text-3);font-family:var(--mono)}
+.pc-sub-link{cursor:pointer;text-decoration:underline;text-underline-offset:2px;text-decoration-color:color-mix(in srgb,var(--text-3) 45%,transparent)}
+.pc-sub-link:hover{color:var(--text-2);text-decoration-color:color-mix(in srgb,var(--text-2) 70%,transparent)}
 .pc-desc{color:var(--text-2);font-size:13px;line-height:1.6;margin:8px 0 4px}
 .key-row{display:flex;gap:8px;align-items:center}
 .key-row .inp{flex:1}
@@ -1784,4 +1786,54 @@ body.modal-open{overflow:hidden}
   .ml-card-acts .btn{flex:1 1 100%;width:100%}
   .ml-seg{flex:1 1 100%}
   .ml-toggle{flex:1 1 auto;justify-content:center}
+}
+
+/* ════════════════════════════════════════════════════════════
+   Provider Intelligence (v1.4.0) — discovery status indicators
+   ════════════════════════════════════════════════════════════ */
+
+/* Discovery-status dot — a calm, honest traffic light. No purple; uses the
+   graphite/azure palette + amber for stale, red-ish for unavailable. */
+.pi-dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none;
+  background:var(--text-3);box-shadow:0 0 0 3px color-mix(in srgb,var(--surface-2) 60%,transparent)}
+.pi-dot.ds-verified{background:var(--ok,#34d399)}
+.pi-dot.ds-observed{background:var(--azure,#5b8def)}
+.pi-dot.ds-curated{background:var(--text-2,#9aa4b2)}
+.pi-dot.ds-stale{background:var(--warning,#f5a623)}
+.pi-dot.ds-unavailable{background:var(--danger,#ef5b6b)}
+.pi-dot.ds-deprecated{background:var(--text-3,#5b6472)}
+.pi-dot.ds-unknown{background:var(--text-3,#5b6472)}
+
+/* Cloud Providers explorer intel overlay */
+.pc-head{display:flex;align-items:center;gap:10px}
+.pc-head .provider-meta{margin-right:auto}
+.pc-intel-row{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-2);margin-top:8px}
+.pc-intel-row .pi-status{font-weight:600;color:var(--text)}
+.pc-intel-row .pi-checked{color:var(--text-3)}
+.pc-actions{display:flex;gap:6px;margin-top:10px}
+.pc-actions .btn{flex:1 1 auto;justify-content:center}
+.badge.pi-src{background:color-mix(in srgb,var(--azure) 16%,transparent);color:var(--azure);border-color:color-mix(in srgb,var(--azure) 35%,transparent)}
+.badge.pi-change{background:color-mix(in srgb,var(--warning) 18%,transparent);color:var(--warning);border-color:color-mix(in srgb,var(--warning) 35%,transparent)}
+
+/* Gateway card intel strip */
+.gw-intel{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:10px;
+  padding-top:9px;border-top:1px dashed var(--border)}
+.gw-intel .gw-intel-status{font-size:12px;font-weight:600;color:var(--text)}
+.gw-intel .gw-intel-checked{font-size:11px;color:var(--text-3)}
+.gw-intel .pi-details{margin-left:auto}
+
+/* Workspace + Settings provider-intelligence widgets */
+.pi-ws-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0 2px;font-size:12.5px;color:var(--text-2)}
+.pi-ws-status .pi-dot{margin-right:-4px}
+.ml-stats .ml-chip b{color:var(--text)}
+
+/* Provider details modal status row */
+.pi-modal-status{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:2px 0 12px}
+.pi-modal-status .pi-dot{width:11px;height:11px}
+
+/* Command-palette / settings refresh button reuse existing .btn styles.
+   Compact selects in the Model Library filter bar. */
+.ml-access-sel,.ml-avail-sel,.ml-life-sel,.ml-src-sel{flex:0 1 auto;min-width:120px;width:auto}
+@media (max-width:768px){
+  .ml-access-sel,.ml-avail-sel,.ml-life-sel,.ml-src-sel{flex:1 1 100%}
 }
