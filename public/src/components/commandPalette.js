@@ -43,6 +43,7 @@ export function toggleCommandPalette() {
     { label: 'Open Model Library', hint: 'Models', run: () => router.navigate('models') },
     { label: 'Refresh Model Catalogue', hint: 'Models', run: async () => { await modelService.refresh(); notify.toast('Model catalogue refreshed', 'success'); } },
     { label: 'Refresh Provider Intelligence', hint: 'Providers', run: async () => { if (window.refreshProviderIntelligence) await window.refreshProviderIntelligence(); else router.navigate('cloud-providers'); } },
+    { label: 'Refresh Provider Monitoring', hint: 'Providers', run: async () => { if (window.refreshProviderMonitoring) await window.refreshProviderMonitoring(); else router.navigate('cloud-providers'); } },
     { label: 'View Provider Changes', hint: 'Providers', run: () => { if (window.openProviderChangesModal) window.openProviderChangesModal(); else router.navigate('cloud-providers'); } },
     { label: 'Refresh OpenRouter Models', hint: 'Providers', run: async () => { if (window.refreshProviderModels) await window.refreshProviderModels('openrouter'); else router.navigate('cloud-providers'); } },
     { label: 'Recommended Models', hint: 'Models', run: () => { router.navigate('models'); } },
@@ -63,6 +64,11 @@ export function toggleCommandPalette() {
       label: `Provider: ${p.name}`,
       hint: 'Configure',
       run: () => { router.navigate('cloud-providers'); if (window.openProviderConfig) window.openProviderConfig(p.id); },
+    });
+    actions.push({
+      label: `Monitor: ${p.name}`,
+      hint: 'Providers',
+      run: async () => { if (window.refreshProviderMonitoring) await window.refreshProviderMonitoring(p.id); else router.navigate('cloud-providers'); },
     });
   });
 

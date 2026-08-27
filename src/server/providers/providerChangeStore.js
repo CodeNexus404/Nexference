@@ -57,8 +57,15 @@ export const CHANGE_TYPES = {
   PROVIDER_UNAVAILABLE: 'provider_unavailable',
   PROVIDER_DOWN: 'provider_down',
   PROVIDER_RESTORED: 'provider_restored',
+  PROVIDER_DEPRECATED: 'provider_deprecated',
   MODELS_ADDED: 'models_added',
   MODELS_REMOVED: 'models_removed',
+  MODEL_DISCOVERED: 'model_discovered',
+  MODEL_REMOVED: 'model_removed',
+  MODEL_DEPRECATED: 'model_deprecated',
+  MODEL_ACCESS_CHANGED: 'model_access_changed',
+  MODEL_AVAILABILITY_CHANGED: 'model_availability_changed',
+  MODEL_LIFECYCLE_CHANGED: 'model_lifecycle_changed',
   FREE_MODELS_CHANGED: 'free_models_changed',
   SOURCE_CHANGED: 'source_changed',
   METADATA_CHANGED: 'metadata_changed',
@@ -70,27 +77,54 @@ const SEVERITY = {
   [CHANGE_TYPES.PROVIDER_UNAVAILABLE]: 'warning',
   [CHANGE_TYPES.PROVIDER_DOWN]: 'warning',
   [CHANGE_TYPES.PROVIDER_RESTORED]: 'info',
+  [CHANGE_TYPES.PROVIDER_DEPRECATED]: 'warning',
   [CHANGE_TYPES.MODELS_ADDED]: 'info',
   [CHANGE_TYPES.MODELS_REMOVED]: 'warning',
+  [CHANGE_TYPES.MODEL_DISCOVERED]: 'info',
+  [CHANGE_TYPES.MODEL_REMOVED]: 'warning',
+  [CHANGE_TYPES.MODEL_DEPRECATED]: 'warning',
+  [CHANGE_TYPES.MODEL_ACCESS_CHANGED]: 'info',
+  [CHANGE_TYPES.MODEL_AVAILABILITY_CHANGED]: 'info',
+  [CHANGE_TYPES.MODEL_LIFECYCLE_CHANGED]: 'info',
   [CHANGE_TYPES.FREE_MODELS_CHANGED]: 'info',
   [CHANGE_TYPES.SOURCE_CHANGED]: 'info',
   [CHANGE_TYPES.METADATA_CHANGED]: 'info',
 };
 
-export function recordChange({ providerId, providerName, type, summary, details = {} }) {
+// Avoid recording the exact same event twice in a row (e.g. a refresh that
+// re-observes an unchanged state must not spam the change feed).
+const DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function recordChange({ providerId, providerName, modelId = null, type, previousValue = null, newValue = null, sourceType = null, confidence = 'medium', summary, details = {} }) {
   if (!providerId || !type) throw new Error('recordChange requires providerId and type');
+  const now = Date.now();
+  const list = readAll();
+  const key = modelId ? `${providerId}:${modelId}:${type}` : `${providerId}:${type}`;
+  for (const prev of list.slice(0, 300)) {
+    if (now - new Date(prev.detectedAt).getTime() > DEDUP_WINDOW_MS) break;
+    const pkey = prev.modelId ? `${prev.providerId}:${prev.modelId}:${prev.type}` : `${prev.providerId}:${prev.type}`;
+    if (pkey !== key) continue;
+    if (JSON.stringify(prev.previousValue || null) === JSON.stringify(previousValue || null)
+        && JSON.stringify(prev.newValue || null) === JSON.stringify(newValue || null)) {
+      return null; // duplicate unchanged state — skip
+    }
+  }
   const entry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
     providerId,
     providerName: providerName || providerId,
+    modelId,
     type,
-    category: 'provider-discovery',
+    category: modelId ? 'model-change' : 'provider-discovery',
     severity: SEVERITY[type] || 'info',
-    detectedAt: new Date().toISOString(),
+    previousValue,
+    newValue,
+    sourceType,
+    confidence,
+    detectedAt: new Date(now).toISOString(),
     summary,
     details: sanitize(details),
   };
-  const list = readAll();
   list.unshift(entry);
   writeAll(list);
   return entry;

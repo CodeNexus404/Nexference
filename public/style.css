@@ -1372,6 +1372,25 @@ body.modal-open{overflow:hidden}
 .ml-dsec:first-of-type{ border-top:0; padding-top:0; margin-top:14px; }
 .ml-dsec-h{ font:600 11px/1 var(--sans); letter-spacing:.08em; text-transform:uppercase; color:var(--text-3); margin:0 0 10px; }
 
+/* Monitoring timeline (Provider Intelligence) */
+.timeline{ display:flex; flex-direction:column; gap:0; }
+.tl-item{ display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-left:2px solid var(--border-strong); margin-left:6px; padding-left:14px; position:relative; }
+.tl-item::before{ content:''; position:absolute; left:-7px; top:12px; width:12px; height:12px; border-radius:50%; background:var(--panel); border:2px solid var(--border-strong); }
+.tl-item .tl-dot{ display:none; }
+.tl-body{ font-size:13px; color:var(--text); }
+
+/* Reliability bar */
+.rel-bar{ height:8px; border-radius:999px; background:var(--border-strong); overflow:hidden; margin:10px 0 6px; }
+.rel-fill{ height:100%; border-radius:999px; background:linear-gradient(90deg,var(--success),color-mix(in srgb,var(--success) 60%,var(--accent))); }
+
+/* Change badges (Model Library: NEW / REMOVED / FREE CHANGED) */
+.badge.chg-new{ color:var(--success); border-color:var(--success-soft); background:var(--success-soft); }
+.badge.chg-removed{ color:var(--danger,#e5484d); border-color:color-mix(in srgb,var(--danger,#e5484d) 30%,transparent); background:color-mix(in srgb,var(--danger,#e5484d) 10%,transparent); }
+.badge.chg-free{ color:var(--warn,#f5a623); border-color:color-mix(in srgb,var(--warn,#f5a623) 30%,transparent); background:color-mix(in srgb,var(--warn,#f5a623) 12%,transparent); }
+.ml-chg-list{ list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.ml-chg-list li{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-2); }
+
+
 /* header */
 .ml-detail-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:4px; }
 .ml-dh-title{ min-width:0; }

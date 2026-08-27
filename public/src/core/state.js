@@ -47,9 +47,88 @@ export const workspace = {
   providerIntelSummary: null,
   _intelLoading: false,
 
+  // Provider Monitoring (v1.5.0) — populated from /api/provider-monitor/*.
+  // Maps providerId -> insight payload (history + metrics + changes). Never secrets.
+  monitorInsights: {},
+  benchmarkProfiles: [],
+  benchmarkResults: [],
+  // Per-model change index derived from /api/provider-changes, used by the
+  // Model Library "Changed recently" filter + NEW/REMOVED/FREE badges.
+  modelChanges: {},
+
   _fetching: new Set(),
   _keyFetchTimers: {},
 };
+
+// ── Provider Monitoring helpers (v1.5.0) ──
+export async function fetchMonitorInsight(providerId) {
+  const res = await fetch(`/api/provider-monitor/insight/${encodeURIComponent(providerId)}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  workspace.monitorInsights[providerId] = data;
+  return data;
+}
+
+export async function refreshMonitoring(providerId) {
+  const body = providerId ? { providerId } : {};
+  const res = await fetch('/api/provider-monitor/refresh', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  // Re-pull intelligence + insight for the affected provider(s).
+  if (providerId) {
+    await fetchMonitorInsight(providerId);
+  } else if (data.results) {
+    for (const r of data.results) if (r.providerId) await fetchMonitorInsight(r.providerId);
+  }
+  return data;
+}
+
+export async function fetchBenchmarkProfiles() {
+  const res = await fetch('/api/benchmarks/profiles');
+  if (!res.ok) return;
+  const data = await res.json();
+  workspace.benchmarkProfiles = data.profiles || [];
+}
+
+export async function fetchBenchmarks(providerId) {
+  const url = providerId ? `/api/benchmarks?providerId=${encodeURIComponent(providerId)}` : '/api/benchmarks';
+  const res = await fetch(url);
+  if (!res.ok) return;
+  const data = await res.json();
+  workspace.benchmarkResults = data.results || [];
+}
+
+export async function runBenchmark(providerId, profileId) {
+  const res = await fetch('/api/benchmarks/run', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ providerId, profileId }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  await fetchBenchmarks(providerId);
+  return data.result;
+}
+
+// Build a per-model change index from the change feed (for "Changed recently").
+export async function fetchModelChanges(limit = 200) {
+  const res = await fetch(`/api/provider-changes?limit=${limit}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  const idx = {};
+  for (const c of data.changes || []) {
+    if (!c.modelId) continue;
+    const e = (idx[c.modelId] = idx[c.modelId] || { types: {}, lastAt: c.detectedAt });
+    e.types[c.type] = (e.types[c.type] || 0) + 1;
+    if (new Date(c.detectedAt) > new Date(e.lastAt)) e.lastAt = c.detectedAt;
+  }
+  workspace.modelChanges = idx;
+  return idx;
+}
 
 // ── Model selectors (read-through to the cached server model list) ──
 export function getFreeModels(providerId) {

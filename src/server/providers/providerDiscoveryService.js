@@ -147,6 +147,14 @@ function deriveAccessType(free, paid) {
   return 'unknown';
 }
 
+// Compact, secret-free model list (id + free flag) used only for diffing model
+// level changes. Bounded so a huge catalogue can't blow up the diff.
+function compactModelList(providerId) {
+  const entry = modelCache[providerId];
+  if (!entry || !Array.isArray(entry.models)) return [];
+  return entry.models.slice(0, 2000).map((m) => ({ id: m.id, f: m.paid ? 0 : 1 }));
+}
+
 function ensureBaseline(providerId) {
   if (intel[providerId]) return intel[providerId];
   const p = getProvider(providerId);
@@ -166,8 +174,10 @@ async function discoverProvider(provider, { force = false } = {}) {
   inflight.add(provider.id);
   try {
     const previous = intel[provider.id] ? { ...intel[provider.id] } : null;
+    const prevModelList = compactModelList(provider.id);
     const curated = curatedSource.discoverProvider(provider);
     const official = await officialApiSource.discoverProvider(provider);
+    const nextModelList = compactModelList(provider.id);
 
     const snap = modelSnapshot(provider.id);
     const now = new Date().toISOString();
@@ -223,7 +233,7 @@ async function discoverProvider(provider, { force = false } = {}) {
       _fetchedAt: Date.now(),
     };
 
-    const changes = diffRecords(provider, previous, record);
+    const changes = diffRecords(provider, previous, record, prevModelList, nextModelList);
     for (const c of changes) {
       recordChange(c);
       record.timestamps.lastChangedAt = now;
@@ -237,31 +247,32 @@ async function discoverProvider(provider, { force = false } = {}) {
   }
 }
 
-// Compare previous and next records, emit typed change records (secret-free).
-function diffRecords(provider, prev, next) {
+// Compare previous and next records, emit typed change records (secret-free),
+// including granular model-level changes where the data supports it.
+const MAX_MODEL_CHANGES_PER_REFRESH = 40;
+
+function diffRecords(provider, prev, next, prevModelList, nextModelList) {
   const changes = [];
+  const emit = (type, summary, extra = {}) => changes.push(mk(provider, type, summary, extra));
+
   if (!prev) {
-    // First time we actively discovered this provider.
     if (next.status.availability === AVAILABILITY.AVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_DISCOVERED,
-        `${next.identity.name} discovered and reachable`,
-        { availability: next.status.availability, modelCount: next.models.total }));
+      emit(CHANGE_TYPES.PROVIDER_DISCOVERED, `${next.identity.name} discovered and reachable`,
+        { previousValue: null, newValue: { availability: next.status.availability, modelCount: next.models.total }, sourceType: next.source.type, confidence: 'high' });
     }
+    emitModelChanges(nextModelList, null, next, emit);
     return changes;
   }
 
   // Transition from a baseline (never actively discovered) to a real record is a
-  // first discovery, not a "restore". Avoids mislabelling on the very first
-  // refresh.
+  // first discovery, not a "restore". Avoids mislabelling on the very first refresh.
   if (prev.discovered === false) {
     if (next.status.availability === AVAILABILITY.AVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_DISCOVERED,
-        `${next.identity.name} discovered and reachable`,
-        { availability: next.status.availability, modelCount: next.models.total }));
+      emit(CHANGE_TYPES.PROVIDER_DISCOVERED, `${next.identity.name} discovered and reachable`,
+        { previousValue: null, newValue: { availability: next.status.availability, modelCount: next.models.total }, sourceType: next.source.type });
     } else if (next.status.availability === AVAILABILITY.UNAVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_UNAVAILABLE,
-        `${next.identity.name} marked unavailable`,
-        { before: prev.status?.availability, after: next.status.availability }));
+      emit(CHANGE_TYPES.PROVIDER_UNAVAILABLE, `${next.identity.name} marked unavailable`,
+        { previousValue: { availability: prev.status?.availability }, newValue: { availability: next.status.availability }, sourceType: next.source.type });
     }
     return changes;
   }
@@ -270,53 +281,80 @@ function diffRecords(provider, prev, next) {
   const nextAvail = next.status?.availability;
   if (prevAvail !== nextAvail) {
     if (prevAvail === AVAILABILITY.AVAILABLE && nextAvail === AVAILABILITY.UNAVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_DOWN, `${next.identity.name} is no longer reachable`, { before: prevAvail, after: nextAvail }));
+      emit(CHANGE_TYPES.PROVIDER_DOWN, `${next.identity.name} is no longer reachable`, { previousValue: { availability: prevAvail }, newValue: { availability: nextAvail }, sourceType: next.source.type });
     } else if (prevAvail !== AVAILABILITY.AVAILABLE && nextAvail === AVAILABILITY.AVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_RESTORED, `${next.identity.name} is reachable again`, { before: prevAvail, after: nextAvail }));
+      emit(CHANGE_TYPES.PROVIDER_RESTORED, `${next.identity.name} is reachable again`, { previousValue: { availability: prevAvail }, newValue: { availability: nextAvail }, sourceType: next.source.type });
     } else if (nextAvail === AVAILABILITY.AVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_AVAILABLE, `${next.identity.name} marked available`, { before: prevAvail, after: nextAvail }));
+      emit(CHANGE_TYPES.PROVIDER_AVAILABLE, `${next.identity.name} marked available`, { previousValue: { availability: prevAvail }, newValue: { availability: nextAvail }, sourceType: next.source.type });
     } else if (nextAvail === AVAILABILITY.UNAVAILABLE) {
-      changes.push(mk(provider, CHANGE_TYPES.PROVIDER_UNAVAILABLE, `${next.identity.name} marked unavailable`, { before: prevAvail, after: nextAvail }));
+      emit(CHANGE_TYPES.PROVIDER_UNAVAILABLE, `${next.identity.name} marked unavailable`, { previousValue: { availability: prevAvail }, newValue: { availability: nextAvail }, sourceType: next.source.type });
     }
   }
+
+  // Model-level diff (only when we have both lists).
+  if (prevModelList && nextModelList) emitModelChanges(nextModelList, prevModelList, next, emit);
 
   const prevIds = new Set(prev.models?.modelIds || []);
   const nextIds = new Set(next.models?.modelIds || []);
   if (prevIds.size && nextIds.size) {
     const added = [...nextIds].filter((id) => !prevIds.has(id));
     const removed = [...prevIds].filter((id) => !nextIds.has(id));
-    if (added.length) changes.push(mk(provider, CHANGE_TYPES.MODELS_ADDED, `${added.length} new model(s) on ${next.identity.name}`, { added, count: added.length }));
-    if (removed.length) changes.push(mk(provider, CHANGE_TYPES.MODELS_REMOVED, `${removed.length} model(s) removed from ${next.identity.name}`, { removed, count: removed.length }));
+    if (added.length) emit(CHANGE_TYPES.MODELS_ADDED, `${added.length} new model(s) on ${next.identity.name}`, { previousValue: null, newValue: { count: added.length }, sourceType: next.source.type });
+    if (removed.length) emit(CHANGE_TYPES.MODELS_REMOVED, `${removed.length} model(s) removed from ${next.identity.name}`, { previousValue: { count: removed.length }, newValue: null, sourceType: next.source.type });
   }
 
   const prevFree = prev.models?.free || 0;
   const prevPaid = prev.models?.paid || 0;
   if (prevFree !== next.models.free || prevPaid !== next.models.paid) {
-    changes.push(mk(provider, CHANGE_TYPES.FREE_MODELS_CHANGED, `Free/paid mix changed on ${next.identity.name}`,
-      { before: { free: prevFree, paid: prevPaid }, after: { free: next.models.free, paid: next.models.paid } }));
+    emit(CHANGE_TYPES.FREE_MODELS_CHANGED, `Free/paid mix changed on ${next.identity.name}`,
+      { previousValue: { free: prevFree, paid: prevPaid }, newValue: { free: next.models.free, paid: next.models.paid }, sourceType: next.source.type });
   }
 
   if (prev.source?.type !== next.source.type) {
-    changes.push(mk(provider, CHANGE_TYPES.SOURCE_CHANGED, `Discovery source changed for ${next.identity.name}`,
-      { before: prev.source?.type, after: next.source.type }));
+    emit(CHANGE_TYPES.SOURCE_CHANGED, `Discovery source changed for ${next.identity.name}`,
+      { previousValue: { type: prev.source?.type }, newValue: { type: next.source.type }, sourceType: next.source.type });
   }
 
   if (prev.identity?.name !== next.identity?.name || prev.identity?.website !== next.identity?.website) {
-    changes.push(mk(provider, CHANGE_TYPES.METADATA_CHANGED, `Provider metadata changed for ${next.identity.name}`,
-      { before: { name: prev.identity?.name, website: prev.identity?.website }, after: { name: next.identity?.name, website: next.identity?.website } }));
+    emit(CHANGE_TYPES.METADATA_CHANGED, `Provider metadata changed for ${next.identity.name}`,
+      { previousValue: { name: prev.identity?.name, website: prev.identity?.website }, newValue: { name: next.identity?.name, website: next.identity?.website } });
   }
 
   return changes;
 }
 
-function mk(provider, type, summary, details) {
-  return {
-    providerId: provider.id,
-    providerName: provider.id,
-    type,
-    summary,
-    details: details || {},
-  };
+// Emit granular model_discovered / model_removed / model_access_changed events.
+// Capped per refresh so a 400-model catalogue addition doesn't flood the feed.
+function emitModelChanges(nextList, prevList, next, emit) {
+  if (!Array.isArray(nextList)) return;
+  const prevMap = prevList ? new Map(prevList.map((m) => [m.id, m])) : new Map();
+  const nextMap = new Map(nextList.map((m) => [m.id, m]));
+  let budget = MAX_MODEL_CHANGES_PER_REFRESH;
+  for (const [id, nm] of nextMap) {
+    const pm = prevMap.get(id);
+    if (!pm) {
+      if (budget-- <= 0) continue;
+      emit(CHANGE_TYPES.MODEL_DISCOVERED, `Model discovered: ${id}`,
+        { modelId: id, previousValue: null, newValue: { accessType: nm.f ? 'free' : 'paid' }, sourceType: next.source.type, confidence: 'medium' });
+    } else if (pm.f !== nm.f) {
+      if (budget-- <= 0) continue;
+      emit(CHANGE_TYPES.MODEL_ACCESS_CHANGED, `Model ${id} access ${pm.f ? 'free' : 'paid'} → ${nm.f ? 'free' : 'paid'}`,
+        { modelId: id, previousValue: { accessType: pm.f ? 'free' : 'paid' }, newValue: { accessType: nm.f ? 'free' : 'paid' }, sourceType: next.source.type, confidence: 'medium' });
+    }
+  }
+  if (prevList) {
+    for (const [id, pm] of prevMap) {
+      if (!nextMap.has(id)) {
+        if (budget-- <= 0) continue;
+        emit(CHANGE_TYPES.MODEL_REMOVED, `Model removed: ${id}`,
+          { modelId: id, previousValue: { accessType: pm.f ? 'free' : 'paid' }, newValue: null, sourceType: next.source.type, confidence: 'medium' });
+      }
+    }
+  }
+}
+
+function mk(provider, type, summary, extra = {}) {
+  return { providerId: provider.id, providerName: provider.id, type, summary, ...extra };
 }
 
 // Run discovery for every discoverable provider (in parallel, de-duplicated).

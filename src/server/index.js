@@ -20,6 +20,9 @@ import { registerHealthRoutes } from './routes/health.js';
 import { registerActivityRoutes } from './routes/activity.js';
 import { registerProviderIntelligenceRoutes } from './routes/providerIntelligence.js';
 import { registerProviderChangesRoutes } from './routes/providerChanges.js';
+import { registerProviderMonitorRoutes } from './routes/providerMonitor.js';
+import { registerProviderHistoryRoutes } from './routes/providerHistory.js';
+import { registerBenchmarkRoutes } from './routes/benchmarks.js';
 import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
@@ -60,6 +63,9 @@ export function createApp() {
   registerActivityRoutes(app);
   registerProviderIntelligenceRoutes(app);
   registerProviderChangesRoutes(app);
+  registerProviderMonitorRoutes(app);
+  registerProviderHistoryRoutes(app);
+  registerBenchmarkRoutes(app);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);

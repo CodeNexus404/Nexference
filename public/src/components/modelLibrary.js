@@ -4,6 +4,7 @@ import { modelService } from '../models/modelService.js';
 import { getProvider } from '../providers/registry.js';
 import { notify } from '../core/notifications.js';
 import { historyStore } from '../playground/historyStore.js';
+import { workspace, fetchModelChanges } from '../core/state.js';
 
 // ═══════════════════════════════════════════════════
 //  Model Library (v0.9.0) — the enhanced Models explorer.
@@ -66,6 +67,34 @@ function fitsBadge(fits) {
   if (fits === true) return '<span class="ml-fit good">Fits your device</span>';
   if (fits === false) return '<span class="ml-fit warn">May not fit</span>';
   return '<span class="ml-fit unknown">Fit unknown</span>';
+}
+
+// Per-model change badges derived from the secret-free change feed. Only shows
+// when there is a recorded change for this exact model id.
+function changeBadgesHTML(m) {
+  const c = workspace.modelChanges[m.id];
+  if (!c || !c.types) return '';
+  const t = c.types;
+  const badges = [];
+  if (t.model_discovered) badges.push('<span class="badge chg-new" title="Newly discovered">NEW</span>');
+  if (t.model_removed) badges.push('<span class="badge chg-removed" title="Removed from provider">REMOVED</span>');
+  if (t.model_access_changed || t.free_models_changed) badges.push('<span class="badge chg-free" title="Free/paid status changed">FREE CHANGED</span>');
+  return badges.join('');
+}
+
+// A short, honest "change history" panel inside a model's Details dialog.
+// Derived entirely from recorded change events — never inferred.
+function modelChangeSectionHTML(modelId) {
+  const c = workspace.modelChanges[modelId];
+  if (!c) return '';
+  const t = c.types || {};
+  const items = Object.keys(t).map((type) => `<li><span class="badge chg-${type.startsWith('model_discovered') ? 'new' : type.startsWith('model_removed') ? 'removed' : 'free'}">${esc(type)}</span> ×${t[type]}</li>`).join('');
+  return `
+    <section class="ml-dsec">
+      <h4 class="ml-dsec-h">Change history</h4>
+      <div class="muted">Last change: ${esc(relTime(c.lastAt))}</div>
+      <ul class="ml-chg-list">${items}</ul>
+    </section>`;
 }
 
 async function showDetails(providerId, modelId) {
@@ -172,7 +201,8 @@ async function showDetails(providerId, modelId) {
         <h4 class="ml-dsec-h">Provenance</h4>
         ${provHTML}
       </section>
-    </div>
+
+      ${modelChangeSectionHTML(detail.id)}
     <div class="modal-actions">
       <button class="btn btn2" id="mlDetClose" type="button">Close</button>
       <button class="btn btn-go" id="mlDetGo" type="button">Open in Playground</button>
@@ -212,6 +242,7 @@ function modelCardHTML(m, isUsing) {
         <span class="ml-prov">${esc(m.providerName || m.providerId)}</span>
         ${statusBadge(m.sourceStatus)}
         ${freeBadge}
+        ${changeBadgesHTML(m)}
       </div>
       ${capChips(m.capabilities)}
       <footer class="ml-card-acts">
@@ -256,7 +287,10 @@ export async function renderModelLibrary(host) {
   }
 
   const recent = modelService.getRecent();
-  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false, access: '', availability: '', lifecycle: '', sourceStatus: '' };
+  // Build the per-model change index (NEW / REMOVED / FREE CHANGED) from the
+  // secret-free change feed. Best-effort; ignored on failure.
+  await fetchModelChanges(300).catch(() => {});
+  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false, changed: false, access: '', availability: '', lifecycle: '', sourceStatus: '' };
 
   function providersList() {
     return [...new Set(all.map((m) => m.providerId))]
@@ -273,6 +307,7 @@ export async function renderModelLibrary(host) {
     if (filterState.type === 'local') list = list.filter((m) => m.kind === 'local');
     if (filterState.provider) list = list.filter((m) => m.providerId === filterState.provider);
     if (filterState.free) list = list.filter((m) => m.isFree);
+    if (filterState.changed) list = list.filter((m) => workspace.modelChanges[m.id]);
     if (filterState.chat) list = list.filter((m) => m.capabilities && m.capabilities.chat === true);
     if (filterState.access) list = list.filter((m) => m.accessType === filterState.access);
     if (filterState.availability) list = list.filter((m) => m.availability === filterState.availability);
@@ -334,6 +369,7 @@ export async function renderModelLibrary(host) {
             <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
             <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
             <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
+            <label class="ml-toggle"><input type="checkbox" class="ml-changed-chk" ${filterState.changed ? 'checked' : ''}> Changed recently</label>
             <select class="inp ml-access-sel" title="Access type" aria-label="Access type">
               <option value="">Any access</option><option value="free">Free</option><option value="paid">Paid</option><option value="freemium">Freemium</option>
             </select>
@@ -405,6 +441,7 @@ export async function renderModelLibrary(host) {
     }));
     root.querySelector('.ml-prov-sel').addEventListener('change', (e) => { filterState.provider = e.target.value; draw(); });
     root.querySelector('.ml-free-chk').addEventListener('change', (e) => { filterState.free = e.target.checked; draw(); });
+    root.querySelector('.ml-changed-chk').addEventListener('change', (e) => { filterState.changed = e.target.checked; draw(); });
     root.querySelector('.ml-chat-chk').addEventListener('change', (e) => { filterState.chat = e.target.checked; draw(); });
     root.querySelector('.ml-access-sel').addEventListener('change', (e) => { filterState.access = e.target.value; draw(); });
     root.querySelector('.ml-avail-sel').addEventListener('change', (e) => { filterState.availability = e.target.value; draw(); });
@@ -423,13 +460,14 @@ export async function renderModelLibrary(host) {
       finally { btn.disabled = false; btn.classList.remove('spinning'); }
     });
     const clearBtn = root.querySelector('#mlClearFilters');
-    if (clearBtn) clearBtn.addEventListener('click', () => {
-      filterState.q = ''; filterState.type = 'all'; filterState.provider = ''; filterState.free = false; filterState.chat = false;
+    if (clearBtn)     clearBtn.addEventListener('click', () => {
+      filterState.q = ''; filterState.type = 'all'; filterState.provider = ''; filterState.free = false; filterState.changed = false; filterState.chat = false;
       filterState.access = ''; filterState.availability = ''; filterState.lifecycle = ''; filterState.sourceStatus = '';
       const s = root.querySelector('.ml-search'); if (s) s.value = '';
       root.querySelectorAll('.ml-seg-btn').forEach((x) => x.classList.toggle('on', x.dataset.type === 'all'));
       const sel = root.querySelector('.ml-prov-sel'); if (sel) sel.value = '';
       const f = root.querySelector('.ml-free-chk'); if (f) f.checked = false;
+      const ch = root.querySelector('.ml-changed-chk'); if (ch) ch.checked = false;
       const c = root.querySelector('.ml-chat-chk'); if (c) c.checked = false;
       const a = root.querySelector('.ml-access-sel'); if (a) a.value = '';
       const av = root.querySelector('.ml-avail-sel'); if (av) av.value = '';

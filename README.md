@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.4.0 — Provider Discovery & Intelligence Foundation** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.5.0 — Provider Monitoring, Model Changes & Benchmark Intelligence** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -33,6 +33,22 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
 ---
+
+## What's new in v1.5.0
+
+**Provider Monitoring, Model Changes & Benchmark Intelligence** — Nexference now watches providers over time and surfaces model-level change, connection reliability, and benchmarks — entirely from recorded, honest signals.
+
+- **Provider Monitoring** — a manual `POST /api/provider-monitor/refresh` produces a bounded snapshot per provider (discovery status, availability, model counts, added/removed/changed models, measured latency, connection state, reliability state) without any background auto-polling.
+- **Connection metrics & reliability** — per-provider connection samples feed an honest reliability score. When there are fewer than 3 real checks (or none), reliability is reported as `insufficient-data` — never a fabricated percentage.
+- **Model-level change detection** — discovery now emits granular `model_discovered` / `model_removed` / `model_access_changed` (free↔paid) events (capped per refresh, de-duplicated), surfaced in the Model Library as **NEW / REMOVED / FREE CHANGED** badges and a "Changed recently" filter, plus a change-history panel per model.
+- **Provider History** — `GET /api/provider-history` (index), `/:id` (timeline), and `/:id/summary` (history + reliability + recent changes) give the UI a per-provider monitoring timeline.
+- **Benchmarks** — a catalogue (`connection` / `basic-generation` / `latency`) with `GET /api/benchmarks/profiles`, `GET /api/benchmarks`, `/summary`, and `POST /api/benchmarks/run`. Public providers are tested without a key; keyed providers are reported `not-tested` — generation/auth states are never faked.
+- **Provider Intelligence UI upgrade** — the provider dialog now shows a Monitoring section (latest snapshot, reliability bar, history timeline) and a Benchmarks section with run buttons.
+- **Honesty guardrails preserved** — monitoring reuses the existing discovery + change stores; keyed providers are still never probed; secrets never reach snapshots, metrics, benchmarks, or change records.
+- **APIs** — `/api/provider-monitor/refresh`, `/api/provider-monitor/insight/:id`, `/api/provider-monitor/insights`, `/api/provider-history`, `/api/provider-history/:id`, `/api/provider-history/:id/summary`, `/api/benchmarks/profiles`, `/api/benchmarks`, `/api/benchmarks/summary`, `/api/benchmarks/run`.
+- **Version** — bumped to `1.5.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ## What's new in v1.4.0
 

@@ -1,4 +1,4 @@
-import { workspace, getFreeModels, getModels, getAllModels, getModelSource, isFetching } from '../core/state.js';
+import { workspace, getFreeModels, getModels, getAllModels, getModelSource, isFetching, fetchMonitorInsight, refreshMonitoring, fetchBenchmarkProfiles, fetchBenchmarks, runBenchmark } from '../core/state.js';
 import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { theme } from '../core/theme.js';
@@ -2247,12 +2247,69 @@ export async function refreshProviderIntelligence(providerId) {
   }
 }
 
+function monitorSectionHTML(insight) {
+  if (!insight) return '<div class="muted">No monitoring data yet — run a manual refresh.</div>';
+  const rel = insight.reliability || {};
+  const snap = insight.latestSnapshot;
+  const relBar = rel.state === 'measured'
+    ? `<div class="rel-bar"><div class="rel-fill" style="width:${rel.percentage}%"></div></div><div class="muted">${rel.percentage}% reachable over ${rel.sampleSize} checks</div>`
+    : `<div class="muted">Reliability: insufficient data (${rel.sampleSize || 0} check(s)). Run a manual refresh to measure.</div>`;
+  const snapStats = snap
+    ? `<div class="ml-kv-grid">
+        <div class="kv"><span>Availability</span><b>${esc(snap.availability)}</b></div>
+        <div class="kv"><span>Latency</span><b>${snap.latencyMs != null ? snap.latencyMs + ' ms' : '—'}</b></div>
+        <div class="kv"><span>Connection</span><b>${esc(snap.checkResult?.connectionState || 'unknown')}</b></div>
+        <div class="kv"><span>Models</span><b>${snap.modelCount}</b></div>
+        <div class="kv"><span>Free</span><b>${snap.freeModelCount}</b></div>
+        <div class="kv"><span>Paid</span><b>${snap.paidModelCount}</b></div>
+      </div>`
+    : '<div class="muted">No monitoring snapshot yet — run a manual refresh.</div>';
+  const timeline = (insight.recentSnapshots || []).map((s) => {
+    const dot = s.availability === 'available' ? 'verified' : (s.availability === 'unavailable' ? 'unavailable' : 'curated');
+    const deltas = [s.addedModels?.length, s.removedModels?.length, s.changedModels?.length].filter((n) => n).length
+      ? ` · ${s.addedModels?.length || 0} added, ${s.removedModels?.length || 0} removed, ${s.changedModels?.length || 0} changed`
+      : '';
+    return `<div class="tl-item"><span class="tl-dot ${dsDotClass(dot)}"></span>
+      <div class="tl-body"><b>${esc(new Date(s.checkedAt).toLocaleString())}</b> — ${esc(s.availability)} · ${s.modelCount} models${s.latencyMs != null ? ' · ' + s.latencyMs + 'ms' : ''}${deltas}</div></div>`;
+  }).join('') || '<div class="muted">No snapshots yet.</div>';
+  return `${snapStats}<div class="ml-dsec" style="margin-top:8px"><h4 class="ml-dsec-h">Reliability</h4>${relBar}</div>
+    <div class="ml-dsec" style="margin-top:8px"><h4 class="ml-dsec-h">History timeline</h4><div class="timeline">${timeline}</div></div>`;
+}
+
+function benchSectionHTML(profiles, results, providerId) {
+  const profBtns = (profiles || []).map((pr) => `<button class="btn btn2 sm" type="button" onclick="runBenchmarkFor('${esc(providerId)}','${esc(pr.id)}')">▶ ${esc(pr.name)}</button>`).join(' ');
+  const rows = (results || []).slice(0, 6).map((r) => `<div class="activity-row"><span class="act-ico">${r.ok ? '✓' : '•'}</span>
+    <div class="act-msg"><div>${esc(r.profileId)} — ${esc(r.connectionState)}${r.latencyMs != null ? ' (' + r.latencyMs + 'ms)' : ''}</div>
+    <div class="muted" style="font-size:11px">${esc(new Date(r.measuredAt).toLocaleString())} · ${esc(r.note || '')}</div></div></div>`).join('') || '<div class="muted">No benchmark runs yet.</div>';
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${profBtns || '<span class="muted">No profiles.</span>'}</div><div class="activity-list">${rows}</div>`;
+}
+
+export async function runBenchmarkFor(providerId, profileId) {
+  notify.toast(`Running benchmark: ${profileId}…`, 'info');
+  const r = await runBenchmark(providerId, profileId).catch(() => null);
+  if (r) notify.toast(`Benchmark ${profileId}: ${r.connectionState}${r.latencyMs != null ? ' (' + r.latencyMs + 'ms)' : ''}`, r.ok ? 'success' : 'info');
+  else notify.toast('Benchmark failed to run', 'error');
+  openProviderIntelligence(providerId);
+}
+
+export async function refreshProviderMonitoring(id) {
+  notify.toast('Monitoring refresh…', 'info');
+  await refreshMonitoring(id).catch(() => {});
+  openProviderIntelligence(id);
+}
+
 export async function openProviderIntelligence(id) {
   const local = workspace.providerIntel[id];
   if (!local) { notify.toast('No intelligence for this provider yet — run a refresh', 'info'); return; }
-  const res = await fetch(`/api/provider-intelligence/${encodeURIComponent(id)}`).then((r) => r.json()).catch(() => ({ provider: local, changes: [] }));
+  const [res, profilesRes] = await Promise.all([
+    fetch(`/api/provider-intelligence/${encodeURIComponent(id)}`).then((r) => r.json()).catch(() => ({ provider: local, changes: [] })),
+    fetchBenchmarkProfiles().then(() => ({ profiles: workspace.benchmarkProfiles })).catch(() => ({ profiles: [] })),
+  ]);
   const p = res.provider || local;
   const changes = res.changes || [];
+  const insight = await fetchMonitorInsight(id).catch(() => null);
+  await fetchBenchmarks(id).catch(() => {});
+  const benchResults = (workspace.benchmarkResults || []).filter((r) => r.providerId === id);
   const st = p.status || {};
   const acc = p.access || {};
   const comp = p.compatibility || {};
@@ -2321,6 +2378,16 @@ export async function openProviderIntelligence(id) {
       </section>
 
       <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Monitoring <button class="btn btn2 sm" type="button" onclick="refreshProviderMonitoring('${esc(p.id)}')">↻ Monitor now</button></h4>
+        ${monitorSectionHTML(insight)}
+      </section>
+
+      <section class="ml-dsec">
+        <h4 class="ml-dsec-h">Benchmarks</h4>
+        ${benchSectionHTML(profilesRes.profiles, benchResults, p.id)}
+      </section>
+
+      <section class="ml-dsec">
         <h4 class="ml-dsec-h">Recent changes</h4>
         <div class="activity-list">${changeRows}</div>
       </section>
@@ -2333,7 +2400,7 @@ export async function openProviderIntelligence(id) {
 
   openModal({
     title: 'Provider intelligence',
-    subtitle: `${esc(p.identity?.name || p.id)} · honest discovery only`,
+    subtitle: `${esc(p.identity?.name || p.id)} · honest discovery + monitoring`,
     size: 'wide',
     bodyHTML,
     onMount: (body, ctrl) => {
@@ -2390,6 +2457,7 @@ function fillWsProviderIntel() {
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn2 sm" onclick="refreshProviderIntelligence()">↻ Refresh discovery</button>
+      <button class="btn btn2 sm" onclick="refreshProviderMonitoring()">↻ Monitor all</button>
       <button class="btn btn2 sm" onclick="openProviderChangesModal()">View changes</button>
     </div>`;
 }
@@ -2610,6 +2678,10 @@ function openExecutionDetail(e) {
 }
 // Exposed globally so inline onclick handlers (Workspace "View all", Playground History) resolve it.
 window.openExecutionHistory = openExecutionHistory;
+// Exposed for inline onclick handlers (Provider Intelligence → monitor/benchmark) and the command palette.
+window.openProviderIntelligence = openProviderIntelligence;
+window.refreshProviderMonitoring = refreshProviderMonitoring;
+window.runBenchmarkFor = runBenchmarkFor;
 
 export async function renderPlayground() {
   updateCrumb('Playground');

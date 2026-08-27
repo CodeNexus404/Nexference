@@ -1,6 +1,6 @@
 {
   "name": "nexference",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Nexference — Universal AI provider & runtime workspace. Manage cloud providers, local runtimes, models, and client configuration.",
   "license": "MIT",
   "type": "module",
