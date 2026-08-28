@@ -28,6 +28,8 @@ export function toggleCommandPalette() {
     { label: 'Go to Settings', hint: 'Page', run: () => router.navigate('settings') },
     { label: 'Go to Intelligence Center', hint: 'Page', run: () => router.navigate('intelligence') },
     { label: 'Refresh Intelligence', hint: 'Intelligence', run: () => { router.navigate('intelligence'); if (window.intelRefresh) window.intelRefresh(); } },
+    { label: 'Go to Ecosystem Discovery', hint: 'Page', run: () => router.navigate('ecosystem') },
+    { label: 'Refresh Ecosystem Discovery', hint: 'Ecosystem', run: () => { router.navigate('ecosystem'); if (window.ecosystemDiscover) window.ecosystemDiscover(); } },
     { label: 'Configure a client', hint: 'Workflow', run: () => openWorkflow() },
     { label: 'Open Configuration Workspace', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('config'); } },
     { label: 'Open Profiles', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },

@@ -2495,6 +2495,10 @@ export function renderCloudProviders() {
   ];
   let activeCat = 'all';
   let q = '';
+  // Registry filter: default keeps the curated list uncluttered. Discovered/adopted
+  // ecosystem providers only surface when explicitly chosen.
+  let registryFilter = 'curated';
+  let ecoProviders = workspace.ecoProviders || [];
 
   const passes = (p) => {
     const tags = providerTags(p.id);
@@ -2507,10 +2511,17 @@ export function renderCloudProviders() {
   };
 
   const drawFilters = () => {
+    const registryChips = [
+      ['curated', 'Curated'], ['adopted', 'Adopted'], ['discovered', 'Discovered'], ['all', 'All'],
+    ].map(([id, label]) => `<button class="chip-filter reg ${registryFilter === id ? 'on' : ''}" data-reg="${id}">${esc(label)}</button>`).join('');
     filtersEl.innerHTML = `<button class="btn btn2 sm pi-refresh-all" id="piRefreshAll" onclick="refreshProviderIntelligence()" title="Refresh all provider intelligence">↻ Refresh</button>` +
-      cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('');
-    filtersEl.querySelectorAll('.chip-filter').forEach(b => b.addEventListener('click', () => {
+      cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('') +
+      `<span class="cp-reg-sep"></span><span class="cp-reg-label muted">Registry:</span>${registryChips}`;
+    filtersEl.querySelectorAll('.chip-filter[data-cat]').forEach(b => b.addEventListener('click', () => {
       activeCat = b.dataset.cat; drawFilters(); drawGrid();
+    }));
+    filtersEl.querySelectorAll('.chip-filter.reg').forEach(b => b.addEventListener('click', () => {
+      registryFilter = b.dataset.reg; drawGrid();
     }));
   };
 
@@ -2518,7 +2529,15 @@ export function renderCloudProviders() {
     // Anthropic is the first-party API, not a third-party cloud gateway — keep it
     // out of the Cloud Providers explorer (it still appears under Providers / compatibility).
     const list = PROVIDERS.filter(p => p.id !== 'anthropic' && passes(p));
-    if (!list.length) { grid.innerHTML = '<div class="muted">No providers match.</div>'; return; }
+    let ecoCards = [];
+    if (registryFilter !== 'curated') {
+      ecoCards = ecoProviders.filter(e => {
+        const st = e.registryState || 'discovered';
+        if (registryFilter === 'all') return st === 'adopted' || st === 'discovered';
+        return st === registryFilter;
+      }).filter(e => !q || (e.name || '').toLowerCase().includes(q.toLowerCase()));
+    }
+    if (!list.length && !ecoCards.length) { grid.innerHTML = '<div class="muted">No providers match.</div>'; return; }
     grid.innerHTML = list.map(p => {
       const key = Storage.getKey(p.id);
       const free = getFreeModels(p.id).length;
@@ -2556,7 +2575,7 @@ export function renderCloudProviders() {
           <button class="btn btn2 sm pi-refresh" data-id="${p.id}" type="button" title="Re-check this provider">↻</button>
         </div>`}
       </div>`;
-    }).join('');
+    }).join('') + ecoCards.map(ecoCard).join('');
     grid.querySelectorAll('.provider-card').forEach(c => {
       const open = () => openProviderConfig(c.dataset.id);
       c.addEventListener('click', open);
@@ -2566,7 +2585,40 @@ export function renderCloudProviders() {
       const ref = c.querySelector('.pi-refresh');
       if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(c.dataset.id); });
     });
+    grid.querySelectorAll('.eco-cp-card').forEach(c => {
+      const open = () => { if (window.openEcosystemProvider) window.openEcosystemProvider(c.dataset.id); };
+      c.addEventListener('click', open);
+    });
   };
+
+  // A discovered/adopted ecosystem provider rendered inside the Cloud Providers grid.
+  // It links to the Ecosystem detail view and never pretends to be configured here.
+  function ecoCard(e) {
+    const adopted = (e.registryState || 'discovered') === 'adopted';
+    const cfg = e.validation && e.validation.configurable === true;
+    const src = e.logo && e.logoSource && e.logoSource !== 'fallback'
+      ? `/api/ecosystem/logo?url=${encodeURIComponent(e.logo)}` : '';
+    const logo = src
+      ? `<img class="pc-logo-sm" src="${src}" alt="" onerror="this.outerHTML='<div class=&quot;pc-logo-sm&quot;>' + ${JSON.stringify(ecoInitials(e.name))} + '</div>'" />`
+      : `<div class="pc-logo-sm">${esc(ecoInitials(e.name))}</div>`;
+    const stateBadge = adopted ? '<span class="badge ok">adopted</span>' : '<span class="badge">discovered</span>';
+    const cfgBadge = cfg && adopted ? '<span class="badge cc">configurable</span>' : '';
+    return `<div class="panel provider-card eco-cp-card" data-id="${esc(e.id)}" role="button" tabindex="0">
+      <div class="pc-head">
+        <div class="pc-logo-sm">${logo}</div>
+        <div class="provider-meta"><b>${esc(e.name)}</b><span class="provider-compat">${esc(e.category || 'unknown')}</span></div>
+      </div>
+      <div class="pc-card-foot">
+        <span class="badge pi-src">ecosystem</span>
+        ${stateBadge}
+        ${cfgBadge}
+      </div>
+      <div class="pc-intel-row"><span class="pi-status">discovery only</span></div>
+    </div>`;
+  }
+  function ecoInitials(name) {
+    return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  }
 
   const search = document.getElementById('cpSearch');
   if (search) search.addEventListener('input', (e) => { q = e.target.value; drawGrid(); });
@@ -2575,6 +2627,11 @@ export function renderCloudProviders() {
   // Populate intelligence once (no loop: only when empty), then redraw the grid.
   if (!Object.keys(workspace.providerIntel).length) {
     fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
+  }
+  // Load ecosystem (discovered) providers so the Registry filter can surface them. Only
+  // fetched once per session; adoption changes are reflected via the Ecosystem page.
+  if (!workspace.ecoProviders) {
+    fetch('/api/ecosystem/providers').then((r) => r.json()).then((d) => { workspace.ecoProviders = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
 }
 

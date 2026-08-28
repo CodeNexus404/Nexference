@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "note": "Controlled discovery source registry. Nexference reads only the sources listed here — it never scrapes arbitrary GitHub search results or crawls the web. To add a trusted ecosystem source, append an entry and point `paths`/`rawUrls` at a structured registry file. These seed entries are community-curated EXAMPLES and are not an authoritative endorsement of any project.",
+  "sources": [
+    {
+      "id": "community-oss-ai-infra",
+      "name": "Community OSS AI Infrastructure (curated examples)",
+      "type": "open-source-registry",
+      "repository": null,
+      "branch": null,
+      "paths": ["data/ecosystem-registry.json"],
+      "rawUrls": [],
+      "homepage": "https://github.com/topics/llm-gateway",
+      "enabled": true,
+      "trustLevel": "community",
+      "requiresManualRefresh": true
+    }
+  ]
+}

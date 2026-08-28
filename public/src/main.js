@@ -9,6 +9,7 @@ import { toggleCommandPalette } from './components/commandPalette.js';
 import { openWorkflow } from './config/workflow.js';
 import * as UI from './ui/app.js';
 import { renderIntelligenceCenter } from './ui/intelligenceCenter.js';
+import { renderEcosystem } from './ui/ecosystem.js';
 
 // v0.2.0 composition root (client). Wires the managers, registers the six
 // pages with the router, and exposes the action functions as globals so the
@@ -26,6 +27,7 @@ router.register('configuration', UI.renderConfiguration);
 router.register('playground', UI.renderPlayground);
 router.register('settings', UI.renderSettings);
 router.register('intelligence', renderIntelligenceCenter);
+router.register('ecosystem', renderEcosystem);
 
 // Keep the shell in sync with the active route (no flash: inline script already
 // set data-page before paint; this stays consistent on every navigation).

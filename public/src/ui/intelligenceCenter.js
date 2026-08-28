@@ -216,7 +216,37 @@ async function renderIntelBody(root, period) {
     </div>
   </section>`;
 
-  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality;
+  const ecosystemSection = `<section class="ic-section">
+    <h2 class="ic-h2">Ecosystem Discovery</h2>
+    <div id="icEcosystem"><div class="muted">Loading ecosystem summary…</div></div>
+  </section>`;
+
+  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality + ecosystemSection;
+
+  // Ecosystem summary is independent of the intelligence period; populate it async.
+  fetch('/api/ecosystem/summary').then((r) => r.json()).then((sum) => {
+    const host = document.getElementById('icEcosystem');
+    if (!host) return;
+    const recs = [];
+    if (sum.needsReview) recs.push(`<li>${sum.needsReview} provider(s) need review before adoption.</li>`);
+    if (sum.staleSources) recs.push(`<li>${sum.staleSources} discovery source(s) are stale or failing.</li>`);
+    if (sum.newlyDiscovered) recs.push(`<li>${sum.newlyDiscovered} newly discovered provider(s) in the last 7 days.</li>`);
+    if (!recs.length) recs.push('<li>No ecosystem actions required. Discovered providers are healthy or none yet discovered.</li>');
+    host.innerHTML = `<div class="ic-overview">
+      ${statCard('Curated', sum.curatedProviders || 0)}
+      ${statCard('Discovered', sum.discoveredProviders || 0)}
+      ${statCard('Adopted', sum.adopted || 0)}
+      ${statCard('Ignored', sum.ignored || 0)}
+      ${statCard('Needs review', sum.needsReview || 0)}
+    </div>
+    <ul class="ic-insights">${recs.map((r) => `<li>${r}</li>`).join('')}</ul>
+    <div class="ic-foot-row">
+      <button class="btn btn2 sm" onclick="router.navigate('ecosystem')">Open Ecosystem Discovery</button>
+    </div>`;
+  }).catch(() => {
+    const host = document.getElementById('icEcosystem');
+    if (host) host.innerHTML = '<div class="muted">Ecosystem summary unavailable.</div>';
+  });
 }
 
 // ── Global action dispatch (referenced by inline onclick handlers) ──

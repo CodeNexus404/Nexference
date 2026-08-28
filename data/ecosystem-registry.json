@@ -1,0 +1,55 @@
+[
+  {
+    "name": "LiteLLM",
+    "website": "https://github.com/BerriAI/litellm",
+    "documentationUrl": "https://docs.litellm.ai",
+    "apiDocumentationUrl": "https://docs.litellm.ai/docs/quick_start",
+    "description": "Open-source proxy and gateway that exposes 100+ LLM providers through a single OpenAI-compatible interface.",
+    "category": "api-gateway",
+    "repository": "https://github.com/BerriAI/litellm",
+    "compatibility": { "openaiCompatible": true },
+    "endpoints": [{ "type": "proxy", "url": "https://docs.litellm.ai" }],
+    "accessType": "unknown"
+  },
+  {
+    "name": "One API",
+    "website": "https://github.com/songquanpeng/one-api",
+    "documentationUrl": "https://github.com/songquanpeng/one-api#readme",
+    "description": "Open-source API aggregation and management service that provides a unified OpenAI-compatible interface across multiple model providers.",
+    "category": "api-gateway",
+    "repository": "https://github.com/songquanpeng/one-api",
+    "compatibility": { "openaiCompatible": true },
+    "endpoints": [{ "type": "proxy", "url": "https://github.com/songquanpeng/one-api" }],
+    "accessType": "unknown"
+  },
+  {
+    "name": "LocalAI",
+    "website": "https://github.com/mudler/LocalAI",
+    "documentationUrl": "https://localai.io",
+    "apiDocumentationUrl": "https://localai.io/docs/",
+    "description": "Open-source, OpenAI-compatible drop-in replacement that runs local models (GGUF, transformers) on consumer hardware.",
+    "category": "local-runtime",
+    "repository": "https://github.com/mudler/LocalAI",
+    "compatibility": { "openaiCompatible": true },
+    "endpoints": [{ "type": "inference", "url": "https://localai.io" }],
+    "accessType": "free"
+  },
+  {
+    "name": "Open WebUI",
+    "website": "https://github.com/open-webui/open-webui",
+    "documentationUrl": "https://docs.openwebui.com",
+    "description": "Self-hosted web interface for local and remote LLMs, supporting many model backends and OpenAI-compatible endpoints.",
+    "category": "community-project",
+    "repository": "https://github.com/open-webui/open-webui",
+    "accessType": "unknown"
+  },
+  {
+    "name": "Dify",
+    "website": "https://github.com/langgenius/dify",
+    "documentationUrl": "https://docs.dify.ai",
+    "description": "Open-source LLM app development platform with orchestration, RAG, and agent tooling across multiple model providers.",
+    "category": "community-project",
+    "repository": "https://github.com/langgenius/dify",
+    "accessType": "unknown"
+  }
+]
