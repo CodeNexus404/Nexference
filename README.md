@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.5.0 — Provider Monitoring, Model Changes & Benchmark Intelligence** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.6.0 — Intelligence Center, Trends & Smart Recommendations** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -33,6 +33,23 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
 ---
+
+## What's new in v1.6.0
+
+**Intelligence Center, Trends & Smart Recommendations** — Nexference now aggregates its existing intelligence (provider monitoring, model changes, benchmarks, environment) into one honest, scannable view, with explainable trends and recommendations. No new persistent store was created and no fake data is introduced.
+
+- **Intelligence Center page** — a new `Intelligence` navigation entry (`/intelligence`) that aggregates Overview, Attention Required, Provider Trends, Model Trends, Smart Recommendations, Benchmark Insights, Recent Changes, Activity, and a Data Quality & Confidence panel.
+- **Attention Required engine** — surfaces only real, actionable items: stale intelligence, an unavailable provider, recent breaking model changes, a benchmark regression, or a configuration-impact gap (escalated to **Important** only when it touches your own configured provider). De-duplicated, never fabricated.
+- **Provider & Model trends** — provider trends (availability, model count, free-model count, measured latency, reliability) are computed from real history snapshots and labelled `IMPROVING` / `DECLINING` / `STABLE` only when the first-vs-last change exceeds a small, documented minimum delta. Rendered as small, honest SVG sparklines. Model trends summarise discovered/removed/access-changed counts.
+- **Smart Recommendations** — configuration, provider (free models), model (capability match), local-AI, benchmark, and discovery suggestions. Every recommendation carries an explicit **basis** and a **confidence** (`MEASURED` / `OBSERVED` / `CURATED` / `INSUFFICIENT_DATA` / `UNKNOWN`); none use a black-box scoring, and none claim "best/fastest/most reliable" without comparable measured data.
+- **Data Quality & Confidence** — every panel shows how much real data backs it (snapshot counts, real connection samples, benchmark samples, stale/curated-only/unknown provider counts) so you can judge trustworthiness at a glance.
+- **Confidence vocabulary** — the backend normalises insight confidence into `MEASURED / OBSERVED / CURATED / INSUFFICIENT_DATA / UNKNOWN` (explanatory labels, not percentages) and documents them here.
+- **Manual refresh preserved** — a `POST /api/intelligence/refresh` reuses the existing provider-monitor refresh (no background polling); it is guarded against concurrent runs and records activity.
+- **Honesty guardrails preserved** — the Intelligence Center only reads existing stores; no secrets, headers, keys, or raw pricing reach any intelligence/recommendation/trend/activity record, API response, or the UI; insufficient history yields explicit empty states, never invented trends.
+- **APIs** — `GET /api/intelligence?period=24h|7d|30d|all` (defaults to `7d`; invalid periods fall back to `7d`) and `POST /api/intelligence/refresh`.
+- **Version** — bumped to `1.6.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ## What's new in v1.5.0
 

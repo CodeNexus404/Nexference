@@ -5,7 +5,7 @@ import { Storage } from './storage.js';
 // Local AI / Clients / Settings). The router persists the active page and
 // notifies listeners so the shell can show the right view and render its
 // content. No framework, no history hacking — just a single mutable route.
-const PAGES = ['workspace', 'cloud-providers', 'localai', 'models', 'clients', 'configuration', 'playground', 'settings'];
+const PAGES = ['workspace', 'cloud-providers', 'localai', 'models', 'clients', 'configuration', 'playground', 'settings', 'intelligence'];
 
 export class Router {
   constructor() {

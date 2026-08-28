@@ -26,6 +26,8 @@ export function toggleCommandPalette() {
     { label: 'Go to Models', hint: 'Page', run: () => router.navigate('models') },
     { label: 'Go to Clients', hint: 'Page', run: () => router.navigate('clients') },
     { label: 'Go to Settings', hint: 'Page', run: () => router.navigate('settings') },
+    { label: 'Go to Intelligence Center', hint: 'Page', run: () => router.navigate('intelligence') },
+    { label: 'Refresh Intelligence', hint: 'Intelligence', run: () => { router.navigate('intelligence'); if (window.intelRefresh) window.intelRefresh(); } },
     { label: 'Configure a client', hint: 'Workflow', run: () => openWorkflow() },
     { label: 'Open Configuration Workspace', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('config'); } },
     { label: 'Open Profiles', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('profiles'); } },

@@ -12,6 +12,7 @@ const PAID = (id) => `gw_paid_${id}`;
 const CUSTOM_FORMAT = 'gw_custom_format';
 const PAGE = 'nx_page';
 const THEME = 'nx_theme';
+const INTEL_PERIOD = 'nx_intel_period';
 const SIDEBAR = 'nx_sidebar';
 const PROFILE = (id) => `nx_profile_${id}`;
 const PROFILES_INDEX = 'nx_profiles';
@@ -53,6 +54,14 @@ export const Storage = {
   },
   setPage(val) {
     localStorage.setItem(PAGE, val);
+  },
+
+  // Intelligence Center selected trend period (persisted across navigations)
+  getIntelPeriod() {
+    return localStorage.getItem(INTEL_PERIOD) || '7d';
+  },
+  setIntelPeriod(val) {
+    localStorage.setItem(INTEL_PERIOD, val);
   },
 
   // Theme: 'dark' | 'light' | 'system'
