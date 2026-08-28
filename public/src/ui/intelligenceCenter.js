@@ -242,6 +242,7 @@ async function renderIntelBody(root, period) {
     <ul class="ic-insights">${recs.map((r) => `<li>${r}</li>`).join('')}</ul>
     <div class="ic-foot-row">
       <button class="btn btn2 sm" onclick="router.navigate('ecosystem')">Open Ecosystem Discovery</button>
+      <button class="btn btn2 sm" onclick="router.navigate('cloud-providers')">Open Providers</button>
     </div>`;
   }).catch(() => {
     const host = document.getElementById('icEcosystem');

@@ -26,6 +26,7 @@ import {
 import { resolveLogo, validateLogoUrl } from './logoResolver.js';
 import { createStructuredRegistrySource } from './sources/structuredRegistrySource.js';
 import { providerDiscoveryService } from '../providerDiscoveryService.js';
+import { createDynamicFromEcosystem } from '../dynamic/dynamicProviderService.js';
 
 const BASE_DIR = process.cwd();
 const SOURCES_FILE = join(BASE_DIR, 'data', 'discovery-sources.json');
@@ -403,7 +404,20 @@ function setRegistryState(id, state, changeType, summary) {
 }
 
 export function adoptProvider(id) {
-  return setRegistryState(id, REGISTRY_STATES.ADOPTED, CHANGE_TYPES.PROVIDER_ADOPTED, `Adopted ${getEcosystemProvider(id)?.name || id} into local registry`);
+  const rec = setRegistryState(id, REGISTRY_STATES.ADOPTED, CHANGE_TYPES.PROVIDER_ADOPTED, `Adopted ${getEcosystemProvider(id)?.name || id} into local registry`);
+  // Promotion pipeline (v1.8.0): adoption creates a persistent Dynamic Provider
+  // Record so the provider can appear in the unified catalogue. Idempotent and
+  // refuses to duplicate a curated provider.
+  const dyn = createDynamicFromEcosystem(id);
+  if (dyn && dyn.success && dyn.provider) {
+    rec.dynamicId = dyn.provider.id;
+    const store = loadDiscovered();
+    store[id] = rec;
+    saveDiscovered(store);
+  }
+  // Return both the ecosystem record and the adoption outcome so the UI can show
+  // exactly what happened (success / integration level / warnings / curated-dup).
+  return { provider: rec, adoption: dyn };
 }
 export function ignoreProvider(id) {
   return setRegistryState(id, REGISTRY_STATES.IGNORED, CHANGE_TYPES.PROVIDER_IGNORED, `Ignored ${getEcosystemProvider(id)?.name || id}`);

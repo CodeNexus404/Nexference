@@ -2,6 +2,7 @@ import { PROVIDERS } from '../providers/registry.js';
 import { modelCache } from '../providers/modelCache.js';
 import { getProviderAdapter } from '../providers/providerAdapter.js';
 import { recordTest, getTest } from '../config/credentialsStore.js';
+import { getUnifiedProviders, getUnifiedProvider } from '../providers/dynamic/dynamicProviderRegistry.js';
 
 // ═══════════════════════════════∏═══════════════════════════════
 //  Provider routes — independent connection testing and model listing per
@@ -21,6 +22,25 @@ function isFreeModel(p, m) {
 }
 
 export function registerProviderRoutes(app) {
+  // ─── GET unified provider catalogue (v1.8.0) ───
+  // Curated providers + adopted dynamic providers, with origin preserved.
+  // Filters: ?origin=curated|ecosystem  ?status=active|inactive|removed
+  app.get('/api/providers', (req, res) => {
+    try {
+      const { origin, status } = req.query;
+      const list = getUnifiedProviders({ origin, status });
+      res.json({ providers: list, count: list.length });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  app.get('/api/providers/:id', (req, res) => {
+    try {
+      const p = getUnifiedProvider(req.params.id);
+      if (!p) return res.status(404).json({ error: 'Unknown provider' });
+      res.json({ provider: p });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
   // ─── GET cached models for a provider ───
   app.get('/api/providers/:id/models', (req, res) => {
     const p = PROVIDERS.find((x) => x.id === req.params.id);

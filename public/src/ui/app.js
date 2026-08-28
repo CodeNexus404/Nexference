@@ -14,6 +14,7 @@ import { checkClientRuntime } from '../compatibility/clientRuntimeCompatibility.
 import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
 import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
+import { dynamicProviderCard } from './dynamicProvider.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
 import { openModal, confirmModal } from '../components/modal.js';
@@ -2498,7 +2499,8 @@ export function renderCloudProviders() {
   // Registry filter: default keeps the curated list uncluttered. Discovered/adopted
   // ecosystem providers only surface when explicitly chosen.
   let registryFilter = 'curated';
-  let ecoProviders = workspace.ecoProviders || [];
+  let ecoDiscovered = workspace.ecoDiscovered || [];
+  let dynamicProviders = workspace.dynamicProviders || [];
 
   const passes = (p) => {
     const tags = providerTags(p.id);
@@ -2529,13 +2531,18 @@ export function renderCloudProviders() {
     // Anthropic is the first-party API, not a third-party cloud gateway — keep it
     // out of the Cloud Providers explorer (it still appears under Providers / compatibility).
     const list = PROVIDERS.filter(p => p.id !== 'anthropic' && passes(p));
+    // Registry filter: curated stays the default; ecosystem providers appear only
+    // when chosen. "Adopted" / "All" show active dynamic providers as real cards;
+    // "Discovered" shows not-yet-adopted ecosystem records (links to Ecosystem).
     let ecoCards = [];
-    if (registryFilter !== 'curated') {
-      ecoCards = ecoProviders.filter(e => {
-        const st = e.registryState || 'discovered';
-        if (registryFilter === 'all') return st === 'adopted' || st === 'discovered';
-        return st === registryFilter;
-      }).filter(e => !q || (e.name || '').toLowerCase().includes(q.toLowerCase()));
+    let ecoCardFn = ecoCard;
+    const ql = q.toLowerCase();
+    if (registryFilter === 'adopted' || registryFilter === 'all') {
+      ecoCards = dynamicProviders.filter(dp => dp.status === 'active' && (!q || (dp.name || '').toLowerCase().includes(ql)));
+      ecoCardFn = dynamicProviderCard;
+    } else if (registryFilter === 'discovered') {
+      ecoCards = ecoDiscovered.filter(e => !q || (e.name || '').toLowerCase().includes(ql));
+      ecoCardFn = ecoCard;
     }
     if (!list.length && !ecoCards.length) { grid.innerHTML = '<div class="muted">No providers match.</div>'; return; }
     grid.innerHTML = list.map(p => {
@@ -2575,7 +2582,7 @@ export function renderCloudProviders() {
           <button class="btn btn2 sm pi-refresh" data-id="${p.id}" type="button" title="Re-check this provider">↻</button>
         </div>`}
       </div>`;
-    }).join('') + ecoCards.map(ecoCard).join('');
+    }).join('') + ecoCards.map(ecoCardFn).join('');
     grid.querySelectorAll('.provider-card').forEach(c => {
       const open = () => openProviderConfig(c.dataset.id);
       c.addEventListener('click', open);
@@ -2586,7 +2593,8 @@ export function renderCloudProviders() {
       if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(c.dataset.id); });
     });
     grid.querySelectorAll('.eco-cp-card').forEach(c => {
-      const open = () => { if (window.openEcosystemProvider) window.openEcosystemProvider(c.dataset.id); };
+      const id = c.dataset.id;
+      const open = () => { if (id.startsWith('dyn:')) { if (window.openDynamicProvider) window.openDynamicProvider(id); } else if (window.openEcosystemProvider) window.openEcosystemProvider(id); };
       c.addEventListener('click', open);
     });
   };
@@ -2628,11 +2636,16 @@ export function renderCloudProviders() {
   if (!Object.keys(workspace.providerIntel).length) {
     fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
-  // Load ecosystem (discovered) providers so the Registry filter can surface them. Only
-  // fetched once per session; adoption changes are reflected via the Ecosystem page.
-  if (!workspace.ecoProviders) {
-    fetch('/api/ecosystem/providers').then((r) => r.json()).then((d) => { workspace.ecoProviders = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
+  // Load discovered ecosystem records + active dynamic providers so the Registry
+  // filter can surface them. Fetched once per session; adoption changes are
+  // reflected via the Ecosystem page or an explicit refresh.
+  if (!workspace.ecoDiscovered) {
+    fetch('/api/ecosystem/providers?registryState=discovered').then((r) => r.json()).then((d) => { workspace.ecoDiscovered = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
+  if (!workspace.dynamicProviders) {
+    fetch('/api/providers?origin=ecosystem').then((r) => r.json()).then((d) => { workspace.dynamicProviders = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
+  }
+  window.refreshCloudProviders = renderCloudProviders;
 }
 
 // ── Models explorer (v0.8.0 — Model Intelligence) ──

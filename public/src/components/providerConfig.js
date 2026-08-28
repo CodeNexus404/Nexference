@@ -18,6 +18,13 @@ export function openProviderConfig(providerId) {
   const provider = getProvider(providerId);
   if (!provider) return;
 
+  // "Apply to Claude Code" is meaningful only for Anthropic-format providers
+  // (Claude Code consumes the Anthropic Messages API directly). Anything else
+  // (OpenAI/Gemini-style, including OpenRouter) shows a copyable config instead.
+  // Use `format`, not the `claudeCode` boolean, so adopted/dynamic providers with
+  // format:'anthropic' are handled correctly too.
+  const anthropicSupported = provider.format === 'anthropic' || provider.claudeCode || provider.id === 'openrouter';
+
   const key = Storage.getKey(providerId) || '';
   const model = Storage.getModel(providerId) || '';
   const baseVal = provider.hasCustomUrl ? (workspace.customUrl || '') : (provider.baseUrl || '');
@@ -30,7 +37,7 @@ export function openProviderConfig(providerId) {
           <div class="pc-name">${esc(provider.name)}</div>
           ${provider.id !== 'custom' && provider.sub ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" title="Open ${esc(provider.sub)}">${esc(provider.sub)}</div>` : ''}
         </div>
-        <span class="badge ${provider.claudeCode ? 'cc' : 'browse'}">${provider.claudeCode ? 'Claude Code' : 'Browse · API'}</span>
+        <span class="badge ${anthropicSupported ? 'cc' : 'browse'}">${anthropicSupported ? 'Claude Code' : 'Browse · API'}</span>
       </div>
       <p class="pc-desc">${esc(provider.desc)}</p>
 
@@ -51,7 +58,7 @@ export function openProviderConfig(providerId) {
 
       <div class="modal-actions">
         <button class="btn btn2" data-act="test" type="button">Test Connection</button>
-        <button class="btn btn-go" data-act="apply" type="button">${provider.claudeCode ? 'Apply to Claude Code' : 'Show config'}</button>
+        <button class="btn btn-go" data-act="apply" type="button">${anthropicSupported ? 'Apply to Claude Code' : 'Show config'}</button>
       </div>
     </div>`;
 
@@ -100,8 +107,9 @@ export function openProviderConfig(providerId) {
         else notify.toast('Test unavailable', 'error');
       });
 
-      // Apply / show config — decided by provider compatibility with Claude Code
-      // (registry `claudeCode` flag), not by provider id:
+      // Apply / show config — decided by Anthropic-format support (the
+      // `anthropicSupported` flag derived from `provider.format`), not by
+      // provider id:
       // - Anthropic-compatible providers (anthropic, agentrouter, aerolink,
       //   freemodel, tokenrouter, custom) write the built config directly to
       //   settings.json (atomic + backup + verify on the server).
@@ -119,7 +127,7 @@ export function openProviderConfig(providerId) {
           : (provider.baseUrl || '');
         const cfg = configEngine.buildClaudeSettings(provider, baseUrl, model, key);
 
-        if (provider.claudeCode) {
+        if (anthropicSupported) {
           const ok = await LocalSettingsRuntime.write(cfg);
           if (ok) {
             Storage.setKey(providerId, key);

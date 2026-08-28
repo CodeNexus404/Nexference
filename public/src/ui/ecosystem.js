@@ -197,6 +197,7 @@ async function openEcosystemProvider(id) {
     size: 'wide',
     bodyHTML: `
       <div class="eco-detail">
+        ${p.dynamicId ? `<div class="eco-reg-added">✓ Added to Provider Registry <button class="btn btn-sm" onclick="openDynamicProvider('${esc(p.dynamicId)}')">Open Provider</button></div>` : ''}
         <div class="eco-detail-head">
           <div class="eco-logo-wrap lg">${ecoLogoHtml(p)}</div>
           <div>
@@ -261,10 +262,26 @@ window.ecosystemAction = async (token, id) => {
     const r = await fetch(url, { method: 'POST' });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { notify.toast(d.error || 'Action failed', 'error'); return; }
-    notify.toast(`${m[1]} ${d.provider?.name || id}`, 'success');
+    // Adoption promotes the provider into the dynamic registry — surface that clearly.
+    if (token === 'adopt' && d.adoption) {
+      if (d.adoption.success) {
+        notify.toast(`Adopted ${d.provider?.name || id} → added to Provider Registry`, 'success');
+      } else if (d.adoption.reason === 'duplicate-of-curated') {
+        notify.toast(`${d.provider?.name || id} matches a curated provider — not adopted as duplicate`, 'warning');
+      } else {
+        notify.toast(`${m[1]} ${d.provider?.name || id}`, 'success');
+      }
+    } else {
+      notify.toast(`${m[1]} ${d.provider?.name || id}`, 'success');
+    }
     // Keep the detail modal fresh when open.
     await openEcosystemProvider(id);
     const root = document.getElementById('page-ecosystem'); if (root) await renderEcoBody(root);
+    // A new adopted provider should appear in the Providers dashboard.
+    if (token === 'adopt' && d.adoption?.success && window.refreshCloudProviders) {
+      if (workspace) { delete workspace.dynamicProviders; }
+      window.refreshCloudProviders();
+    }
   } catch (e) { notify.toast('Action failed: ' + (e.message || e), 'error'); }
 };
 window.openEcosystemProvider = (id) => openEcosystemProvider(id);

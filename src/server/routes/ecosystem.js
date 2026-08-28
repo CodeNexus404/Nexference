@@ -95,7 +95,14 @@ export function registerEcosystemRoutes(app) {
       res.json({ ok: true, provider: rec });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
-  router.post('/ecosystem/providers/:id/adopt', providerAction(adoptProvider));
+  router.post('/ecosystem/providers/:id/adopt', async (req, res) => {
+    try {
+      const p = getEcosystemProvider(req.params.id);
+      if (!p) return res.status(404).json({ error: 'Unknown ecosystem provider' });
+      const out = adoptProvider(req.params.id);
+      res.json({ ok: true, provider: out.provider, adoption: out.adoption });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
   router.post('/ecosystem/providers/:id/ignore', providerAction(ignoreProvider));
   router.post('/ecosystem/providers/:id/restore', providerAction(restoreProvider));
   router.post('/ecosystem/providers/:id/review', providerAction(markForReview));

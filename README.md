@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.7.0 — Ecosystem Discovery & Provider Registry** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.8.0 — Dynamic Provider Registry & Integration Pipeline** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -67,6 +67,27 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **Honesty guardrails preserved** — no secrets, keys, headers, or raw pricing reach any discovery record, change, activity, API response, or UI; discoveries are local-only and optional (the app still boots cleanly if the store is missing or corrupt).
 - **APIs** — `GET /api/ecosystem/sources`, `GET /api/ecosystem/providers`, `GET /api/ecosystem/providers/:id`, `POST /api/ecosystem/discover`, `POST /api/ecosystem/sources/:id/refresh`, `POST /api/ecosystem/providers/:id/validate`, `POST /api/ecosystem/providers/:id/adopt|ignore|restore|review`, `GET /api/ecosystem/summary`, `GET /api/ecosystem/logo?url=`.
 - **Version** — bumped to `1.7.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
+
+## What's new in v1.8.0
+
+**Dynamic Provider Registry & Integration Pipeline** — Nexference becomes genuinely dynamic: a discovered provider can now move through Discovery → Review → Adopt → Active Provider and appear in the unified provider catalogue without any source-code or static-registry edits.
+
+- **Three provider layers** — the curated, source-controlled registry stays authoritative; discovered providers live in the separate Ecosystem layer; adopted providers become persistent **Dynamic Provider Records** (Layer 3). The **Unified Provider Catalogue** merges curated + active dynamic providers.
+- **Dynamic Provider Record** — a normalized, secret-free record (`src/server/providers/dynamic/`) carrying safe metadata only: identity, logo provenance, source/confidence, capabilities (OpenAI/Anthropic-compatible, custom base URL, model discovery), access (type / requires-key / pricing), integration state, and model support. Unknown stays unknown; nothing is invented.
+- **Persistent dynamic store** — `~/.nexference/dynamic-providers.json` with a schema version marker (`_v`), atomic writes, corrupt-file safety, bounded/validated records, duplicate protection, and safe startup loading. The curated registry is never overwritten; a foreign app's data is ignored.
+- **Adoption pipeline** — `Adopt` now creates a Dynamic Provider Record, persists it, links the ecosystem record, and returns `{ success, provider, addedToRegistry, integrationStatus, warnings }`. It is idempotent (re-adoption updates, never duplicates) and refuses to create a dynamic duplicate of an existing curated provider.
+- **Unified provider API** — `GET /api/providers` returns the merged catalogue with `origin: curated | ecosystem`; supports `?origin=` and `?status=` filters. `GET /api/providers/:id` resolves either layer.
+- **Integration states** — `metadata-only` / `configurable` / `adapter-ready` / `tested` / `unknown`, derived conservatively. `tested` is set ONLY after a real connection test succeeds; the test key is never stored (only the outcome).
+- **Provider lifecycle** — adopted providers can be `deactivate`d (hidden from active lists, provenance kept) and `reactivate`d; `remove` deletes the dynamic record but preserves the original ecosystem discovery record. Curated providers cannot be deleted through this system.
+- **Generic compatibility** — a dynamic provider is mapped to an existing generic adapter (OpenAI/Anthropic/Gemini) only when its declared compatibility supports it; otherwise it stays `metadata-only` and is never forced into the Claude Code generation path.
+- **Model honesty** — dynamic providers show discovered models only when a real source list exists; otherwise "No models discovered yet." No fabricated model entries.
+- **Logo pipeline** — reuses the v1.7.0 safe resolver (explicit/official > website > GitHub > generated initials) and records logo provenance; all external URLs still pass the HTTPS / size / no-unsafe-redirect controls.
+- **UI** — Cloud Providers gains an `Adopted` registry filter showing adopted providers as first-class cards (plus `Discovered` showing not-yet-adopted ecosystem records); a Dynamic Provider details modal surfaces integration, provenance, models, connection status, and actions (Refresh Metadata, Discover Models, Test Connection, Deactivate/Reactivate, Remove). The Ecosystem page now shows "✓ Added to Provider Registry" with a link to the adopted provider. Intelligence Center shows curated/adopted/awaiting-review counts; command palette gains Ecosystem + dynamic-registry commands.
+- **Backward compatibility** — curated providers behave exactly as before; the existing provider routes, discovery service, and configuration safety flow are untouched.
+- **APIs** — `GET /api/providers` (+ `/:id`), `GET /api/dynamic-providers`, `GET /api/dynamic-providers/:id`, `POST /api/dynamic-providers/:id/refresh-metadata`, `/discover-models`, `/test`, `/deactivate`, `/reactivate`, `DELETE /api/dynamic-providers/:id`.
+- **Version** — bumped to `1.8.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 

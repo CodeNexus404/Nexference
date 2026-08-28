@@ -1,0 +1,287 @@
+// Dynamic Provider Service (v1.8.0) — turns an adopted Ecosystem discovery into a
+// persistent, unified provider record and manages its lifecycle.
+//
+// Honesty rules (inherited from v1.7.0, hardened for integration):
+//   • Adoption creates metadata + integration-capability only. It NEVER claims a
+//     provider is "working / verified / compatible" unless evidence supports it.
+//   • Integration level is derived conservatively: only a known adapter format
+//     earns 'adapter-ready'; only real configuration signals earn 'configurable'.
+//   • 'tested' is set ONLY after an actual connection test succeeds.
+//   • Unknown stays unknown — fields are null / 'unknown', never fabricated.
+//   • No secrets: we store metadata, capabilities and test OUTCOMES only.
+
+import { loadDiscovered, saveDiscovered } from '../ecosystem/ecosystemStore.js';
+import { PROVIDERS, getProvider } from '../registry.js';
+import { recordChange, CHANGE_TYPES } from '../providerChangeStore.js';
+import { recordActivity } from '../../activity/activityService.js';
+import { getProviderAdapter } from '../providerAdapter.js';
+import {
+  loadDynamicProviders, getDynamicProvider, findByEcosystemId, upsertDynamicProvider,
+  setDynamicProviderStatus, removeDynamicProvider,
+} from './dynamicProviderStore.js';
+
+const STORE_VERSION = '1.8.0';
+const INTEGRATION = {
+  METADATA_ONLY: 'metadata-only',
+  CONFIGURABLE: 'configurable',
+  ADAPTER_READY: 'adapter-ready',
+  TESTED: 'tested',
+  UNKNOWN: 'unknown',
+};
+
+function slugify(name) {
+  return (name || 'provider').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'provider';
+}
+
+// Detect a generic compatibility format from explicit ecosystem compatibility data.
+// We do NOT infer format from names — only from declared compatibility.
+function detectFormat(eco) {
+  const c = eco.compatibility || {};
+  if (c.openaiCompatible) return 'openai';
+  if (c.anthropicCompatible) return 'anthropic';
+  if (c.geminiCompatible) return 'gemini';
+  return null;
+}
+
+// Determine the integration level + adapter type from safe signals only.
+function detectIntegration(eco) {
+  const format = detectFormat(eco);
+  const v = eco.validation || {};
+  let level = INTEGRATION.UNKNOWN;
+  if (format) level = INTEGRATION.ADAPTER_READY; // a known provider adapter exists
+  else if (v.configurable === true) level = INTEGRATION.CONFIGURABLE;
+  else if (eco.website) level = INTEGRATION.METADATA_ONLY;
+  return {
+    level,
+    adapterType: format, // null when no known adapter dialect
+    status: 'untested', // only 'tested' after a real successful test
+    baseUrl: null, // unknown until the user supplies a self-hosted endpoint
+    format,
+  };
+}
+
+function buildCapabilities(eco) {
+  const c = eco.compatibility || {};
+  const gatewayLike = ['api-gateway', 'proxy-service', 'local-runtime', 'model-aggregator'].includes(eco.category);
+  return {
+    openaiCompatible: !!c.openaiCompatible || c.format === 'openai-compatible',
+    anthropicCompatible: !!c.anthropicCompatible || c.format === 'anthropic-compatible',
+    customBaseUrl: gatewayLike || !!c.openaiCompatible || !!c.anthropicCompatible,
+    modelDiscovery: Array.isArray(eco.models) && eco.models.length > 0,
+  };
+}
+
+function buildAccess(eco) {
+  const at = eco.accessType || 'unknown';
+  return {
+    type: at,
+    requiresApiKey: at === 'free' ? false : (at === 'paid' ? true : null),
+    pricingStatus: at === 'free' ? 'free' : at === 'paid' ? 'paid' : 'unknown',
+  };
+}
+
+function buildModelSupport(eco) {
+  const models = Array.isArray(eco.models) ? eco.models.map((m) => ({
+    modelId: m.id || m.name, name: m.name || m.id, source: eco.discoveryOrigin, accessType: m.accessType || 'unknown', availability: m.availability || 'unknown',
+  })) : [];
+  return {
+    status: models.length ? 'discovered' : 'unknown',
+    count: models.length,
+    lastUpdated: models.length ? new Date().toISOString() : null,
+    models,
+  };
+}
+
+function buildRecord(eco) {
+  const now = new Date().toISOString();
+  const slug = slugify(eco.name);
+  const id = `dyn:${slug}`;
+  const integration = detectIntegration(eco);
+  return {
+    _v: STORE_VERSION,
+    id,
+    slug,
+    name: eco.name,
+    origin: 'ecosystem',
+    ecosystemId: eco.id,
+    status: 'active',
+    lifecycle: eco.lifecycle || 'unknown',
+    adoptedAt: now,
+    updatedAt: now,
+    discoveredAt: eco.discoveredAt || now,
+    website: eco.website || null,
+    documentationUrl: eco.documentationUrl || null,
+    logo: { url: eco.logo || null, source: eco.logoSource || 'fallback', status: eco.logo ? 'resolved' : 'none' },
+    source: {
+      type: eco.sources?.[0]?.sourceType || (eco.discoveryOrigin ? 'structured-registry' : 'unknown'),
+      name: eco.sources?.[0]?.sourceName || eco.discoveryOrigin || 'unknown',
+      url: eco.sources?.[0]?.sourceUrl || null,
+      confidence: eco.confidence || 'OBSERVED',
+    },
+    capabilities: buildCapabilities(eco),
+    access: buildAccess(eco),
+    integration,
+    modelSupport: buildModelSupport(eco),
+    compatibilityNote: buildCompatibilityNote(eco, integration),
+    provenance: {
+      ecosystemRecordId: eco.id,
+      discoveredAt: eco.discoveredAt || now,
+      adoptedVia: 'ecosystem-adopt',
+    },
+  };
+}
+
+function buildCompatibilityNote(eco, integration) {
+  if (integration.adapterType === 'openai') return 'OpenAI-compatible API (generic OpenAI adapter applies).';
+  if (integration.adapterType === 'anthropic') return 'Anthropic-compatible API (generic Anthropic adapter applies).';
+  if (eco.compatibility && Object.keys(eco.compatibility).length) return 'Declared compatibility present; verify before configuring.';
+  return 'No proven compatibility format. Metadata-only until verified.';
+}
+
+// Does this discovered provider duplicate an existing curated provider?
+function matchesCurated(eco) {
+  const name = (eco.name || '').toLowerCase();
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const p of PROVIDERS) {
+    if (p.id === eco.id) return p.id;
+    if (norm(p.name) === norm(eco.name)) return p.id;
+    if (norm(p.id) === norm(name)) return p.id;
+  }
+  return null;
+}
+
+export function createDynamicFromEcosystem(ecoId) {
+  const store = loadDiscovered();
+  const eco = store[ecoId];
+  if (!eco) return { success: false, reason: 'unknown-ecosystem-provider' };
+
+  const curatedId = matchesCurated(eco);
+  if (curatedId) {
+    eco.registryState = 'duplicate';
+    eco.duplicateOf = curatedId;
+    store[ecoId] = eco; saveDiscovered(store);
+    recordChange({ providerId: ecoId, providerName: eco.name, type: CHANGE_TYPES.PROVIDER_DUPLICATE,
+      summary: `${eco.name} matches curated provider ${curatedId}; not adopted as duplicate`, sourceType: 'ecosystem', confidence: 'observed' });
+    return { success: false, reason: 'duplicate-of-curated', curatedId, provider: eco };
+  }
+
+  // Idempotent: re-adoption updates the existing dynamic record.
+  const existing = findByEcosystemId(ecoId);
+  const rec = existing || buildRecord(eco);
+  rec.status = 'active';
+  rec.updatedAt = new Date().toISOString();
+  rec.website = rec.website || eco.website || null;
+  upsertDynamicProvider(rec);
+
+  // Link the ecosystem record to its dynamic counterpart.
+  eco.dynamicId = rec.id;
+  if (eco.registryState !== 'adopted') eco.registryState = 'adopted';
+  store[ecoId] = eco; saveDiscovered(store);
+
+  recordChange({ providerId: rec.id, providerName: rec.name, type: CHANGE_TYPES.PROVIDER_ADOPTED,
+    summary: `Adopted ${rec.name} into the dynamic provider registry`, sourceType: 'ecosystem', confidence: 'observed' });
+  try {
+    recordActivity('provider', 'dynamic-adopt', 'success', `${rec.name} added to the dynamic provider registry`, { id: rec.id, origin: 'ecosystem' });
+  } catch { /* non-fatal */ }
+
+  const warnings = [];
+  if (rec.integration.level === INTEGRATION.METADATA_ONLY) warnings.push('Metadata-only: Nexference cannot configure this provider without a verified compatibility path.');
+  if (rec.modelSupport.status === 'unknown') warnings.push('No model list discovered; models must be imported before use.');
+
+  return {
+    success: true,
+    provider: rec,
+    addedToRegistry: !existing,
+    integrationStatus: rec.integration.level,
+    warnings,
+  };
+}
+
+export function deactivateDynamicProvider(id) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return null;
+  setDynamicProviderStatus(id, 'inactive');
+  recordActivity('provider', 'dynamic-deactivate', 'info', `${rec.name} deactivated (hidden from active catalogue)`, { id });
+  return getDynamicProvider(id);
+}
+
+export function reactivateDynamicProvider(id) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return null;
+  setDynamicProviderStatus(id, 'active');
+  recordActivity('provider', 'dynamic-reactivate', 'info', `${rec.name} reactivated`, { id });
+  return getDynamicProvider(id);
+}
+
+export function removeDynamicProviderRecord(id) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return false;
+  // History/provenance preserved: the ecosystem discovery record is NOT deleted.
+  const ecoStore = loadDiscovered();
+  const eco = ecoStore[rec.ecosystemId];
+  if (eco) { eco.dynamicId = null; eco.registryState = 'discovered'; ecoStore[rec.ecosystemId] = eco; saveDiscovered(ecoStore); }
+  const removed = removeDynamicProvider(id);
+  recordActivity('provider', 'dynamic-remove', 'info', `${rec.name} removed from dynamic registry (provenance kept)`, { id });
+  return removed;
+}
+
+// Re-read the source ecosystem record and recompute integration + model support.
+export function refreshDynamicMetadata(id) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return null;
+  const eco = loadDiscovered()[rec.ecosystemId];
+  if (!eco) return rec;
+  rec.integration = detectIntegration(eco);
+  rec.capabilities = buildCapabilities(eco);
+  rec.access = buildAccess(eco);
+  rec.modelSupport = buildModelSupport(eco);
+  rec.compatibilityNote = buildCompatibilityNote(eco, rec.integration);
+  rec.website = rec.website || eco.website || null;
+  rec.documentationUrl = eco.documentationUrl || null;
+  rec.updatedAt = new Date().toISOString();
+  if (eco.logo) { rec.logo = { url: eco.logo, source: eco.logoSource || 'fallback', status: 'resolved' }; }
+  upsertDynamicProvider(rec);
+  return rec;
+}
+
+// Import model metadata ONLY when a real source list exists. Never invent models.
+export function discoverDynamicModels(id) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return { status: 'not-found' };
+  const eco = loadDiscovered()[rec.ecosystemId];
+  if (!eco || !Array.isArray(eco.models) || !eco.models.length) {
+    rec.modelSupport = { status: 'unknown', count: 0, lastUpdated: null, models: [] };
+    upsertDynamicProvider(rec);
+    return { status: 'no-source', imported: 0 };
+  }
+  rec.modelSupport = buildModelSupport(eco);
+  upsertDynamicProvider(rec);
+  return { status: 'imported', imported: rec.modelSupport.count };
+}
+
+// Real connection test. Requires a key (never stored). Only marks 'tested' on
+// genuine success. Returns the adapter outcome so the UI can show it honestly.
+export async function testDynamicConnection(id, { key, model, baseUrl } = {}) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return { status: 0, error: 'not-found' };
+  if (!rec.integration.adapterType) return { status: 0, error: 'no-known-adapter', message: 'No proven compatibility format; cannot test.' };
+  const url = baseUrl || rec.integration.baseUrl;
+  if (!url) return { status: 0, error: 'no-base-url', message: 'No known endpoint; supply a base URL to test your instance.' };
+  if (!key) return { status: 0, error: 'missing-key' };
+
+  try {
+    const adapter = getProviderAdapter({ format: rec.integration.adapterType });
+    const result = await adapter.testConnection({ url, key, model, auth: rec.integration.adapterType === 'anthropic' ? 'x-api-key' : 'bearer' });
+    if (result.status >= 200 && result.status < 400) {
+      rec.integration.status = 'tested';
+      rec.integration.level = rec.integration.adapterType ? INTEGRATION.ADAPTER_READY : rec.integration.level;
+    }
+    rec.updatedAt = new Date().toISOString();
+    upsertDynamicProvider(rec);
+    return { status: result.status, body: result.body, tested: rec.integration.status === 'tested' };
+  } catch (err) {
+    return { status: 0, error: err.message };
+  }
+}
+
+export const DYNAMIC_INTEGRATION = INTEGRATION;

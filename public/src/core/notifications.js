@@ -40,7 +40,8 @@ export class NotificationManager {
     el.setAttribute('role', type0 === 'error' ? 'alert' : 'status');
     el.innerHTML =
       `<span class="toast-ico">${icons[type0]}</span>` +
-      `<span class="toast-msg">${esc(message)}</span>` +
+      `<span class="toast-body"><span class="toast-label">${label[type0]}</span>` +
+      `<span class="toast-msg">${esc(message)}</span></span>` +
       `<button class="toast-x" aria-label="Dismiss notification">×</button>`;
 
     const dismiss = () => {

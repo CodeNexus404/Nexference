@@ -23,7 +23,7 @@ const SOURCE_STATE_FILE = join(DATA_DIR, 'discovery-sources-state.json');
 
 const MAX_HISTORY = 100;
 
-function safeRead(file) {
+export function safeRead(file) {
   try {
     if (!existsSync(file)) return null;
     const raw = readFileSync(file, 'utf8');
@@ -35,7 +35,7 @@ function safeRead(file) {
   }
 }
 
-function atomicWrite(file, data) {
+export function atomicWrite(file, data) {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
     const tmp = `${file}.tmp.${process.pid}.${Date.now()}`;

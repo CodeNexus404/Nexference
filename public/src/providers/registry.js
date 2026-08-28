@@ -47,7 +47,7 @@ export const PROVIDERS = [
     id: 'openrouter', name: 'OpenRouter', sub: 'openrouter.ai',
     logo: '/providers/openrouter.ico',
     accent: '#06b6d4', glow: 'rgba(6,182,212,.18)',
-    format: 'openai', claudeCode: false,
+    format: 'openai', claudeCode: true,
     baseUrl: 'https://openrouter.ai/api/v1/',
     desc: 'Dozens of free open-source models (DeepSeek, Llama, Qwen…). List is public.',
     signup: 'https://openrouter.ai/keys',

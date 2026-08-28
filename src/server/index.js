@@ -25,6 +25,7 @@ import { registerProviderHistoryRoutes } from './routes/providerHistory.js';
 import { registerBenchmarkRoutes } from './routes/benchmarks.js';
 import { registerIntelligenceRoutes } from './routes/intelligence.js';
 import { registerEcosystemRoutes } from './routes/ecosystem.js';
+import { registerDynamicProviderRoutes } from './routes/dynamicProviders.js';
 import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
@@ -70,6 +71,7 @@ export function createApp() {
   registerBenchmarkRoutes(app);
   registerIntelligenceRoutes(app);
   registerEcosystemRoutes(app);
+  registerDynamicProviderRoutes(app);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);
