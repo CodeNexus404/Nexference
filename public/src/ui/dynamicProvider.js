@@ -8,6 +8,7 @@ import { router } from '../core/router.js';
 import { notify } from '../core/notifications.js';
 import { openModal, closeModal, confirmModal } from '../components/modal.js';
 import { renderTimeline } from '../components/intelligenceTimeline.js';
+import { integrationSectionHTML } from './providerIntegrations.js';
 
 function initials(name) {
   return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
@@ -148,8 +149,20 @@ async function openDynamicProvider(id) {
 
         <h3>Actions</h3>
         <div class="eco-detail-actions">${actions}</div>
+
+        <details class="intg-details" open>
+          <summary>Provider Integration (v1.9.0)</summary>
+          <div id="intgHost-${id}">Loading integration…</div>
+        </details>
       </div>`,
-    onMount: () => {},
+    onMount: (b) => {
+      const host = b.querySelector(`#intgHost-${id}`);
+      if (host) integrationSectionHTML(id).then((html) => { host.innerHTML = html; });
+      b.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-intg-action]');
+        if (t && window.integrationAction) window.integrationAction(t.dataset.intgAction, t.dataset.id);
+      });
+    },
   });
 }
 

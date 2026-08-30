@@ -10,6 +10,9 @@ import { openWorkflow } from './config/workflow.js';
 import * as UI from './ui/app.js';
 import { renderIntelligenceCenter } from './ui/intelligenceCenter.js';
 import { renderEcosystem } from './ui/ecosystem.js';
+import { initIntegrationActions } from './ui/providerIntegrations.js';
+import { setDynamicProviderIndex } from './compatibility/clientProviderCompatibility.js';
+import { getIntegrations } from './providers/integrationService.js';
 
 // v0.2.0 composition root (client). Wires the managers, registers the six
 // pages with the router, and exposes the action functions as globals so the
@@ -65,6 +68,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       toggleCommandPalette();
     }
   });
+
+  // v1.9.0: initialise the integration action dispatcher and keep the client
+  // compatibility matrix honest by feeding it the integration adapters.
+  const refreshIntegrationState = async (id) => {
+    const h = document.getElementById('intgHost-' + id);
+    if (h) { const { integrationSectionHTML } = await import('./ui/providerIntegrations.js'); integrationSectionHTML(id).then((html) => { h.innerHTML = html; }); }
+    try {
+      const intgs = await getIntegrations();
+      const idx = {};
+      for (const r of intgs) idx[r.providerId] = { adapterType: r.adapterType, name: r.name };
+      setDynamicProviderIndex(idx);
+    } catch { /* non-fatal */ }
+  };
+  initIntegrationActions(refreshIntegrationState);
+  refreshIntegrationState();
 });
 
 // Expose action functions as globals for inline handlers in index.html.

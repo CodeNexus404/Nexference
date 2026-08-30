@@ -8,6 +8,7 @@ import { notify } from '../core/notifications.js';
 import { configEngine } from '../config/engine.js';
 import { LocalSettingsRuntime, CopyableRuntime } from '../config/runtimeAdapter.js';
 import { recordActivity } from '../core/activityStore.js';
+import { integrationSectionHTML } from '../ui/providerIntegrations.js';
 
 // Provider configuration panel — opened when a provider card is clicked. Replaces
 // the old inline-card editing with a focused modal: API key (password + show/hide),
@@ -60,6 +61,11 @@ export function openProviderConfig(providerId) {
         <button class="btn btn2" data-act="test" type="button">Test Connection</button>
         <button class="btn btn-go" data-act="apply" type="button">${anthropicSupported ? 'Apply to Claude Code' : 'Show config'}</button>
       </div>
+
+      <details class="intg-details">
+        <summary>Provider Integration</summary>
+        <div id="intgHost-${providerId}" class="intg-section">Loading integration…</div>
+      </details>
     </div>`;
 
   const { close } = openModal({
@@ -105,6 +111,14 @@ export function openProviderConfig(providerId) {
           : (provider.baseUrl || '');
         if (window.testConnection) window.testConnection(providerId, url);
         else notify.toast('Test unavailable', 'error');
+      });
+
+      // v1.9.0: fill the Provider Integration section and wire its actions.
+      const host = b.querySelector(`#intgHost-${providerId}`);
+      if (host) integrationSectionHTML(providerId).then((html) => { host.innerHTML = html; });
+      b.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-intg-action]');
+        if (t && window.integrationAction) window.integrationAction(t.dataset.intgAction, t.dataset.id);
       });
 
       // Apply / show config — decided by Anthropic-format support (the

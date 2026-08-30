@@ -5,26 +5,50 @@
 //
 // Behaviour preserved exactly from the previous single-file server.js.
 
+// The `pricingApi` field points at a provider's keyless, public pricing/model
+// endpoint (new-one-api style gateways expose /api/pricing?all=true). When the
+// keyed /v1/models endpoint rejects us, this yields the live model list.
+// `publicModels: true` marks endpoints verifiably callable without an API key.
 export const PROVIDERS = [
   { id: 'anthropic', baseUrl: 'https://api.anthropic.com/', format: 'anthropic', publicModels: false },
-  { id: 'agentrouter', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: false },
-  { id: 'aerolink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: false },
-  { id: 'freemodel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: false },
+  { id: 'agentrouter', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: true, pricingApi: 'https://agentrouter.org/api/pricing?all=true' },
+  { id: 'aerolink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: true },
+  { id: 'freemodel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: true },
   { id: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1/', format: 'openai', publicModels: true },
   { id: 'nvidia', baseUrl: 'https://integrate.api.nvidia.com/v1/', format: 'openai', publicModels: false },
   { id: 'groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false },
   { id: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false },
   { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false },
-  { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: false },
+  { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: true, pricingApi: 'https://api.orcarouter.ai/api/pricing?all=true' },
   { id: 'mistral', baseUrl: 'https://api.mistral.ai/v1/', format: 'openai', publicModels: false },
   { id: 'huggingface', baseUrl: 'https://router.huggingface.co/v1/', format: 'openai', publicModels: false },
   { id: 'chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false },
-  { id: 'tokenrouter', baseUrl: 'https://api.tokenrouter.io/v1/', format: 'anthropic', publicModels: false },
+  // TokenRouter accepts the Anthropic-format /v1/messages protocol but its auth
+  // is Bearer-only — it rejects `x-api-key` outright ("Pass 'Authorization:
+  // Bearer tr_...'"). `bearerAuth` records this fact so integrations/tests send
+  // the right header and the config flow knows settings.json needs
+  // ANTHROPIC_AUTH_TOKEN rather than an apiKeyHelper.
+  // `scrapeDefaultPaid` records that TokenRouter's catalogue is paid: only
+  // explicitly `:free` / `-free` models (a temporary promo) are free, so
+  // anything scraped from the site defaults to paid, never free.
+  { id: 'tokenrouter', baseUrl: 'https://api.tokenrouter.io/v1/', format: 'openai', publicModels: false, scrapeDefaultPaid: true },
 ];
 
 // Curated fallback model lists for providers whose list endpoint is unavailable
 // or requires a client allow-list (e.g. Agent/Token Router reject unknown clients).
 export const STATIC_MODELS = {
+  aerolink: [
+    { id: 'claude-opus-5', paid: true }, { id: 'claude-opus-4-8', paid: true },
+    { id: 'claude-opus-4-7', paid: true }, { id: 'claude-sonnet-4-6', paid: true },
+    { id: 'claude-sonnet-5', paid: true }, { id: 'claude-opus-4-6', paid: true },
+    { id: 'claude-haiku-4-5-20251001', paid: true },
+  ],
+  freemodel: [
+    { id: 'claude-opus-5', paid: true }, { id: 'claude-opus-4-8', paid: true },
+    { id: 'claude-opus-4-7', paid: true }, { id: 'claude-sonnet-4-6', paid: true },
+    { id: 'claude-sonnet-5', paid: true }, { id: 'claude-opus-4-6', paid: true },
+    { id: 'claude-haiku-4-5-20251001', paid: true },
+  ],
   agentrouter: [
     'claude-sonnet-4', 'claude-opus-4',
     { id: 'claude-opus-4-8', paid: true }, { id: 'claude-opus-5', paid: true },
@@ -33,8 +57,24 @@ export const STATIC_MODELS = {
     'deepseek-chat', 'deepseek-reasoner', 'llama-3.3-70b-instruct',
   ],
   tokenrouter: [
-    'claude-sonnet-4', 'claude-opus-4', 'gpt-4o', 'gpt-4o-mini', 'deepseek-chat',
-    { id: 'claude-opus-4-8', paid: true }, { id: 'claude-opus-5', paid: true },
+    { id: 'claude-sonnet-4', paid: true }, { id: 'claude-sonnet-4.5', paid: true },
+    { id: 'claude-sonnet-4.6', paid: true }, { id: 'claude-sonnet-5', paid: true },
+    { id: 'claude-opus-4', paid: true }, { id: 'claude-opus-4.5', paid: true },
+    { id: 'claude-opus-4.6', paid: true }, { id: 'claude-opus-4.7', paid: true },
+    { id: 'claude-opus-4.7-fast', paid: true }, { id: 'claude-opus-4.8', paid: true },
+    { id: 'claude-opus-4.8-fast', paid: true }, { id: 'claude-opus-5', paid: true },
+    { id: 'claude-opus-5-fast', paid: true }, { id: 'claude-haiku-4.5', paid: true },
+    { id: 'claude-fable-5', paid: true },
+    { id: 'gpt-4o-mini', paid: true }, { id: 'gpt-5', paid: true },
+    { id: 'gpt-5-mini', paid: true }, { id: 'gpt-5.2', paid: true },
+    { id: 'gpt-5.3-codex', paid: true }, { id: 'gpt-5.4', paid: true },
+    { id: 'gpt-5.4-mini', paid: true }, { id: 'gpt-5.4-nano', paid: true },
+    { id: 'gpt-5.4-pro', paid: true }, { id: 'gpt-5.5', paid: true },
+    { id: 'gpt-5.5-pro', paid: true },
+    { id: 'deepseek-v3.2', paid: true }, { id: 'deepseek-v4-pro', paid: true },
+    { id: 'gemini-3.5-flash', paid: true }, { id: 'gemini-3.5-flash-lite', paid: true },
+    { id: 'gemini-3.6-flash', paid: true }, { id: 'gemini-3.7-flash', paid: true },
+    { id: 'qwen3.8-max-free' },
   ],
   mistral: [
     'mistral-small-latest', 'ministral-8b-latest',
@@ -140,13 +180,35 @@ function parseAgentRouter(html) {
   return [...out];
 }
 
-const TOKENROUTER_RE = /(claude-(?:opus|sonnet|haiku)-[0-9]+(?:-[0-9]+)?|gpt-[0-9]+(?:\.[0-9]+)?(?:-[a-z0-9]+)?|deepseek-[a-z]+(?:-[a-z]+)?|llama-[\d.]+(?:-[\w]+)?)/gi;
+// TokenRouter model ids appear on the public site as `/models/<org>/<model>`
+// routes (and sometimes as bare `org/model` strings in page data). Route
+// extraction is the primary signal because hyphenated orgs (z-ai, x-ai,
+// bytedance-seed) cannot be captured by a simple `word/name` match. A second
+// pass picks up bare tokens (claude-*/gpt-*/deepseek-*/llama-*) and inline
+// `org/model` mentions that fall outside route paths.
+const TOKENROUTER_ROUTE_RE = /\/models\/([a-z0-9][a-z0-9-]*)\/([a-z0-9][a-z0-9_.:-]*)(?![a-z0-9_.:\-])/gi;
+const TOKENROUTER_INLINE_RE = /([a-z][a-z0-9_]*)\/([a-z0-9][a-z0-9_.:-]*\d[a-z0-9_.:-]*)(?![a-z0-9_.:\-])/gi;
+const TOKENROUTER_BARE_RE = /(claude-(?:fable|opus|sonnet|haiku)-[0-9][a-z0-9.\-]*|gpt-[0-9][a-z0-9.\-]*|gemini-[0-9][a-z0-9.\-]*|deepseek-[a-z0-9.\-]+|qwen[0-9][a-z0-9.\-]*|llama-[0-9][a-z0-9.\-]*)/gi;
+const TOKENROUTER_INLINE_ORG_BLOCK = /^(models|assets|docs|blog|pricing|login|signup|register|console|static|public|api|www|css|script|font|images?|media|i18n|en|us|net|ms|com|org|io|ai|ex|seed|application|text|image|video|audio)$/i;
 function parseTokenRouter(html) {
   const out = new Set();
+  const lower = html.toLowerCase();
   let m;
-  while ((m = TOKENROUTER_RE.exec(html))) {
-    const t = m[1].toLowerCase().replace(/\.$/, '');
+  while ((m = TOKENROUTER_ROUTE_RE.exec(lower))) {
+    out.add(`${m[1]}/${m[2]}`);
+  }
+  while ((m = TOKENROUTER_INLINE_RE.exec(lower))) {
+    const org = m[1];
+    const name = m[2].replace(/\.$/, '');
+    if (TOKENROUTER_INLINE_ORG_BLOCK.test(org)) continue;
+    if (/\.(js|css|png|jpe?g|svg|gif|ico|woff2?|ttf|otf|map|json|html?|webp|avif|ld)$/.test(name)) continue;
+    if (!/\d/.test(name)) continue;
+    out.add(`${org}/${name}`);
+  }
+  while ((m = TOKENROUTER_BARE_RE.exec(lower))) {
+    const t = m[1].replace(/\.$/, '');
     if (/(limits|price|-stable|logo|models|custom)$/.test(t)) continue;
+    if (/^[a-z]+-[a-z]$/.test(t)) continue; // partial fragments like "deepseek-v"
     out.add(t);
   }
   return [...out];

@@ -16,8 +16,32 @@ const CLIENT_PROTOCOLS = {
   'gemini-cli': ['gemini'],
 };
 
+// Dynamic (adopted/ecosystem) providers are not in the curated registry. The app
+// populates this index from the integration API (id → { adapterType, name }) so the
+// compatibility matrix can reason about them honestly using their integration
+// metadata. Claude Code compatibility remains gated: only an anthropic-compatible
+// dynamic provider may be verified; OpenAI/Gemini dynamic providers are unsupported
+// by Claude Code (the configuration adapter does not consume those protocols).
+let dynamicIndex = {};
+
+export function setDynamicProviderIndex(map) {
+  dynamicIndex = map && typeof map === 'object' ? map : {};
+}
+
+function resolveProvider(providerId) {
+  if (typeof providerId !== 'string') return providerId;
+  const curated = getProvider(providerId);
+  if (curated) return curated;
+  const d = dynamicIndex[providerId];
+  if (!d) return null;
+  const format = d.adapterType === 'anthropic-compatible' ? 'anthropic'
+    : d.adapterType === 'openai-compatible' ? 'openai'
+      : d.adapterType === 'gemini-compatible' ? 'gemini' : null;
+  return { id: providerId, name: d.name || providerId, format, claudeCode: format === 'anthropic' };
+}
+
 export function checkClientProvider(clientId, providerId) {
-  const provider = typeof providerId === 'string' ? getProvider(providerId) : providerId;
+  const provider = resolveProvider(providerId);
   if (!provider) return unsupported('Unknown provider');
 
   if (clientId === 'claude-code') {

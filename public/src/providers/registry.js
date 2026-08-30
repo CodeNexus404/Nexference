@@ -29,9 +29,9 @@ export const PROVIDERS = [
     accent: '#3b82f6', glow: 'rgba(59,130,246,.18)',
     format: 'anthropic', claudeCode: true,
     baseUrl: 'https://capi.aerolink.lat/v1/',
-    desc: 'Free Claude Code gateway. Verify via Telegram bot to get a key.',
+    desc: 'Anthropic-format Claude gateway. Verify via Telegram bot to get a key.',
     signup: 'https://aerolink.lat',
-    defaultKey: '', isFree: () => true,
+    defaultKey: '', isFree: () => false,
   },
   {
     id: 'freemodel', name: 'FreeModel AI', sub: 'cc.freemodel.dev',
@@ -39,9 +39,9 @@ export const PROVIDERS = [
     accent: '#ec4899', glow: 'rgba(236,72,153,.18)',
     format: 'anthropic', claudeCode: true,
     baseUrl: 'https://cc.freemodel.dev/v1/',
-    desc: 'Anthropic-format Claude endpoint. Free tier, no card needed.',
+    desc: 'Anthropic-format Claude endpoint. Paid tier.',
     signup: 'https://freemodel.dev',
-    defaultKey: '', isFree: () => true,
+    defaultKey: '', isFree: () => false,
   },
   {
     id: 'openrouter', name: 'OpenRouter', sub: 'openrouter.ai',
@@ -135,10 +135,10 @@ export const PROVIDERS = [
     defaultKey: '', isFree: (m) => !/embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma/i.test(m.id || ''),
   },
   {
-    id: 'tokenrouter', name: 'TokenRouter', sub: 'tokenrouter.com',
+     id: 'tokenrouter', name: 'TokenRouter', sub: 'tokenrouter.com',
     logo: '/providers/tokenrouter.png',
     accent: '#8b5cf6', glow: 'rgba(139,92,246,.18)',
-    format: 'anthropic', claudeCode: true,
+    format: 'openai',
     baseUrl: 'https://api.tokenrouter.io/v1/',
     desc: 'Token routing service — Claude, GPT & more. Efficient key management.',
     signup: 'https://www.tokenrouter.com',
@@ -162,8 +162,8 @@ export function getProvider(id) {
 // Anthropic Compatible / OpenAI Compatible / Google). Presentation-only.
 export const PROVIDER_TAGS = {
   agentrouter: ['popular', 'anthropic', 'free'],
-  aerolink: ['anthropic', 'free'],
-  freemodel: ['anthropic', 'free'],
+  aerolink: ['anthropic', 'paid'],
+  freemodel: ['anthropic', 'paid'],
   openrouter: ['popular', 'openai', 'free'],
   nvidia: ['openai', 'free'],
   groq: ['popular', 'openai', 'free'],
@@ -173,7 +173,7 @@ export const PROVIDER_TAGS = {
   mistral: ['openai', 'free'],
   huggingface: ['openai', 'free'],
   chutes: ['openai', 'free'],
-  tokenrouter: ['anthropic', 'free'],
+  tokenrouter: ['openai', 'free'],
   custom: ['anthropic', 'openai'],
 };
 

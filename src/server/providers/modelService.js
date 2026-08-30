@@ -4,8 +4,8 @@ import { modelCache, FETCH_TIMEOUT } from './modelCache.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Model fetch service — resolves a provider's model list through a
-//  three-tier fallback: live API → scrape public site → curated static list.
-//  Logic preserved exactly from the original server.js.
+//  four-tier fallback: live API → public pricing API → scrape public
+//  site → curated static list.
 // ═══════════════════════════════════════════════════════════════
 
 async function fetchModelsForProvider(provider, key = '') {
@@ -74,8 +74,32 @@ async function fetchModelsForProvider(provider, key = '') {
   }
 
   if (models.length) {
+    // Apply paid flags from static list even when API succeeds — providers like
+    // Aerolink/FreeModel list Claude models without pricing, but the freemium
+    // period has ended and they are now paid.
+    if (STATIC_MODELS[id]) {
+      const staticPaid = new Set();
+      for (const entry of STATIC_MODELS[id]) {
+        const mid = typeof entry === 'string' ? entry : entry.id;
+        if (typeof entry !== 'string' && entry.paid) staticPaid.add(mid);
+      }
+      for (const m of models) {
+        if (staticPaid.has(m.id)) {
+          m.paid = true;
+          if (!m.pricing) m.pricing = { prompt: '1', completion: '1' };
+        }
+      }
+    }
     modelCache[id] = { models, fetchedAt: Date.now(), total: models.length };
     return { ok: true, count: models.length, provider: id };
+  }
+
+  // API returned nothing (usually needs a key) — fall back to the provider's
+  // public pricing/model endpoint (new-one-api gateways expose it keyless).
+  const priced = await fetchFromPricingApi(provider);
+  if (priced) {
+    modelCache[id] = { models: priced.models, fetchedAt: priced.fetchedAt, total: priced.models.length, source: 'pricing' };
+    return { ok: true, count: priced.models.length, provider: id, source: 'pricing' };
   }
 
   // API returned nothing (usually needs a key) — fall back to scraping the provider's public website
@@ -84,7 +108,22 @@ async function fetchModelsForProvider(provider, key = '') {
     let models = scraped.models;
     // Merge curated static entries so a thin/partial website scrape never drops
     // known-good models (e.g. paid flags, or providers whose site yields little).
+    // The static list is the source of truth for paid flags: overlay them onto any
+    // scraped models with matching IDs so the UI never mislabels a paid model as free.
     if (STATIC_MODELS[id]) {
+      const staticPaid = new Set();
+      for (const entry of STATIC_MODELS[id]) {
+        const mid = typeof entry === 'string' ? entry : entry.id;
+        if (typeof entry !== 'string' && entry.paid) staticPaid.add(mid);
+      }
+      // Overlay paid flags from static list onto scraped models
+      for (const m of models) {
+        if (staticPaid.has(m.id)) {
+          m.paid = true;
+          if (!m.pricing) m.pricing = { prompt: '1', completion: '1' };
+        }
+      }
+      // Add static-only entries not in scrape
       const have = new Set(models.map(m => m.id));
       for (const entry of STATIC_MODELS[id]) {
         const mid = typeof entry === 'string' ? entry : entry.id;
@@ -119,6 +158,11 @@ async function fetchModelsForProvider(provider, key = '') {
 //  the model list when the API needs a key (or is unavailable).
 // ═══════════════════════════════════════════════════════════════
 
+// Explicitly-marked free ids (`:free` OpenRouter convention, `-free` suffix).
+export function isFreeSuffixedModel(id) {
+  return /(:free|-free)$/i.test(id || '');
+}
+
 async function scrapeModelsForProvider(provider) {
   const url = PROVIDER_SITES[provider.id];
   const parse = SCRAPE_PARSERS[provider.id];
@@ -135,8 +179,52 @@ async function scrapeModelsForProvider(provider) {
     const html = await r.text();
     const ids = parse(html);
     if (!ids.length) return null;
-    const models = ids.map((id) => ({ id, name: id }));
+    // When a provider's catalogue is paid by default (e.g. TokenRouter, where
+    // only explicitly `-free`/`:free` models are a temporary free promo), mark
+    // every scraped entry paid so the UI/intelligence never claim free without
+    // a real signal.
+    const models = ids.map((id) => {
+      if (!provider.scrapeDefaultPaid || isFreeSuffixedModel(id)) return { id, name: id };
+      return { id, name: id, pricing: { prompt: '1', completion: '1' }, paid: true };
+    });
     return { models, fetchedAt: Date.now(), total: models.length, source: 'website' };
+  } catch {
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Public pricing-API fallback — new-one-api style gateways (Agent
+//  Router, Orca Router, …) expose a keyless /api/pricing endpoint
+//  that lists every served model with ratios and supported endpoint
+//  types. This is the live source of truth for their model lists.
+// ═══════════════════════════════════════════════════════════════
+
+async function fetchFromPricingApi(provider) {
+  const url = provider.pricingApi;
+  if (!url) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; Nexference/1.0)' },
+    });
+    clearTimeout(timeout);
+    if (!r.ok) return null;
+    const data = await r.json();
+    const list = Array.isArray(data?.data) ? data.data : [];
+    const models = list
+      .filter((m) => m && m.model_name)
+      .map((m) => ({
+        id: m.model_name,
+        name: m.model_name,
+        pricing: m.model_ratio != null ? { model_ratio: m.model_ratio, completion_ratio: m.completion_ratio ?? null } : null,
+        supported_endpoint_types: Array.isArray(m.supported_endpoint_types) ? m.supported_endpoint_types : null,
+        paid: (m.model_ratio || 0) > 0 || (m.model_price || 0) > 0,
+      }));
+    if (!models.length) return null;
+    return { models, fetchedAt: Date.now(), total: models.length, source: 'pricing' };
   } catch {
     return null;
   }
@@ -154,8 +242,8 @@ async function fetchAllModels(source = 'startup') {
     fetchable.map(async (p) => {
       const result = await fetchModelsForProvider(p, '');
       if (result.ok) {
-        if (result.source !== 'website') modelCache[p.id].source = source;
-        console.log(`    ✅ ${p.id}: ${result.count} models${result.source === 'website' ? ' (website)' : ''}`);
+        if (result.source !== 'website' && result.source !== 'pricing') modelCache[p.id].source = source;
+        console.log(`    ✅ ${p.id}: ${result.count} models${result.source === 'website' ? ' (website)' : result.source === 'pricing' ? ' (pricing API)' : ''}`);
       } else {
         console.log(`    ⏭️  ${p.id}: ${result.error?.slice(0, 60) || 'no key'}`);
       }

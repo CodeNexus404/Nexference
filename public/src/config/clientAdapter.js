@@ -15,9 +15,30 @@ export class ClientAdapter {
 // Anthropic-compatible → Claude Code config (unchanged behaviour).
 // Claude Code appends `/v1/messages` to ANTHROPIC_BASE_URL, so we strip any
 // trailing `/v1/` from the gateway base (present for OpenAI-style calls).
+//
+// Two auth shapes exist, matching how each gateway actually authenticates:
+//  • default — apiKeyHelper echo: Claude Code resolves the helper and sends
+//    the result as `x-api-key` (Anthropic's native header). Correct for
+//    anthropic, agentrouter, aerolink, freemodel, custom.
+//  • bearerAuth — TokenRouter-style gateways reject `x-api-key` and demand
+//    `Authorization: Bearer <key>` (their own error message says so). For
+//    these we emit ANTHROPIC_AUTH_TOKEN only (no apiKeyHelper): Claude Code
+//    treats the helper as the preferred source for x-api-key, and with no
+//    helper present it sends ANTHROPIC_AUTH_TOKEN as a Bearer token instead.
 export class ClaudeCodeAdapter extends ClientAdapter {
   buildConfig(provider, baseUrl, model, apiKey) {
     const ccBase = (baseUrl || '').replace(/\/v1\/?$/, '/').replace(/\/v1beta\/?$/, '/');
+    if (provider && provider.bearerAuth) {
+      return {
+        env: {
+          ANTHROPIC_BASE_URL: ccBase,
+          ANTHROPIC_MODEL: model,
+          ANTHROPIC_AUTH_TOKEN: apiKey,
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        },
+        ...(model && { model }),
+      };
+    }
     return {
       env: {
         ANTHROPIC_BASE_URL: ccBase,

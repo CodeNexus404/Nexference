@@ -15,6 +15,7 @@ import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
 import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { dynamicProviderCard } from './dynamicProvider.js';
+import { integrationCoverageHTML } from './providerIntegrations.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
 import { openModal, confirmModal } from '../components/modal.js';
@@ -100,8 +101,8 @@ export async function fetchProviderSilent(providerId) {
     const data = await res.json().catch(() => ({}));
     if (!data.ok) {
       const reason = (data.error || `HTTP ${res.status}`).toString().slice(0, 90);
-      if (/unauthorized client detected|unauthorized_client_error/i.test(reason)) {
-        notify.log(`Models · ${provider.name}: WAF blocks app-side fetch (works in Claude Code). Using fallback list.`, 't-ok');
+      if (/unauthorized client detected|unauthorized_client_error|Missing or malformed API key|authentication_error/i.test(reason)) {
+        notify.log(`Models · ${provider.name}: API requires approved client/key (works in Claude Code). Using fallback list.`, 't-ok');
       } else {
         notify.log(`Models not loaded · ${provider.name}: ${reason}`, 't-err');
       }
@@ -185,9 +186,9 @@ export async function testConnection(providerId, baseUrl) {
       // Agent Router (and similar) run a WAF that only accepts Claude Code-shaped
       // clients, so app-side probes are rejected. The saved config is still valid
       // for Claude Code itself, so surface a clear note instead of a scary failure.
-      if (/unauthorized client detected|unauthorized_client_error/i.test(raw)) {
-        notify.toast(`${provider.name}: WAF allows only Claude Code — Apply & use in Claude Code`, 'info');
-        notify.log(`Test note · ${provider.name}: provider WAF blocks app-side probes; the saved config works in Claude Code.`, 't-ok');
+      if (/unauthorized client detected|unauthorized_client_error|Missing or malformed API key|authentication_error/i.test(raw)) {
+        notify.toast(`${provider.name}: API requires valid key — check key format`, 'info');
+        notify.log(`Test note · ${provider.name}: auth rejected (${raw.slice(0, 80)})`, 't-ok');
       } else {
         const msg = raw.slice(0, 160);
         notify.toast(`Failed: ${msg}`, 'error');
@@ -696,6 +697,11 @@ function renderWorkspaceFromEnv(env) {
       <div class="muted">Loading provider discovery…</div>
     </div>
 
+    <div class="panel ws-summary reveal" id="wsIntegration" style="--d:.29s">
+      <h3>Provider Integration</h3>
+      <div class="muted">Loading integration coverage…</div>
+    </div>
+
     <div class="panel ws-profiles reveal" style="--d:.30s">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
@@ -720,6 +726,15 @@ function renderWorkspaceFromEnv(env) {
 
   fillWsModelIntel();
   fillWsProviderIntel();
+  fillWsIntegration();
+}
+
+function fillWsIntegration() {
+  const host = document.getElementById('wsIntegration');
+  if (!host) return;
+  integrationCoverageHTML().then((html) => {
+    if (html) host.outerHTML = html.replace('<section', '<div').replace('</section>', '</div>');
+  }).catch(() => {});
 }
 
 // ── Workspace Health modal (v1.0.0) ───────────────────────────────

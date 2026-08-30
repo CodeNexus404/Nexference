@@ -54,6 +54,7 @@ function sourceStatus(source) {
   switch (source) {
     case 'website': return 'fallback-website';
     case 'static': return 'fallback-static';
+    case 'pricing': return 'live';
     case 'proxy': return 'live';
     case 'manual': return 'live';
     case 'startup': return 'live';
@@ -73,6 +74,7 @@ function availabilityFromSource(source) {
     case 'manual':
     case 'startup':
     case 'periodic':
+    case 'pricing':
     case 'website':
     case 'static':
     case 'local':

@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.8.0 — Dynamic Provider Registry & Integration Pipeline** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v1.9.0 — Provider Integration & Adapter Framework** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -31,6 +31,27 @@ It spans five kinds of intelligence and a safety-first configuration pipeline:
 On top of that sits a **Safe Configuration Management** pipeline and a **Unified Playground** with an honest execution engine, metrics, history, and comparison. A **Workspace Health** report and an **Activity** feed give you observability without exposing secrets.
 
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
+
+---
+
+## What's new in v1.9.0
+
+**Provider Integration & Adapter Framework** — Nexference now keeps integration (configurable / executable) strictly separate from discovery and adoption. A provider can be discovered and even adopted without Nexference ever assuming it can be configured or run; an explicit, evidence-based **adapter** is resolved only when supported by real signals.
+
+- **Discovery ≠ Integration, always** — the core principle. Adoption, registration, and metadata never imply configuration/execution compatibility. Every integration record is honest about what is actually known.
+- **Integration status vocabulary** — `integrated` / `supported` / `partial` / `assessing` / `metadata-only` / `unsupported` / `blocked` / `unknown`, each shown with a label **and** a colour + dot so meaning is never conveyed by colour alone. `metadata-only` is the default honest state for adopted-but-unverified providers.
+- **Adapter framework** — `baseAdapter` plus `openAICompatible` / `anthropicCompatible` / `geminiCompatible` / `unsupported` adapters, each exposing conservative capabilities (chat, streaming, model listing, connection test, custom headers, environment variables). Adapters are assigned **only** from explicit evidence (compatibility flags, integration-evidence claims, or curated provider truth) — never from a name, website, repository, or marketing language.
+- **Evidence system** — normalised evidence claims (`openai_compatible_api`, `anthropic_compatible_api`, `gemini_compatible_api`, …) with source type and confidence (`high` / `medium` / `low` / `insufficient` / `unknown`). Authoritative curated provider formats resolve at `high`; ecosystem compatibility flags at `medium`; claims at their own confidence.
+- **Integration store** — `~/.nexference/provider-integrations.json` (schema `_v: 1.9.0`), kept **separate** from provider and dynamic records, with atomic writes, corrupt-file safety, a 2000-record bound, duplicate protection by provider id, and a secret-free guard (no keys/tokens/headers ever persist; secret-*shaped* values are rejected). Historical records are retained when a provider is deactivated/removed.
+- **Adoption pipeline extended** — adopting a provider now also creates an honest integration record (typically `metadata-only`), surfaced in the provider details modal, the Intelligence Center (Integration Coverage), the dashboard, and the command palette.
+- **Manual, on-demand assessment** — `POST /api/provider-integrations/assess` (or `/:providerId/assess`) runs once; there is **no background polling**. An in-flight guard prevents concurrent double-assessment; results are de-duplicated in the change store (`INTEGRATION_ASSESSED`, `INTEGRATION_STATUS_CHANGED`, `ADAPTER_CHANGED`).
+- **Connection & model endpoints** — `POST /api/provider-integrations/:id/test` and `/:id/models` send your credentials **transiently for a single probe** and never persist them; model listing is offered only when the resolved adapter actually supports it.
+- **Client compatibility stays honest** — the compatibility matrix now also understands dynamic-provider integration metadata: a dynamic Anthropic-compatible provider can be verified for Claude Code, while dynamic OpenAI/Gemini providers remain `unsupported` by Claude Code (its configuration adapter does not consume those protocols). No unsupported client was invented just to fill the matrix.
+- **Honesty guardrails preserved** — no secrets, keys, headers, or raw pricing reach any integration record, change, activity, API response, or UI; unknown stays unknown and nothing is inferred from names/marketing.
+- **APIs** — `GET /api/provider-integrations`, `/coverage`, `/:id`, `/:id/capabilities`, `POST …/assess`, `/:id/assess`, `/:id/test`, `/:id/models`.
+- **Version** — bumped to `1.9.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
 ---
 

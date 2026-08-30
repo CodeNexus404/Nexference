@@ -11,6 +11,7 @@ import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { trendChart } from '../components/trendChart.js';
 import { renderTimeline } from '../components/intelligenceTimeline.js';
+import { integrationCoverageHTML } from './providerIntegrations.js';
 
 const PERIODS = [
   { id: '24h', label: '24h' },
@@ -221,7 +222,9 @@ async function renderIntelBody(root, period) {
     <div id="icEcosystem"><div class="muted">Loading ecosystem summary…</div></div>
   </section>`;
 
-  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality + ecosystemSection;
+  const integrationCoverage = await integrationCoverageHTML();
+
+  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality + integrationCoverage + ecosystemSection;
 
   // Ecosystem summary is independent of the intelligence period; populate it async.
   fetch('/api/ecosystem/summary').then((r) => r.json()).then((sum) => {

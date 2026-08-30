@@ -7,6 +7,7 @@ import { CLIENTS, getClient } from '../clients/registry.js';
 import { modelService } from '../models/modelService.js';
 import { notify } from '../core/notifications.js';
 import { esc } from './util.js';
+import { assess as assessIntegration, getIntegrations } from '../providers/integrationService.js';
 
 // Command Palette — a lightweight ⌘K / Ctrl+K launcher. Pure navigation/action
 // dispatch using the existing router, theme, and workflow modules. No framework,
@@ -52,6 +53,8 @@ export function toggleCommandPalette() {
     { label: 'Refresh Provider Intelligence', hint: 'Providers', run: async () => { if (window.refreshProviderIntelligence) await window.refreshProviderIntelligence(); else router.navigate('cloud-providers'); } },
     { label: 'Refresh Provider Monitoring', hint: 'Providers', run: async () => { if (window.refreshProviderMonitoring) await window.refreshProviderMonitoring(); else router.navigate('cloud-providers'); } },
     { label: 'View Provider Changes', hint: 'Providers', run: () => { if (window.openProviderChangesModal) window.openProviderChangesModal(); else router.navigate('cloud-providers'); } },
+    { label: 'View Integration Coverage', hint: 'Integration', run: () => { router.navigate('intelligence'); } },
+    { label: 'Assess Provider Integration', hint: 'Integration', run: () => openIntegrationAssessModal() },
     { label: 'Refresh OpenRouter Models', hint: 'Providers', run: async () => { if (window.refreshProviderModels) await window.refreshProviderModels('openrouter'); else router.navigate('cloud-providers'); } },
     { label: 'Recommended Models', hint: 'Models', run: () => { router.navigate('models'); } },
     { label: 'Toggle Theme', hint: 'Appearance', run: () => { if (window.setTheme) window.setTheme(theme.current() === 'dark' ? 'light' : 'dark'); } },
@@ -127,5 +130,39 @@ export function toggleCommandPalette() {
       input.focus();
     },
     onClose: () => { paletteOpen = false; },
+  });
+}
+
+// Manual, on-demand integration assessment launcher (no background polling).
+async function openIntegrationAssessModal() {
+  let list = [];
+  try { list = await getIntegrations(); } catch { /* non-fatal */ }
+  const rows = (list && list.length)
+    ? list.map((r) => `<div class="palette-item">
+        <span class="palette-label">${esc(r.name || r.providerId)}</span>
+        <span class="palette-hint" id="intgStatus-${esc(r.providerId)}">${esc(r.integrationStatus || 'unknown')}</span>
+        <button class="btn btn-sm" data-assess="${esc(r.providerId)}">Assess</button>
+      </div>`).join('')
+    : '<div class="muted">No providers found.</div>';
+  openModal({
+    title: 'Assess Provider Integration',
+    subtitle: 'Runs once, on demand. Never infers compatibility from name or marketing.',
+    size: 'wide',
+    bodyHTML: `<div class="palette"><div class="palette-list">${rows}</div></div>`,
+    onMount: (b) => {
+      b.querySelectorAll('[data-assess]').forEach((btn) => btn.addEventListener('click', async () => {
+        const id = btn.dataset.assess;
+        try {
+          const rec = await assessIntegration(id);
+          if (rec) {
+            notify.toast(`Integration: ${rec.integrationStatus}`, 'success');
+            const lbl = b.querySelector(`#intgStatus-${id}`);
+            if (lbl) lbl.textContent = rec.integrationStatus;
+          } else {
+            notify.toast('Assessment failed', 'error');
+          }
+        } catch (e) { notify.toast('Assessment failed: ' + (e.message || e), 'error'); }
+      }));
+    },
   });
 }

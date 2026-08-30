@@ -27,6 +27,7 @@ import { resolveLogo, validateLogoUrl } from './logoResolver.js';
 import { createStructuredRegistrySource } from './sources/structuredRegistrySource.js';
 import { providerDiscoveryService } from '../providerDiscoveryService.js';
 import { createDynamicFromEcosystem } from '../dynamic/dynamicProviderService.js';
+import { assessProviderIntegration } from '../integrations/providerIntegrationService.js';
 
 const BASE_DIR = process.cwd();
 const SOURCES_FILE = join(BASE_DIR, 'data', 'discovery-sources.json');
@@ -414,6 +415,9 @@ export function adoptProvider(id) {
     const store = loadDiscovered();
     store[id] = rec;
     saveDiscovered(store);
+    // v1.9.0: initialize an honest integration record for the adopted provider.
+    // It remains METADATA_ONLY unless explicit compatibility evidence exists.
+    try { assessProviderIntegration(dyn.provider.id); } catch { /* non-fatal */ }
   }
   // Return both the ecosystem record and the adoption outcome so the UI can show
   // exactly what happened (success / integration level / warnings / curated-dup).
