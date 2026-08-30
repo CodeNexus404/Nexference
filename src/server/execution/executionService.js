@@ -17,6 +17,8 @@ import { computeMetrics } from './executionMetrics.js';
 import { validateExecution } from './executionValidation.js';
 import { runExecutionAdapter } from './executionAdapter.js';
 import { getExecutionCapabilities } from './executionRegistry.js';
+import { resolveExecutionRoute, resolveExecutionStatus } from './executionResolver.js';
+import { normalizeError } from './executionErrors.js';
 import { recordActivity } from '../activity/activityService.js';
 
 const HISTORY_DIR = join(homedir(), '.nexference');
@@ -62,6 +64,7 @@ function normalizeMessages(req) {
 function makeRecord(id, req) {
   const messages = normalizeMessages(req);
   const preview = (req.prompt || messages.filter((m) => m.role === 'user').pop()?.content || '').slice(0, 200);
+  const resolution = resolveExecutionRoute(req);
   return {
     id,
     source: req.source,
@@ -79,6 +82,9 @@ function makeRecord(id, req) {
     error: null,
     sourceStatus: null,
     promptPreview: preview,
+    route: resolution.route || null,
+    adapterType: resolution.adapterType || null,
+    resolutionReason: resolution.reason || null,
   };
 }
 
@@ -188,6 +194,9 @@ function finalize(rec, req) {
     contentPreview: (r.content || '').slice(0, 400),
     parameters: r.parameters,
     systemPrompt: r.systemPrompt,
+    route: r.route || null,
+    adapterType: r.adapterType || null,
+    resolutionReason: r.resolutionReason || null,
   };
   history.unshift(summary);
   if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;

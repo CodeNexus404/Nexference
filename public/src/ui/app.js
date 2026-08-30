@@ -702,6 +702,11 @@ function renderWorkspaceFromEnv(env) {
       <div class="muted">Loading integration coverage…</div>
     </div>
 
+    <div class="panel ws-summary reveal" id="wsExecGateway" style="--d:.295s">
+      <h3>Execution Gateway</h3>
+      <div class="muted">Loading execution capabilities…</div>
+    </div>
+
     <div class="panel ws-profiles reveal" style="--d:.30s">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
@@ -727,6 +732,28 @@ function renderWorkspaceFromEnv(env) {
   fillWsModelIntel();
   fillWsProviderIntel();
   fillWsIntegration();
+  fillWsExecGateway();
+}
+
+function fillWsExecGateway() {
+  const host = document.getElementById('wsExecGateway');
+  if (!host) return;
+  intg.getExecutionCoverage().then((cov) => {
+    if (!cov) return;
+    host.innerHTML = `
+      <h3>Execution Gateway</h3>
+      <div class="ic-dq-grid">
+        <div class="ic-dq-item"><span class="ic-dq-val"><span class="status-dot dot-green"></span> ${cov.executable || 0}</span><span class="ic-dq-label muted">Executable</span></div>
+        <div class="ic-dq-item"><span class="ic-dq-val"><span class="status-dot dot-yellow"></span> ${cov.needsCredentials || 0}</span><span class="ic-dq-label muted">Needs Setup</span></div>
+        <div class="ic-dq-item"><span class="ic-dq-val"><span class="status-dot dot-gray"></span> ${cov.metadataOnly || 0}</span><span class="ic-dq-label muted">Metadata Only</span></div>
+        <div class="ic-dq-item"><span class="ic-dq-val"><span class="status-dot dot-blue"></span> ${cov.localExecutable || 0}</span><span class="ic-dq-label muted">Local Runtimes</span></div>
+      </div>
+      <div class="muted">${cov.executable} cloud + ${cov.localExecutable} local sources ready. ${cov.needsCredentials} need credentials.</div>
+      <div class="ws-actions-row" style="margin-top:8px">
+        <button class="btn btn2" onclick="navigate('playground')">Open Playground</button>
+      </div>
+    `;
+  }).catch(() => {});
 }
 
 function fillWsIntegration() {

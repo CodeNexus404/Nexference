@@ -224,7 +224,30 @@ async function renderIntelBody(root, period) {
 
   const integrationCoverage = await integrationCoverageHTML();
 
-  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality + integrationCoverage + ecosystemSection;
+  // Execution Gateway coverage (v2.0.0)
+  let execCoverageHTML = '';
+  try {
+    const { getExecutionCoverage } = await import('../providers/integrationService.js');
+    const cov = await getExecutionCoverage();
+    if (cov) {
+      const row = (label, val, dot) => `<div class="ic-dq-item"><span class="ic-dq-val"><span class="status-dot ${dot}"></span> ${val}</span><span class="ic-dq-label muted">${esc(label)}</span></div>`;
+      execCoverageHTML = `<section class="ic-section">
+        <h2 class="ic-h2">Execution Coverage</h2>
+        <div class="card ic-dq">
+          <div class="ic-dq-grid">
+            ${row('Executable', cov.executable || 0, 'dot-green')}
+            ${row('Needs credentials', cov.needsCredentials || 0, 'dot-yellow')}
+            ${row('Metadata only', cov.metadataOnly || 0, 'dot-gray')}
+            ${row('Unsupported', cov.unsupported || 0, 'dot-red')}
+            ${row('Local executable', cov.localExecutable || 0, 'dot-blue')}
+          </div>
+          <div class="muted">${cov.executable} / ${cov.totalProviders} cloud providers executable. ${cov.localExecutable} local runtimes ready.</div>
+        </div>
+      </section>`;
+    }
+  } catch {}
+
+  body.innerHTML = overview + attention + providerTrends + modelTrends + recommendations + benchmark + timelines + dataQuality + integrationCoverage + execCoverageHTML + ecosystemSection;
 
   // Ecosystem summary is independent of the intelligence period; populate it async.
   fetch('/api/ecosystem/summary').then((r) => r.json()).then((sum) => {

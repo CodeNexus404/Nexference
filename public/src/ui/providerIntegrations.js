@@ -40,6 +40,20 @@ export function integrationBadge(status) {
   return `<span class="badge ${m.badge}"><span class="status-dot ${m.dot}"></span>${esc(m.label)}</span>`;
 }
 
+const ROUTE_LABEL = {
+  'legacy-provider-bridge': 'Legacy Provider Bridge',
+  'integration-adapter-bridge': 'Integration Adapter',
+  'runtime-execution-bridge': 'Runtime Bridge',
+  unsupported: 'Unsupported',
+};
+
+const EXEC_STATUS_META = {
+  ready: { label: 'Ready', badge: 'badge-ok', dot: 'dot-green' },
+  needs_credentials: { label: 'Needs credentials', badge: 'badge-warn', dot: 'dot-yellow' },
+  metadata_only: { label: 'Metadata only', badge: 'badge-muted', dot: 'dot-gray' },
+  unsupported: { label: 'Unsupported', badge: 'badge-danger', dot: 'dot-red' },
+};
+
 function kv(label, value, opts = {}) {
   const v = value === true ? '<span class="yes">✓</span>'
     : value === false ? '<span class="no">✗</span>'
@@ -50,34 +64,50 @@ function kv(label, value, opts = {}) {
 
 // Build the Integration section HTML for a provider. Returns a Promise<string>.
 export async function integrationSectionHTML(providerId) {
-  const rec = await intg.getIntegration(providerId);
-  if (!rec) {
+  const [rec, execStatus] = await Promise.all([
+    intg.getIntegration(providerId),
+    intg.getExecutionStatus(providerId).catch(() => null),
+  ]);
+  if (!rec && !execStatus) {
     return `<div class="eco-kv-grid"><div class="eco-kv"><span>Status</span><span>Unknown</span></div></div>
       <div class="eco-detail-actions"><button class="btn btn-sm" data-intg-action="assess" data-id="${esc(providerId)}">Assess Integration</button></div>`;
   }
-  const m = statusMeta(rec.integrationStatus);
-  const adapter = ADAPTER_LABEL[rec.adapterType] || rec.adapterType || 'Unknown';
-  const cap = rec.configuration || {};
-  const exec = rec.execution || {};
-  const evidence = Array.isArray(rec.evidence) ? rec.evidence : [];
+  const m = rec ? statusMeta(rec.integrationStatus) : STATUS_META.unknown;
+  const adapter = rec ? (ADAPTER_LABEL[rec.adapterType] || rec.adapterType || 'Unknown') : 'Unknown';
+  const cap = rec?.configuration || {};
+  const exec = rec?.execution || {};
+  const evidence = Array.isArray(rec?.evidence) ? rec.evidence : [];
   const evidenceRows = evidence.length
     ? evidence.map((e) => `<li>${esc(e.claim || '—')} <span class="muted">· ${esc(e.sourceType || 'unknown')} · ${esc(e.confidence || 'unknown')}</span></li>`).join('')
     : '<li class="muted">No integration evidence recorded yet.</li>';
 
-  const actions = actionButtons(rec);
+  const actions = actionButtons(rec || { providerId, integrationStatus: 'unknown' });
+
+  // Execution routing (v2.0.0)
+  const execMeta = execStatus ? (EXEC_STATUS_META[execStatus.status] || EXEC_STATUS_META.unsupported) : null;
+  const routeLabel = execStatus?.route ? (ROUTE_LABEL[execStatus.route] || execStatus.route) : null;
 
   return `
     <div class="eco-kv-grid">
       <div class="eco-kv"><span>Status</span><span><span class="status-dot ${m.dot}"></span> ${esc(m.label)}</span></div>
       <div class="eco-kv"><span>Adapter</span><span>${esc(adapter)}</span></div>
-      <div class="eco-kv"><span>Confidence</span><span>${esc(rec.confidence || 'unknown')}</span></div>
-      <div class="eco-kv"><span>Last assessed</span><span>${esc((rec.lastAssessedAt || '').slice(0, 19).replace('T', ' ') || 'never')}</span></div>
+      <div class="eco-kv"><span>Confidence</span><span>${esc(rec?.confidence || 'unknown')}</span></div>
+      <div class="eco-kv"><span>Last assessed</span><span>${esc((rec?.lastAssessedAt || '').slice(0, 19).replace('T', ' ') || 'never')}</span></div>
     </div>
     <div class="intg-caps">
       <div><b>Configuration</b>${kv('API key', cap.supportsApiKey)}${kv('Base URL', cap.supportsBaseUrl)}${kv('Model selection', cap.supportsModelSelection)}${kv('Custom headers', cap.supportsCustomHeaders)}${kv('Env variables', cap.supportsEnvironmentVariables)}</div>
       <div><b>Execution</b>${kv('Chat', exec.supportsChat)}${kv('Streaming', exec.supportsStreaming)}${kv('Model listing', exec.supportsModelListing)}${kv('Connection test', exec.supportsConnectionTest)}</div>
     </div>
-    ${rec.warnings && rec.warnings.length ? `<div class="intg-warn">${rec.warnings.map((w) => `<div class="muted">• ${esc(w)}</div>`).join('')}</div>` : ''}
+    ${execMeta ? `<div class="intg-exec-routing">
+      <b>Execution</b>
+      <div class="eco-kv-grid">
+        <div class="eco-kv"><span>Status</span><span><span class="status-dot ${execMeta.dot}"></span> ${esc(execMeta.label)}</span></div>
+        ${routeLabel ? `<div class="eco-kv"><span>Route</span><span>${esc(routeLabel)}</span></div>` : ''}
+        ${execStatus?.adapterType ? `<div class="eco-kv"><span>Adapter</span><span>${esc(execStatus.adapterType)}</span></div>` : ''}
+        ${execStatus?.statusReason ? `<div class="eco-kv"><span>Reason</span><span class="muted">${esc(execStatus.statusReason)}</span></div>` : ''}
+      </div>
+    </div>` : ''}
+    ${rec?.warnings && rec.warnings.length ? `<div class="intg-warn">${rec.warnings.map((w) => `<div class="muted">• ${esc(w)}</div>`).join('')}</div>` : ''}
     <div id="intgEvidence-${esc(providerId)}" class="intg-evidence">
       <b>Evidence</b>
       <ul class="ic-insights">${evidenceRows}</ul>
@@ -88,7 +118,7 @@ export async function integrationSectionHTML(providerId) {
 
 function actionButtons(rec) {
   const id = esc(rec.providerId);
-  const status = rec.integrationStatus;
+  const status = rec.integrationStatus || 'unknown';
   const btns = [];
   if (status === 'metadata-only' || status === 'unknown' || status === 'blocked') {
     btns.push(`<button class="btn btn-sm btn-go" data-intg-action="assess" data-id="${id}">Assess Integration</button>`);

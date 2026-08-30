@@ -1,9 +1,11 @@
-// Provider Integration API client (v1.9.0) — thin wrappers over the
-// /api/provider-integrations endpoints. No secrets: test/model endpoints send
-// credentials transiently and the server never persists them.
+// Provider Integration API client (v2.0.0) — thin wrappers over the
+// /api/provider-integrations and /api/executions/* endpoints. No secrets:
+// test/model endpoints send credentials transiently and the server never
+// persists them.
 import { notify } from '../core/notifications.js';
 
 const BASE = '/api/provider-integrations';
+const EXEC_BASE = '/api/executions';
 
 async function jget(url) {
   const r = await fetch(url);
@@ -53,4 +55,22 @@ export async function listModels(id, { key, baseUrl, model }) {
     body: JSON.stringify({ key, baseUrl, model }),
   });
   return r.json().catch(() => ({ supported: false, reason: 'model listing failed' }));
+}
+
+// ── Execution Gateway APIs (v2.0.0) ──
+
+export async function getGatewayCapabilities() {
+  return jget(`${EXEC_BASE}/gateway-capabilities`);
+}
+
+export async function getExecutionCoverage() {
+  return jget(`${EXEC_BASE}/coverage`);
+}
+
+export async function getExecutionStatus(providerId) {
+  return jget(`${EXEC_BASE}/status/${encodeURIComponent(providerId)}`);
+}
+
+export async function getExecutionDiagnostics(executionId) {
+  return jget(`${EXEC_BASE}/${encodeURIComponent(executionId)}/diagnostics`);
 }

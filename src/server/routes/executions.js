@@ -12,6 +12,8 @@ import {
   saveBenchmark, listBenchmarks, clearBenchmarks, clearExecutions,
 } from '../execution/executionService.js';
 import { validateExecution } from '../execution/executionValidation.js';
+import { getExecutionCapabilitiesFull, getExecutionCoverage } from '../execution/executionCapabilities.js';
+import { resolveExecutionStatus } from '../execution/executionResolver.js';
 
 const EXEC_TIMEOUT_MS = 180_000;
 
@@ -76,6 +78,42 @@ export function registerExecutionRoutes(app) {
   // Honest support matrix.
   app.get('/api/executions/capabilities', (req, res) => {
     res.json(getCapabilities());
+  });
+
+  // Full gateway capabilities (v2.0.0) — per-provider/runtime execution status.
+  app.get('/api/executions/gateway-capabilities', (req, res) => {
+    res.json(getExecutionCapabilitiesFull());
+  });
+
+  // Execution coverage summary (v2.0.0).
+  app.get('/api/executions/coverage', (req, res) => {
+    res.json(getExecutionCoverage());
+  });
+
+  // Per-provider execution status (v2.0.0).
+  app.get('/api/executions/status/:providerId', (req, res) => {
+    const { providerId } = req.params;
+    const key = req.query.key || '';
+    res.json(resolveExecutionStatus(providerId, null, key));
+  });
+
+  // Execution diagnostics for a specific execution record.
+  app.get('/api/executions/:id/diagnostics', (req, res) => {
+    const ex = getExecution(req.params.id);
+    if (!ex) return res.status(404).json({ error: 'Unknown execution' });
+    res.json({
+      executionId: ex.id,
+      route: ex.route || null,
+      adapterType: ex.adapterType || null,
+      sourceType: ex.source || null,
+      providerId: ex.providerId || null,
+      runtimeId: ex.runtimeId || null,
+      model: ex.model || null,
+      status: ex.status || null,
+      durationMs: ex.durationMs || null,
+      error: ex.error || null,
+      resolutionReason: ex.resolutionReason || null,
+    });
   });
 
   // Compare several models sequentially.

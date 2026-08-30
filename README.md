@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v1.9.0 — Provider Integration & Adapter Framework** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v2.0.0 — Unified Execution Gateway** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -27,10 +27,43 @@ It spans five kinds of intelligence and a safety-first configuration pipeline:
 - **Runtime Intelligence** — real local-runtime detection (Ollama, LM Studio, …) with status, installed models, and safe start.
 - **Model Intelligence** — one honest record per model with capability flags, availability, access type (free/paid/freemium), and lifecycle derived only from what a provider/runtime actually reports.
 - **Client Compatibility** — a single compatibility engine answering "can client X use provider Y / runtime Z, and how?".
+- **Unified Execution Gateway** (v2.0.0) — central orchestration layer that routes execution through the appropriate bridge (legacy provider, integration adapter, or runtime) and returns normalized results with honest errors.
 
 On top of that sits a **Safe Configuration Management** pipeline and a **Unified Playground** with an honest execution engine, metrics, history, and comparison. A **Workspace Health** report and an **Activity** feed give you observability without exposing secrets.
 
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
+
+---
+
+## What's new in v2.0.0
+
+**Unified Execution Gateway** — Nexference now routes ALL execution through a single central orchestration layer. The gateway resolves the correct execution bridge (legacy provider, integration adapter, or runtime), normalizes results, and returns honest errors — regardless of source.
+
+- **One execution entry point** — `executionGateway.execute(request)` becomes the central orchestration layer. The existing `executionService` continues to manage lifecycle, SSE streaming, history, and benchmarks. The gateway adds resolution intelligence on top.
+- **Three execution bridges**:
+  - **Legacy Provider Bridge** — safely wraps the existing `ProviderAdapter` for curated cloud providers (openai/anthropic/gemini formats). Proven behavior continues working.
+  - **Integration Adapter Bridge** — routes execution through the Provider Integration Framework's adapters when integration status permits and the adapter explicitly supports execution. Never executes metadata-only providers.
+  - **Runtime Execution Bridge** — integrates with existing local runtime adapters (Ollama, LM Studio, etc.) without creating duplicate implementations.
+- **Execution resolution** — deterministic resolution that checks: provider exists? Integration record exists? Integration executable? Adapter supports execution? Required configuration available? Returns honest assessment of which bridge to use and why.
+- **Normalized execution result** — single contract with `executionId`, `status`, `sourceType`, `providerId`, `runtimeId`, `model`, `route`, `adapterType`, `durationMs`, `usage`, `output`, `error`.
+- **Normalized error categories** — `authentication_required`, `authentication_failed`, `invalid_configuration`, `provider_unavailable`, `network_error`, `model_not_found`, `rate_limited`, `unsupported`, `metadata_only`, `execution_failed`, `timed_out`, `cancelled`, `unknown`. Safe user-facing messages without leaking secrets.
+- **Execution capabilities** — `GET /api/executions/gateway-capabilities` exposes per-provider/runtime execution status, route, adapter, and capabilities. Frontend uses real data, not hardcoded assumptions.
+- **Execution coverage** — `GET /api/executions/coverage` summarizes executable providers, needs-setup, metadata-only, and local runtimes.
+- **Execution diagnostics** — `GET /api/executions/:id/diagnostics` shows route, adapter, status, duration, and error category for debugging.
+- **Execution status per provider** — `GET /api/executions/status/:providerId` returns ready/needs_credentials/metadata_only/unsupported status.
+- **Dashboard card** — Execution Gateway status card shows executable sources, needs-setup, metadata-only, and local runtimes.
+- **Intelligence Center** — Execution Coverage section added with honest capability matrix.
+- **Command palette** — View Execution Coverage, View Executable Providers, View Providers Needing Credentials, Open Execution Diagnostics.
+- **Execution route indicator** — execution details show which bridge handled the request (visible in diagnostics, not cluttering the main chat interface).
+- **Version** — bumped to `2.0.0` across `package.json`, the UI, and this document.
+
+Key principles preserved:
+- "Provider discovery does not imply integration."
+- "Provider integration does not automatically imply execution capability."
+- "Execution capability does not automatically imply compatibility with every CLI client."
+- No secrets in execution history, diagnostics, or API responses.
+- No fabricated execution success, streaming support, or model availability.
+- Legacy bridge support remains as fallback.
 
 ---
 
