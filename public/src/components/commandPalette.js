@@ -33,6 +33,8 @@ export function toggleCommandPalette() {
     { label: 'Refresh Ecosystem Discovery', hint: 'Ecosystem', run: () => { router.navigate('ecosystem'); if (window.ecosystemDiscover) window.ecosystemDiscover(); } },
     { label: 'Review Discovered Providers', hint: 'Ecosystem', run: () => { router.navigate('ecosystem'); const f = document.querySelector('.eco-filter [data-f="review"]'); if (f) f.click(); } },
     { label: 'View Adopted Providers', hint: 'Providers', run: () => { router.navigate('cloud-providers'); const reg = document.querySelector('.chip-filter.reg[data-reg="adopted"]'); if (reg) reg.click(); } },
+    { label: 'View Custom Providers', hint: 'Providers', run: () => { router.navigate('cloud-providers'); const reg = document.querySelector('.chip-filter.reg[data-reg="custom"]'); if (reg) reg.click(); } },
+    { label: 'Add Custom Provider', hint: 'Providers', run: () => { if (window.openAddCustomProviderWizard) window.openAddCustomProviderWizard(); } },
     { label: 'Refresh Dynamic Provider Registry', hint: 'Providers', run: () => { if (window.refreshCloudProviders) window.refreshCloudProviders(); else router.navigate('cloud-providers'); } },
     { label: 'Configure a client', hint: 'Workflow', run: () => openWorkflow() },
     { label: 'Open Configuration Workspace', hint: 'Page', run: () => { router.navigate('configuration'); if (window.setCfgTab) window.setCfgTab('config'); } },
@@ -144,7 +146,7 @@ async function openIntegrationAssessModal() {
   const rows = (list && list.length)
     ? list.map((r) => `<div class="palette-item">
         <span class="palette-label">${esc(r.name || r.providerId)}</span>
-        <span class="palette-hint" id="intgStatus-${esc(r.providerId)}">${esc(r.integrationStatus || 'unknown')}</span>
+         <span class="palette-hint" data-intg-status="${esc(r.providerId)}">${esc(r.integrationStatus || 'unknown')}</span>
         <button class="btn btn-sm" data-assess="${esc(r.providerId)}">Assess</button>
       </div>`).join('')
     : '<div class="muted">No providers found.</div>';
@@ -160,7 +162,7 @@ async function openIntegrationAssessModal() {
           const rec = await assessIntegration(id);
           if (rec) {
             notify.toast(`Integration: ${rec.integrationStatus}`, 'success');
-            const lbl = b.querySelector(`#intgStatus-${id}`);
+            const lbl = b.querySelector(`[data-intg-status="${btn.dataset.assess}"]`);
             if (lbl) lbl.textContent = rec.integrationStatus;
           } else {
             notify.toast('Assessment failed', 'error');

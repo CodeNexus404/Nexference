@@ -94,6 +94,16 @@ async function fetchModelsForProvider(provider, key = '') {
     return { ok: true, count: models.length, provider: id };
   }
 
+  // API required a key / returned nothing — fall back to the provider's official
+  // public model-list endpoint (e.g. Cerebras /public/v1/models) which lists the
+  // free/community models keylessly. This is a real, official source — never a
+  // fallback to fabricated names.
+  const pub = await fetchFromPublicListApi(provider);
+  if (pub) {
+    modelCache[id] = { models: pub.models, fetchedAt: pub.fetchedAt, total: pub.models.length, source: 'public-api' };
+    return { ok: true, count: pub.models.length, provider: id, source: 'public-api' };
+  }
+
   // API returned nothing (usually needs a key) — fall back to the provider's
   // public pricing/model endpoint (new-one-api gateways expose it keyless).
   const priced = await fetchFromPricingApi(provider);
@@ -105,32 +115,21 @@ async function fetchModelsForProvider(provider, key = '') {
   // API returned nothing (usually needs a key) — fall back to scraping the provider's public website
   const scraped = await scrapeModelsForProvider(provider);
   if (scraped) {
-    let models = scraped.models;
-    // Merge curated static entries so a thin/partial website scrape never drops
-    // known-good models (e.g. paid flags, or providers whose site yields little).
-    // The static list is the source of truth for paid flags: overlay them onto any
-    // scraped models with matching IDs so the UI never mislabels a paid model as free.
+    const models = scraped.models;
+    // Overlay paid flags from the static list onto scraped models with matching
+    // IDs so the UI never mislabels a paid model as free. This only corrects
+    // pricing on genuinely-fetched models — it never injects model NAMES, which
+    // must always come from a real source (API/pricing/website).
     if (STATIC_MODELS[id]) {
       const staticPaid = new Set();
       for (const entry of STATIC_MODELS[id]) {
         const mid = typeof entry === 'string' ? entry : entry.id;
         if (typeof entry !== 'string' && entry.paid) staticPaid.add(mid);
       }
-      // Overlay paid flags from static list onto scraped models
       for (const m of models) {
         if (staticPaid.has(m.id)) {
           m.paid = true;
           if (!m.pricing) m.pricing = { prompt: '1', completion: '1' };
-        }
-      }
-      // Add static-only entries not in scrape
-      const have = new Set(models.map(m => m.id));
-      for (const entry of STATIC_MODELS[id]) {
-        const mid = typeof entry === 'string' ? entry : entry.id;
-        if (!have.has(mid)) {
-          const paid = typeof entry === 'string' ? false : !!entry.paid;
-          models = models.concat({ id: mid, name: mid, pricing: paid ? { prompt: '1', completion: '1' } : null, paid });
-          have.add(mid);
         }
       }
     }
@@ -138,17 +137,10 @@ async function fetchModelsForProvider(provider, key = '') {
     return { ok: true, count: models.length, provider: id, source: 'website' };
   }
 
-  // Static curated fallback for providers without a fetchable model list.
-  if (STATIC_MODELS[id]) {
-    const models = STATIC_MODELS[id].map((entry) => {
-      const mid = typeof entry === 'string' ? entry : entry.id;
-      const paid = typeof entry === 'string' ? false : !!entry.paid;
-      return { id: mid, name: mid, pricing: paid ? { prompt: '1', completion: '1' } : null, paid };
-    });
-    modelCache[id] = { models, fetchedAt: Date.now(), total: models.length, source: 'static' };
-    return { ok: true, count: models.length, provider: id, source: 'static' };
-  }
-
+  // No models could be reliably fetched. Per the honesty rules we never show
+  // hard-coded/curated model names as if they were live — the list must come
+  // from a real source (live API, public pricing API, or website scrape). If
+  // all of those fail we report zero models rather than fabricating names.
   modelCache[id] = { models: [], fetchedAt: Date.now(), total: 0 };
   return { ok: false, error: apiFailed ? 'api failed' : 'no models' };
 }
@@ -188,6 +180,54 @@ async function scrapeModelsForProvider(provider) {
       return { id, name: id, pricing: { prompt: '1', completion: '1' }, paid: true };
     });
     return { models, fetchedAt: Date.now(), total: models.length, source: 'website' };
+  } catch {
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Public model-list API fallback — a provider's official, keyless
+//  model endpoint (OpenAI-shaped { data: [{ id, name, pricing,
+//  limits, capabilities }] }). Used when the primary API needs a
+//  key so the free/community models are still listed honestly.
+// ═══════════════════════════════════════════════════════════════
+
+async function fetchFromPublicListApi(provider) {
+  const url = provider.publicListApi;
+  if (!url) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const r = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; Nexference/1.0)' },
+    });
+    clearTimeout(timeout);
+    if (!r.ok) return null;
+    const data = await r.json();
+    const list = Array.isArray(data?.data) ? data.data : [];
+    const models = list
+      .filter((m) => m && m.id)
+      .map((m) => {
+        const p = m.pricing || {};
+        const price = (v) => (v == null ? null : Number(v));
+        const prompt = price(p.prompt ?? p.input_price);
+        const completion = price(p.completion ?? p.output_price);
+        return {
+          id: m.id,
+          name: m.name || m.id,
+          // These models come from an authenticated/paid catalogue, so a price
+          // (or any listed model) counts as paid unless it is explicitly $0.
+          paid: prompt !== 0 || completion !== 0 || (m.pricing != null),
+          pricing: prompt != null || completion != null ? { prompt, completion } : null,
+          context_length: (m.limits && m.limits.max_context_length) || m.context_length || null,
+          capabilities: m.capabilities || null,
+          owned_by: m.owned_by || null,
+        };
+      })
+      .filter((m) => m.id);
+    if (!models.length) return null;
+    return { models, fetchedAt: Date.now(), total: models.length, source: 'public-api' };
   } catch {
     return null;
   }
@@ -243,7 +283,8 @@ async function fetchAllModels(source = 'startup') {
       const result = await fetchModelsForProvider(p, '');
       if (result.ok) {
         if (result.source !== 'website' && result.source !== 'pricing') modelCache[p.id].source = source;
-        console.log(`    ✅ ${p.id}: ${result.count} models${result.source === 'website' ? ' (website)' : result.source === 'pricing' ? ' (pricing API)' : ''}`);
+        const srcNote = result.source === 'website' ? ' (website)' : result.source === 'pricing' ? ' (pricing API)' : result.source === 'public-api' ? ' (public API)' : '';
+        console.log(`    ✅ ${p.id}: ${result.count} models${srcNote}`);
       } else {
         console.log(`    ⏭️  ${p.id}: ${result.error?.slice(0, 60) || 'no key'}`);
       }

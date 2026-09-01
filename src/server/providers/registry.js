@@ -18,11 +18,11 @@ export const PROVIDERS = [
   { id: 'nvidia', baseUrl: 'https://integrate.api.nvidia.com/v1/', format: 'openai', publicModels: false },
   { id: 'groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false },
   { id: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false },
-  { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false },
+  { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://api.cerebras.ai/public/v1/models' },
   { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: true, pricingApi: 'https://api.orcarouter.ai/api/pricing?all=true' },
   { id: 'mistral', baseUrl: 'https://api.mistral.ai/v1/', format: 'openai', publicModels: false },
   { id: 'huggingface', baseUrl: 'https://router.huggingface.co/v1/', format: 'openai', publicModels: false },
-  { id: 'chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false },
+  { id: 'chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://llm.chutes.ai/v1/models' },
   // TokenRouter accepts the Anthropic-format /v1/messages protocol but its auth
   // is Bearer-only — it rejects `x-api-key` outright ("Pass 'Authorization:
   // Bearer tr_...'"). `bearerAuth` records this fact so integrations/tests send

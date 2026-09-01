@@ -100,8 +100,19 @@ export function openProviderConfig(providerId) {
           Storage.setModel(providerId, id);
           const m = b.querySelector(`.model-${providerId}`);
           if (m) m.value = id;
+          resetTestButton();
         },
       });
+
+      // A change of model invalidates a previous test result — reset the label.
+      function resetTestButton() {
+        const t = b.querySelector('[data-act="test"]');
+        if (!t || t.disabled) return;
+        const prev = t.textContent;
+        if (prev.startsWith('Connection OK') || prev.startsWith('Failed (') || prev.startsWith('Error (')) {
+          t.textContent = 'Test Connection';
+        }
+      }
 
       b.querySelector('[data-act="test"]').addEventListener('click', () => {
         // Reuse the proven global testConnection (reads the .api-key-* / .model-* /

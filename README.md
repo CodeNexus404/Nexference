@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v2.0.0 — Unified Execution Gateway** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v2.1.0 — Custom Provider Registry & Provider Onboarding** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -35,7 +35,36 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 
 ---
 
-## What's new in v2.0.0
+## What's new in v2.1.0
+
+**Custom Provider Registry & Provider Onboarding** — Nexference now allows users to manually create, manage, validate, and use their own AI provider cards alongside curated and ecosystem-discovered providers.
+
+- **Unified Provider Registry** — three provider origins: Curated (built-in), Adopted (ecosystem-discovered), Custom (user-created). All appear as first-class provider cards using the same UI architecture.
+- **Custom Provider Store** — `~/.nexference/custom-providers.json` with atomic writes, corrupt-file safety, bounded count (200 max), no secrets ever stored.
+- **Custom Provider Service** — full CRUD operations with validation, duplicate detection (checks curated providers, existing custom providers by name and hostname), lifecycle management (active/inactive), and integration with the provider change store and activity service.
+- **Onboarding Wizard** — multi-step "Add Provider" experience: Identity → Connection (API format + base URL) → Logo (website/initials) → Review & Create. Uses existing modal system and design tokens.
+- **Custom Provider Cards** — rendered using the same card architecture as curated providers. Shows origin badge (Custom), format, lifecycle, connection status, integration status, model count, and creation date.
+- **Registry Filters** — extended with Curated / Adopted / Custom / Discovered / All filters. Default remains Curated.
+- **Custom Provider Details** — modal showing identity, connection, integration, provenance, and action buttons (Edit, Duplicate, Test Connection, Deactivate/Reactivate, Delete).
+- **Test Connection** — integrates with existing ProviderAdapter for transient credential testing. Never persists API keys.
+- **Duplicate Detection** — checks curated providers and existing custom providers by normalized name and hostname. Returns honest warnings without silent merges.
+- **API Routes** — `GET/POST /api/custom-providers`, `GET/PATCH/DELETE /api/custom-providers/:id`, `POST .../test`, `.../duplicate`, `.../deactivate`, `.../reactivate`, `POST /api/custom-providers/validate`.
+- **Unified Catalogue** — `GET /api/providers` now includes active custom providers with `origin: 'custom'`.
+- **Command Palette** — Add Custom Provider, View Custom Providers commands.
+- **Execution Gateway** — custom providers participate in the existing execution resolution. If integration status permits, they route through the Integration Adapter Bridge.
+- **Version** — bumped to `2.1.0` across `package.json`, the UI, and this document.
+
+Key principles:
+- "Provider discovery does not imply integration."
+- "Provider integration does not automatically imply execution capability."
+- Custom providers start as Metadata Only / Unverified — honest defaults.
+- No fabricated verification, model lists, or pricing.
+- Credentials are never stored in custom provider records.
+
+---
+
+<details>
+<summary><h2>What's new in v2.0.0</h2></summary>
 
 **Unified Execution Gateway** — Nexference now routes ALL execution through a single central orchestration layer. The gateway resolves the correct execution bridge (legacy provider, integration adapter, or runtime), normalizes results, and returns honest errors — regardless of source.
 
@@ -65,9 +94,12 @@ Key principles preserved:
 - No fabricated execution success, streaming support, or model availability.
 - Legacy bridge support remains as fallback.
 
+</details>
+
 ---
 
-## What's new in v1.9.0
+<details>
+<summary><h2>What's new in v1.9.0</h2></summary>
 
 **Provider Integration & Adapter Framework** — Nexference now keeps integration (configurable / executable) strictly separate from discovery and adoption. A provider can be discovered and even adopted without Nexference ever assuming it can be configured or run; an explicit, evidence-based **adapter** is resolved only when supported by real signals.
 
@@ -86,9 +118,12 @@ Key principles preserved:
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
+</details>
+
 ---
 
-## What's new in v1.6.0
+<details>
+<summary><h2>What's new in v1.6.0</h2></summary>
 
 **Intelligence Center, Trends & Smart Recommendations** — Nexference now aggregates its existing intelligence (provider monitoring, model changes, benchmarks, environment) into one honest, scannable view, with explainable trends and recommendations. No new persistent store was created and no fake data is introduced.
 
@@ -105,7 +140,12 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.7.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.7.0</h2></summary>
 
 **Ecosystem Discovery & Provider Registry** — Nexference now discovers AI providers, gateways, aggregators, and catalogues from trustworthy external/open-source sources and keeps an extensible, evidence-based registry — without ever silently merging discovered providers into the curated baseline or the configuration flow.
 
@@ -124,7 +164,12 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.8.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.8.0</h2></summary>
 
 **Dynamic Provider Registry & Integration Pipeline** — Nexference becomes genuinely dynamic: a discovered provider can now move through Discovery → Review → Adopt → Active Provider and appear in the unified provider catalogue without any source-code or static-registry edits.
 
@@ -145,7 +190,12 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.5.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.5.0</h2></summary>
 
 **Provider Monitoring, Model Changes & Benchmark Intelligence** — Nexference now watches providers over time and surfaces model-level change, connection reliability, and benchmarks — entirely from recorded, honest signals.
 
@@ -161,7 +211,12 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.4.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.4.0</h2></summary>
 
 The **Provider Discovery & Intelligence Foundation** — Nexference learns about providers from trusted sources and keeps that knowledge honest, observable, and under your control.
 
@@ -176,7 +231,12 @@ The **Provider Discovery & Intelligence Foundation** — Nexference learns about
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.3.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.3.0</h2></summary>
 
 A product-level UI/UX refinement pass that makes Nexference feel like an application rather than a set of static dashboards — without changing architecture, behavior, or the safety-critical configuration pipeline.
 
@@ -189,7 +249,12 @@ A product-level UI/UX refinement pass that makes Nexference feel like an applica
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.2.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.2.0</h2></summary>
 
 A UI/UX refinement milestone focused on making Nexference feel like a complete modern developer workspace — without changing architecture, behavior, or the safety-critical configuration pipeline.
 
@@ -203,13 +268,23 @@ A UI/UX refinement milestone focused on making Nexference feel like a complete m
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
 
-## What's new in v1.1.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.1.0</h2></summary>
 
 - **Information architecture** — the sidebar is now grouped into Workspace / Configure / Explore / Test / Manage, so the eight surfaces read as one coherent product instead of a flat list.
 - **Workspace status indicator** — the top bar shows a live configuration-state chip (Needs setup / Copyable config / Configured / Unsaved changes), derived from the real applied state on every navigation.
 - **Versioned release** — bumped to `1.1.0` across `package.json`, the UI, and this document.
 
-## What's new in v1.0.0
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v1.0.0</h2></summary>
 
 - **Workspace Health** — a single honest report across configuration, clients, runtimes, providers, and execution (`GET /api/health`), with explicit states (`healthy`, `attention`, `config-required`, `partial`, `offline`, `unknown`) and a 0–100 score. Partial failures are never hidden behind a green status.
 - **Unified Activity feed** — persistent, secret-free event log for configuration, backups, runtimes, and executions (`GET /api/activity`).
@@ -217,6 +292,8 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **State restoration** — route, playground draft, and selections survive a page refresh; an interrupted execution is honestly reported instead of pretending the stream is still connected.
 - **Consistent status vocabulary** — providers, runtimes, and clients share normalized, non-misleading status badges across the UI.
 - **Notification discipline** — duplicate toasts are suppressed and long operations use inline progress rather than stacked notifications.
+
+</details>
 
 ---
 

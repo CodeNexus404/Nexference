@@ -152,11 +152,13 @@ async function openDynamicProvider(id) {
 
         <details class="intg-details" open>
           <summary>Provider Integration (v1.9.0)</summary>
-          <div id="intgHost-${id}">Loading integration…</div>
+          <div data-intg-host>Loading integration…</div>
         </details>
       </div>`,
     onMount: (b) => {
-      const host = b.querySelector(`#intgHost-${id}`);
+      // "dyn:" ids contain a colon — invalid in CSS ID selectors. Use an
+      // attribute selector so querySelector never throws.
+      const host = b.querySelector('[data-intg-host]');
       if (host) integrationSectionHTML(id).then((html) => { host.innerHTML = html; });
       b.addEventListener('click', (e) => {
         const t = e.target.closest('[data-intg-action]');

@@ -61,12 +61,24 @@ export function closeModal(onClose = null) {
     const overlay = r.querySelector('.modal-overlay');
     if (overlay) {
       overlay.classList.remove('open');
-      setTimeout(() => { if (r) r.innerHTML = ''; }, 180);
-    } else if (r) {
+      // Remove only the overlay that is actually closing — after the fade.
+      // A newer modal opened in the meantime (openModal clears the root
+      // itself) must never be wiped by this delayed cleanup. Previously this
+      // wiped the whole root, destroying an edit modal opened right after
+      // a detail modal closed.
+      setTimeout(() => {
+        if (overlay.isConnected) overlay.remove();
+        if (root && !root.querySelector('.modal-overlay')) {
+          document.body.classList.remove('modal-open');
+        }
+      }, 180);
+    } else {
       r.innerHTML = '';
+      document.body.classList.remove('modal-open');
     }
+  } else {
+    document.body.classList.remove('modal-open');
   }
-  document.body.classList.remove('modal-open');
   if (onClose) onClose();
 }
 

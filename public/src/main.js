@@ -11,6 +11,7 @@ import * as UI from './ui/app.js';
 import { renderIntelligenceCenter } from './ui/intelligenceCenter.js';
 import { renderEcosystem } from './ui/ecosystem.js';
 import { initIntegrationActions } from './ui/providerIntegrations.js';
+import { initCustomProviderActions } from './ui/customProvider.js';
 import { setDynamicProviderIndex } from './compatibility/clientProviderCompatibility.js';
 import { getIntegrations } from './providers/integrationService.js';
 
@@ -82,6 +83,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch { /* non-fatal */ }
   };
   initIntegrationActions(refreshIntegrationState);
+  initCustomProviderActions();
   refreshIntegrationState();
 });
 
@@ -90,6 +92,7 @@ const GLOBALS = {
   navigate,
   refreshAllModels: UI.refreshAllModels,
   refreshProviderModels: UI.refreshProviderModels,
+  fetchCustomProviderModelsSilent: UI.fetchCustomProviderModelsSilent,
   testConnection: UI.testConnection,
   handleApply: UI.handleApply,
   togglePaid: UI.togglePaid,

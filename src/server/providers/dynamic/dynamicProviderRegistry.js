@@ -1,19 +1,24 @@
-// Unified Provider Registry (v1.8.0) — the single canonical source for the full
+// Unified Provider Registry (v2.1.0) — the single canonical source for the full
 // provider catalogue. It merges:
 //
 //     Curated Registry (source-controlled, authoritative)
 //            +
 //     Dynamic / Adopted Registry (discovered + explicitly adopted)
+//            +
+//     Custom Providers (user-created)
 //            =
 //     Unified Provider Catalogue
 //
 // Curated providers are never mutated; dynamic providers carry their own origin.
+// Custom providers have origin='custom' and are managed via the custom provider store.
 // Consumers (Cloud Providers page, Intelligence Center, CLI integrations) should
 // use getUnifiedProviders() / getUnifiedProvider() instead of reaching into the
 // curated registry directly. Existing curated behaviour is preserved exactly.
 
 import { PROVIDERS } from '../registry.js';
 import { loadDynamicProviders } from './dynamicProviderStore.js';
+import { listCustomProviders, getCustomProvider } from '../custom/customProviderStore.js';
+import { toCustomUnified } from '../custom/customProviderRegistry.js';
 
 const INTEGRATION = {
   METADATA_ONLY: 'metadata-only',
@@ -86,20 +91,27 @@ function toEcosystemUnified(rec) {
 // Curated providers are ALWAYS included (they are the core). Dynamic providers are
 // shown only when active by default; inactive/removed are excluded from normal
 // lists unless explicitly requested via ?status=.
+// Custom providers are included when origin is not filtered, or when origin='custom'.
 export function getUnifiedProviders({ origin, status } = {}) {
   const curated = PROVIDERS.map(toCuratedUnified);
   const dynFilter = status ? (p) => p.status === status : (p) => p.status === 'active';
   const dyn = loadDynamicProviders().providers.filter(dynFilter).map(toEcosystemUnified);
-  let all = [...curated, ...dyn];
+  const custFilter = status ? (p) => p.lifecycle === status : (p) => p.lifecycle === 'active';
+  const cust = listCustomProviders().filter(custFilter).map(toCustomUnified);
+  let all = [...curated, ...dyn, ...cust];
   if (origin === 'curated') all = curated;
   else if (origin === 'ecosystem') all = dyn;
+  else if (origin === 'custom') all = cust;
   return all;
 }
 
 export function getUnifiedProvider(id) {
   const curated = PROVIDERS.find((p) => p.id === id);
   if (curated) return toCuratedUnified(curated);
-  return toEcosystemUnified(loadDynamicProviders().providers.find((p) => p.id === id));
+  const dyn = loadDynamicProviders().providers.find((p) => p.id === id);
+  if (dyn) return toEcosystemUnified(dyn);
+  if (id?.startsWith('cst:')) return toCustomUnified(getCustomProvider(id));
+  return null;
 }
 
 export function getActiveDynamicProviders() {

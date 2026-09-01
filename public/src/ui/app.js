@@ -15,6 +15,7 @@ import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
 import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { dynamicProviderCard } from './dynamicProvider.js';
+import { customProviderCard, initCustomProviderActions, openAddCustomProviderWizard } from './customProvider.js';
 import { integrationCoverageHTML } from './providerIntegrations.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
@@ -40,7 +41,16 @@ export async function fetchCachedModels() {
   try {
     const res = await fetch('/api/cached-models');
     const data = await res.json();
-    workspace.liveModels = data.providers || {};
+    // The server's cached-models endpoint only covers curated + dynamic
+    // providers — NOT user-created custom (cst:) providers. So we must MERGE
+    // into the existing liveModels rather than replace the whole object,
+    // otherwise custom-provider models (already fetched into liveModels) get
+    // wiped away the next time this runs, e.g. blanking the custom provider's
+    // model picker the instant the user toggles free/paid.
+    const server = data.providers || {};
+    const merged = { ...(workspace.liveModels || {}) };
+    for (const [k, v] of Object.entries(server)) merged[k] = v;
+    workspace.liveModels = merged;
     return true;
   } catch (err) {
     console.warn('Failed to fetch cached models:', err);
@@ -74,11 +84,30 @@ export async function refreshAllModels() {
 }
 
 export function replaceCard(providerId) {
-  const old = document.querySelector(`.card[data-id="${providerId}"]`);
+  const old = document.querySelector(`.card[data-id="${providerId}"], .cp-card[data-id="${providerId}"], .custom-provider-card[data-id="${providerId}"]`);
   if (!old) return;
-  const provider = getProvider(providerId);
+  let provider = getProvider(providerId);
+  if (!provider && providerId.startsWith('cst:')) {
+    // Custom provider — build the shape createGatewayCard expects
+    provider = {
+      id: providerId,
+      name: providerId,
+      sub: 'Custom',
+      accent: '#6366f1',
+      format: 'openai',
+      claudeCode: false,
+      hasCustomUrl: true,
+      publicModels: false,
+      baseUrl: '',
+      signup: null,
+      desc: 'Custom provider',
+    };
+    try {
+      const cached = workspace.liveModels[providerId];
+      if (cached?.source?.fetchedAt) provider.sub = 'custom provider';
+    } catch { /* ignore */ }
+  }
   if (!provider) return;
-  const idx = PROVIDERS.indexOf(provider);
   const nc = createGatewayCard(provider);
   nc.style.animation = 'none';
   if (workspace.selectedProviderId === providerId) nc.classList.add('on');
@@ -112,6 +141,26 @@ export async function fetchProviderSilent(providerId) {
   } catch (err) {
     notify.log(`Models fetch error · ${provider.name}: ${err.message}`, 't-err');
   } finally { workspace._fetching.delete(providerId); }
+}
+
+// Silent model fetch for custom providers (official API with transient key →
+// keyless pricing API → website scrape)
+export async function fetchCustomProviderModelsSilent(providerId) {
+  if (workspace._fetching.has(providerId)) return;
+  workspace._fetching.add(providerId);
+  try {
+    const key = Storage.getKey(providerId) || '';
+    const qs = key ? `?key=${encodeURIComponent(key)}` : '';
+    const result = await fetch(`/api/custom-providers/${encodeURIComponent(providerId)}/fetch-models${qs}`).then(r => r.json()).catch(() => ({ ok: false, models: [] }));
+    if (result?.ok && result.models?.length) {
+      const fetchedModels = result.models.map(m => ({ ...m, source: 'fetched' }));
+      workspace.liveModels[providerId] = {
+        models: fetchedModels,
+        freeModels: fetchedModels.filter(m => m.pricing?.input === 0 || m.pricing?.output === 0),
+        source: { type: 'custom-api', fetchedAt: new Date().toISOString() },
+      };
+    }
+  } catch { /* silent */ } finally { workspace._fetching.delete(providerId); }
 }
 
 export async function refreshProviderModels(providerId) {
@@ -161,16 +210,31 @@ export async function testConnection(providerId, baseUrl) {
     return;
   }
 
-  const urlToTest = providerId === 'custom'
+  const isCustomOld = providerId === 'custom';
+  const isCustomNew = providerId.startsWith('cst:');
+  const urlToTest = isCustomOld
     ? document.querySelector(`.base-url-${providerId}`).value
     : baseUrl;
 
-  const format = providerId === 'custom' ? workspace.customFormat : (provider?.format || 'anthropic');
+  const format = isCustomOld ? workspace.customFormat : isCustomNew ? (provider?.format || 'openai') : (provider?.format || 'anthropic');
   const modelEl = document.querySelector(`.model-${providerId}`);
   const model = modelEl?.value || '';
+  const name = provider?.name || providerId;
 
-  const btn = document.querySelector(`.test-btn-${providerId}`);
+  const btn = document.querySelector(`.test-btn-${providerId}`) || document.querySelector('[data-act="test"]');
   if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  const startedAt = Date.now();
+  const timer = setInterval(() => {
+    if (btn) btn.textContent = `Testing… ${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+  }, 100);
+  const finish = (label) => {
+    clearInterval(timer);
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('spinning');
+      btn.textContent = `${label} (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`;
+    }
+  };
 
   try {
     const qs = new URLSearchParams({ url: urlToTest, key: apiKey || '', format });
@@ -180,33 +244,52 @@ export async function testConnection(providerId, baseUrl) {
 
     if (result.status && result.status >= 200 && result.status < 300) {
       notify.toast('Connection successful!', 'success');
-      notify.log(`Test OK · ${provider.name}`, 't-ok');
+      notify.log(`Test OK · ${name}`, 't-ok');
+      finish('Connection OK');
     } else {
       const raw = (result.body || result.error || 'Unknown error').toString();
-      // Agent Router (and similar) run a WAF that only accepts Claude Code-shaped
-      // clients, so app-side probes are rejected. The saved config is still valid
-      // for Claude Code itself, so surface a clear note instead of a scary failure.
-      if (/unauthorized client detected|unauthorized_client_error|Missing or malformed API key|authentication_error/i.test(raw)) {
-        notify.toast(`${provider.name}: API requires valid key — check key format`, 'info');
-        notify.log(`Test note · ${provider.name}: auth rejected (${raw.slice(0, 80)})`, 't-ok');
+      if (/unauthorized client detected|unauthorized_client_error|Missing or malformed API key|authentication_error|wrong_api_key/i.test(raw)) {
+        notify.toast(`${name}: API requires valid key — check the key format`, 'info');
+        notify.log(`Test note · ${name}: auth rejected (${raw.slice(0, 80)})`, 't-ok');
+      } else if (/payment_required|payment required|402|billing|quota/i.test(raw)) {
+        notify.toast(`${name}: key is valid but your account needs an active payment method to run models`, 'warning');
+        notify.log(`Test note · ${name}: payment/billing required (${raw.slice(0, 90)})`, 't-ok');
+      } else if (/model_not_found|model not found|does not exist|no access|forbidden|not.*access/i.test(raw)) {
+        notify.toast(`${name}: model “${model || 'selected'}” isn't available on your account — refreshing the model list with your key`, 'warning');
+        notify.log(`Test note · ${name}: model inaccessible (${raw.slice(0, 90)}), re-listing with key`, 't-ok');
+        // The listed public models may differ from what the account can actually
+        // use (e.g. Cerebras). Re-fetch the real list with the stored key.
+        if (window.refreshProviderModels && !providerId.startsWith('cst:') && providerId !== 'custom') {
+          try { refreshProviderModels(providerId); } catch { /* best-effort */ }
+        }
       } else {
         const msg = raw.slice(0, 160);
         notify.toast(`Failed: ${msg}`, 'error');
-        notify.log(`Test failed · ${provider.name}: ${msg}`, 't-err');
+        notify.log(`Test failed · ${name}: ${msg}`, 't-err');
       }
+      finish('Failed');
     }
   } catch (error) {
     notify.toast(`Error: ${error.message}`, 'error');
-    notify.log(`Test error · ${provider.name}: ${error.message}`, 't-err');
-  } finally {
-    if (btn) { btn.disabled = false; btn.classList.remove('spinning'); }
+    notify.log(`Test error · ${name}: ${error.message}`, 't-err');
+    finish('Error');
   }
 }
 
 export async function handleApply(event, providerId) {
   event.preventDefault();
 
-  const provider = getProvider(providerId);
+  let provider = getProvider(providerId);
+  const isCustomNew = providerId.startsWith('cst:');
+  if (!provider && isCustomNew) {
+    try {
+      const rec = await fetch(`/api/custom-providers/${encodeURIComponent(providerId)}`).then(r => r.json()).catch(() => null);
+      const cp = rec?.provider;
+      provider = { id: providerId, name: cp?.identity?.name || providerId, format: cp?.api?.format || 'openai', baseUrl: cp?.api?.baseUrl || '' };
+    } catch {
+      provider = { id: providerId, name: providerId, format: 'openai', baseUrl: '' };
+    }
+  }
   const apiKey = document.querySelector(`.api-key-${providerId}`).value;
   const model = document.querySelector(`.model-${providerId}`).value;
 
@@ -220,7 +303,7 @@ export async function handleApply(event, providerId) {
     return;
   }
 
-  let baseUrl = getProvider(providerId).baseUrl;
+  let baseUrl = provider.baseUrl || '';
   if (providerId === 'custom') {
     baseUrl = document.querySelector(`.base-url-${providerId}`).value;
     if (!baseUrl) {
@@ -231,9 +314,6 @@ export async function handleApply(event, providerId) {
 
   const newConfig = configEngine.buildClaudeSettings(provider, baseUrl, model, apiKey);
 
-  // OpenAI/Gemini providers: Claude Code can't consume these configs, so show
-  // them as copyable text for the user's own client instead of writing them
-  // into Claude Code's settings.json.
   if (newConfig.env.OPENAI_BASE_URL || newConfig.env.GOOGLE_API_KEY) {
     CopyableRuntime.show(newConfig, provider.name);
     notify.log(`Prepared config · ${provider.name} · model ${model}`, 't-ok');
@@ -244,8 +324,8 @@ export async function handleApply(event, providerId) {
     const ok = await LocalSettingsRuntime.write(newConfig);
     if (ok) {
       workspace.appliedProviderId = providerId;
-      notify.toast(`Applied ${getProvider(providerId).name} to Claude Code!`, 'success');
-      notify.log(`Applied ${getProvider(providerId).name} · model ${model}`, 't-ok');
+      notify.toast(`Applied ${provider.name} to Claude Code!`, 'success');
+      notify.log(`Applied ${provider.name} · model ${model}`, 't-ok');
       await loadConfig();
       renderGateways();
     }
@@ -320,8 +400,11 @@ export function setKey(id, val) {
   const badge = document.getElementById(`keybadge-${id}`);
   if (badge) badge.style.display = val ? '' : 'none';
   const provider = getProvider(id);
-  // Auto-fetch this card's models once a key is entered (and none are loaded yet)
-  if (val && provider && !provider.hasCustomUrl && getFreeModels(id).length === 0) {
+  // Auto-fetch this card's models once a key is entered/changed. Re-fetching
+  // with the real key lets the server pull genuine pricing for providers
+  // (mistral/gemini/groq/nvidia/huggingface) whose keyless list shows no
+  // pricing, so the paid/free tags reflect the true catalogue.
+  if (val && provider && !provider.hasCustomUrl) {
     clearTimeout(workspace._keyFetchTimers[id]);
     workspace._keyFetchTimers[id] = setTimeout(() => fetchProviderSilent(id), 700);
   }
@@ -334,6 +417,7 @@ export function chooseModel(id, modelId) {
     const mnVal = card.querySelector('.mn-val');
     if (mnVal) { mnVal.textContent = modelId || '—'; mnVal.title = modelId; }
   }
+  resetTestBtn(`${id}`);
 }
 
 export function setModel(id, val) {
@@ -342,6 +426,18 @@ export function setModel(id, val) {
   if (card) {
     const mnVal = card.querySelector('.mn-val');
     if (mnVal) { mnVal.textContent = val || '—'; mnVal.title = val; }
+  }
+  resetTestBtn(`${id}`);
+}
+
+// A change of model invalidates a previous connection-test result — reset the
+// test button label back to the base text (not while a test is in flight).
+function resetTestBtn(id) {
+  const btn = document.querySelector(`.test-btn-${id}`);
+  if (!btn || btn.disabled) return;
+  const prev = btn.textContent;
+  if (prev.startsWith('Connection OK') || prev.startsWith('Failed (') || prev.startsWith('Error (')) {
+    btn.textContent = 'Test Connection';
   }
 }
 
@@ -366,7 +462,7 @@ export function filterGatewaysDebounced(val) {
   }, 100);
 }
 
-export function renderGateways() {
+export async function renderGateways() {
   const grid = document.getElementById('grid');
   if (!grid) return;
   grid.innerHTML = '';
@@ -398,6 +494,49 @@ export function renderGateways() {
       fetchProviderSilent(provider.id);
     }
   });
+
+  // Append custom providers with baseUrl as gateway cards
+  try {
+    const custRes = await fetch('/api/custom-providers').then(r => r.json()).catch(() => ({ providers: [] }));
+    const customProviders = (custRes.providers || []).filter(p => p.lifecycle === 'active' && p.baseUrl);
+    customProviders.forEach((cp, idx) => {
+      const customCard = {
+        id: cp.id,
+        name: cp.name,
+        sub: cp.baseUrl ? new URL(cp.baseUrl).hostname : 'Custom provider',
+        accent: '#6366f1',
+        format: cp.format || 'openai',
+        claudeCode: cp.format === 'anthropic',
+        hasCustomUrl: true,
+        publicModels: false,
+        baseUrl: cp.baseUrl,
+        signup: null,
+        desc: cp.desc || 'Custom provider',
+        website: cp.website || null,
+      };
+
+      const key = Storage.getKey(cp.id) || '';
+      const freeModels = getFreeModels(cp.id);
+
+      if (workspace.filterText && !cp.name.toLowerCase().includes(workspace.filterText)) return;
+
+      gatewayCount++;
+      freeModelCount += freeModels.length;
+      if (key) configuredCount++;
+
+      const card = createGatewayCard(customCard);
+      card.style.setProperty('--i', PROVIDERS.length + idx);
+      card.classList.add('custom-gateway-card');
+      if (workspace.selectedProviderId === cp.id) card.classList.add('on');
+      if (workspace.appliedProviderId === cp.id) card.classList.add('applied');
+      grid.appendChild(card);
+
+      // Auto-fetch models for custom providers with baseUrl
+      if (freeModels.length === 0) {
+        fetchCustomProviderModelsSilent(cp.id);
+      }
+    });
+  } catch { /* ignore */ }
 
   document.getElementById('statGw').textContent = gatewayCount;
   document.getElementById('statFree').textContent = freeModelCount;
@@ -1541,7 +1680,9 @@ export async function renderLocalAI() {
         const logoHTML = `<span class="rt-logo-monogram">${esc(initial)}</span>` + (rt.logo
           ? `<img class="rt-logo-img" src="${esc(rt.logo)}" alt="${esc(rt.name)} logo" loading="lazy" onerror="this.closest('.rt-logo').classList.remove('has-img');this.remove()">`
           : '');
-        const modelsHTML = rt.models && rt.models.length
+        // Only show installed-model chips for a RUNNING runtime — before Start
+        // the list is just what's on disk, which reads like stale/leaked data.
+        const modelsHTML = running && rt.models && rt.models.length
           ? `<div class="rt-models">${rt.models.slice(0, 8).map(m => `<span class="chipx">${esc(m)}</span>`).join('')}${rt.models.length > 8 ? `<span class="chipx">+${rt.models.length - 8}</span>` : ''}</div>`
           : '';
         return `<div class="panel rt-card ${running ? 'live' : ''} ${status}">
@@ -2522,7 +2663,7 @@ function fillProviderIntelSettings() {
 }
 
 // ── Cloud Providers explorer ──
-export function renderCloudProviders() {
+export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) {
   updateCrumb('Cloud Providers');
   const grid = document.getElementById('cpGrid');
   const filtersEl = document.getElementById('cpFilters');
@@ -2532,62 +2673,183 @@ export function renderCloudProviders() {
     { id: 'all', label: 'All' },
     { id: 'popular', label: 'Popular' },
     { id: 'free', label: 'Free' },
-    { id: 'anthropic', label: 'Anthropic Compatible' },
-    { id: 'openai', label: 'OpenAI Compatible' },
+    { id: 'anthropic', label: 'Anthropic' },
+    { id: 'openai', label: 'OpenAI' },
     { id: 'google', label: 'Google' },
   ];
   let activeCat = 'all';
   let q = '';
-  // Registry filter: default keeps the curated list uncluttered. Discovered/adopted
-  // ecosystem providers only surface when explicitly chosen.
-  let registryFilter = 'curated';
+  let registryFilter = initialRegFilter || 'all';
   let ecoDiscovered = workspace.ecoDiscovered || [];
   let dynamicProviders = workspace.dynamicProviders || [];
+  let customProviders = [];
 
-  const passes = (p) => {
+  const customTags = (p) => {
+    const fmt = (p.api?.format || p.format || '').toLowerCase();
+    const tags = [];
+    if (fmt === 'anthropic') tags.push('anthropic');
+    else if (fmt === 'openai') tags.push('openai');
+    else if (fmt === 'gemini') tags.push('google');
+    if (p.modelSupport?.models?.some(m => m.pricing?.input === 0 || m.pricing?.output === 0)) tags.push('free');
+    return tags;
+  };
+
+  const customSearchMatch = (p, ql) => {
+    if (!ql) return true;
+    const lql = ql.toLowerCase();
+    if ((p.name || '').toLowerCase().includes(lql)) return true;
+    if ((p.identity?.name || '').toLowerCase().includes(lql)) return true;
+    if ((p.identity?.description || '').toLowerCase().includes(lql)) return true;
+    if ((p.api?.baseUrl || '').toLowerCase().includes(lql)) return true;
+    if ((p.api?.format || '').toLowerCase().includes(lql)) return true;
+    return false;
+  };
+
+  const curatedPasses = (p) => {
     const tags = providerTags(p.id);
     if (activeCat !== 'all' && !tags.includes(activeCat)) return false;
     if (q) {
       const ql = q.toLowerCase();
-      if (!(p.name.toLowerCase().includes(ql) || p.sub.toLowerCase().includes(ql))) return false;
+      if (!(p.name.toLowerCase().includes(ql) || (p.sub || '').toLowerCase().includes(ql))) return false;
+    }
+    return true;
+  };
+
+  const customPasses = (p) => {
+    if (p.lifecycle !== 'active') return false;
+    const tags = customTags(p);
+    if (activeCat !== 'all' && !tags.includes(activeCat)) return false;
+    if (q && !customSearchMatch(p, q)) return false;
+    return true;
+  };
+
+  const ecoPasses = (e) => {
+    if (activeCat === 'free' || activeCat === 'popular') return false;
+    if (q) {
+      const ql = q.toLowerCase();
+      if (!(e.name || '').toLowerCase().includes(ql)) return false;
     }
     return true;
   };
 
   const drawFilters = () => {
     const registryChips = [
-      ['curated', 'Curated'], ['adopted', 'Adopted'], ['discovered', 'Discovered'], ['all', 'All'],
+      ['curated', 'Curated'], ['adopted', 'Adopted'], ['custom', 'Custom'], ['discovered', 'Discovered'], ['all', 'All'],
     ].map(([id, label]) => `<button class="chip-filter reg ${registryFilter === id ? 'on' : ''}" data-reg="${id}">${esc(label)}</button>`).join('');
-    filtersEl.innerHTML = `<button class="btn btn2 sm pi-refresh-all" id="piRefreshAll" onclick="refreshProviderIntelligence()" title="Refresh all provider intelligence">↻ Refresh</button>` +
+    filtersEl.innerHTML =
       cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('') +
-      `<span class="cp-reg-sep"></span><span class="cp-reg-label muted">Registry:</span>${registryChips}`;
+      `<span class="cp-reg-sep"></span>` +
+      `<div class="cp-reg-group"><span class="cp-reg-label muted">Registry:</span>${registryChips}</div>` +
+      `<button class="btn btn2 cp-refresh-all-btn" title="Refresh models for every provider card" data-act="refresh-all">↻</button>`;
     filtersEl.querySelectorAll('.chip-filter[data-cat]').forEach(b => b.addEventListener('click', () => {
       activeCat = b.dataset.cat; drawFilters(); drawGrid();
     }));
     filtersEl.querySelectorAll('.chip-filter.reg').forEach(b => b.addEventListener('click', () => {
-      registryFilter = b.dataset.reg; drawGrid();
+      registryFilter = b.dataset.reg; drawFilters(); drawGrid();
     }));
+    filtersEl.querySelector('[data-act="refresh-all"]')?.addEventListener('click', async () => {
+      const btn = filtersEl.querySelector('[data-act="refresh-all"]');
+      btn.disabled = true; btn.textContent = '⟳';
+      let curatedTotal = 0, customTotal = 0;
+      notify.toast('Refreshing every provider card…', 'info');
+      try {
+        // 1) Curated providers: re-fetch live models from their own APIs/scrapes
+        try {
+          const res = await fetch('/api/refresh-models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          const data = await res.json();
+          for (const r of (data.results || [])) if (r?.ok) curatedTotal += (r.count || 0);
+        } catch {}
+
+        // 2) Discovered/adopted (ecosystem) providers: refresh their intelligence
+        try {
+          const res = await fetch('/api/provider-intelligence/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+          await res.json();
+        } catch {}
+        if (workspace.ecoDiscovered || workspace.dynamicProviders) {
+          try {
+            const [ecoRes, dynRes] = await Promise.all([
+              fetch('/api/ecosystem/providers?registryState=discovered').then(r => r.json()).catch(() => ({ providers: workspace.ecoDiscovered || [] })),
+              fetch('/api/providers?origin=ecosystem').then(r => r.json()).catch(() => ({ providers: workspace.dynamicProviders || [] })),
+            ]);
+            workspace.ecoDiscovered = ecoRes.providers || workspace.ecoDiscovered || [];
+            workspace.dynamicProviders = dynRes.providers || workspace.dynamicProviders || [];
+          } catch {}
+        }
+
+        // 3) Custom providers: re-fetch live models from their own base URLs
+        try {
+          const { listCustomProviders, fetchCustomProviderModels } = await import('../providers/customProviderService.js');
+          const result = await listCustomProviders();
+          const providers = result?.providers || [];
+          let lc = 0;
+          for (const cp of providers) {
+            try {
+              const r = await fetchCustomProviderModels(cp.id, Storage.getKey(cp.id));
+              if (r?.ok && r.models?.length) {
+                const fetchedModels = r.models.map(m => ({ ...m, source: 'fetched' }));
+                workspace.liveModels[cp.id] = {
+                  models: fetchedModels,
+                  freeModels: fetchedModels.filter(m => m.pricing?.input === 0 || m.pricing?.output === 0),
+                  source: { type: 'custom-api', fetchedAt: new Date().toISOString() },
+                };
+                lc += r.models.length;
+              }
+            } catch {}
+          }
+          customTotal = lc;
+          customProviders = providers.filter(p => p.lifecycle === 'active');
+        } catch {}
+
+        // 4) Re-sync client-side cache + intelligence, then re-render all cards
+        await fetchProviderIntel();
+        await fetchCachedModels().catch(() => {});
+        const counts = [curatedTotal, customTotal].filter(n => n > 0).join(' + ');
+        notify.toast(`Refreshed every provider (${counts ? counts + ' models' : 'no live models found'})`, 'success');
+        drawGrid();
+      } catch (e) {
+        notify.toast('Refresh failed: ' + e.message, 'error');
+      }
+      btn.disabled = false; btn.textContent = '↻';
+    });
   };
 
-  const drawGrid = () => {
-    // Anthropic is the first-party API, not a third-party cloud gateway — keep it
-    // out of the Cloud Providers explorer (it still appears under Providers / compatibility).
-    const list = PROVIDERS.filter(p => p.id !== 'anthropic' && passes(p));
-    // Registry filter: curated stays the default; ecosystem providers appear only
-    // when chosen. "Adopted" / "All" show active dynamic providers as real cards;
-    // "Discovered" shows not-yet-adopted ecosystem records (links to Ecosystem).
+  const drawGrid = async () => {
+    const ql = q.toLowerCase();
+    let curatedCards = [];
     let ecoCards = [];
     let ecoCardFn = ecoCard;
-    const ql = q.toLowerCase();
+    let customCards = [];
+
+    if (registryFilter === 'curated' || registryFilter === 'all') {
+      curatedCards = PROVIDERS.filter(p => p.id !== 'anthropic' && curatedPasses(p));
+    }
+
     if (registryFilter === 'adopted' || registryFilter === 'all') {
-      ecoCards = dynamicProviders.filter(dp => dp.status === 'active' && (!q || (dp.name || '').toLowerCase().includes(ql)));
+      ecoCards = dynamicProviders.filter(dp => dp.status === 'active' && ecoPasses(dp));
       ecoCardFn = dynamicProviderCard;
     } else if (registryFilter === 'discovered') {
-      ecoCards = ecoDiscovered.filter(e => !q || (e.name || '').toLowerCase().includes(ql));
+      ecoCards = ecoDiscovered.filter(e => ecoPasses(e));
       ecoCardFn = ecoCard;
     }
-    if (!list.length && !ecoCards.length) { grid.innerHTML = '<div class="muted">No providers match.</div>'; return; }
-    grid.innerHTML = list.map(p => {
+
+    if (registryFilter === 'custom' || registryFilter === 'all') {
+      customCards = customProviders.filter(p => customPasses(p));
+    }
+
+    if (!curatedCards.length && !ecoCards.length && !customCards.length) {
+      grid.innerHTML = `<div class="cp-empty">
+        <div class="cp-empty-icon">🔍</div>
+        <div class="cp-empty-text">No providers match</div>
+        <div class="cp-empty-sub muted">Try a different search term or filter combination.</div>
+      </div>`;
+      return;
+    }
+
+    const curatedHtml = curatedCards.map(p => {
       const key = Storage.getKey(p.id);
       const free = getFreeModels(p.id).length;
       const total = getModels(p.id).length;
@@ -2611,38 +2873,73 @@ export function renderCloudProviders() {
         </div>
         <div class="pc-card-foot">
           <span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>
-          ${srcBadge}
-          ${changeBadge}
-          ${key ? '<span class="badge cc">configured</span>' : ''}
+          ${srcBadge}${changeBadge}${key ? '<span class="badge cc">configured</span>' : ''}
         </div>
         <div class="pc-intel-row">
           <span class="pi-status">${esc(statusText)}</span>
           <span class="pi-checked">· ${esc(lastChecked)}</span>
         </div>
-        ${p.id === 'custom' ? '' : `<div class="pc-actions">
+        <div class="pc-actions">
           <button class="btn btn2 sm pi-details" data-id="${p.id}" type="button">Details</button>
           <button class="btn btn2 sm pi-refresh" data-id="${p.id}" type="button" title="Re-check this provider">↻</button>
-        </div>`}
+        </div>
       </div>`;
-    }).join('') + ecoCards.map(ecoCardFn).join('');
-    grid.querySelectorAll('.provider-card').forEach(c => {
-      const open = () => openProviderConfig(c.dataset.id);
+    }).join('');
+
+    const ecoHtml = ecoCards.map(ecoCardFn).join('');
+    const customHtml = customCards.map(customProviderCard).join('');
+
+    grid.innerHTML = curatedHtml + ecoHtml + customHtml;
+
+    grid.querySelectorAll('.cp-card').forEach(c => {
+      const isCustom = c.dataset.origin === 'custom';
+      const cid = c.dataset.id;
+      const open = isCustom
+        ? () => { if (window.openCustomProvider) window.openCustomProvider(cid); }
+        : () => openProviderConfig(cid);
       c.addEventListener('click', open);
       c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       const det = c.querySelector('.pi-details');
-      if (det) det.addEventListener('click', (e) => { e.stopPropagation(); openProviderIntelligence(c.dataset.id); });
+      if (det) det.addEventListener('click', (e) => { e.stopPropagation(); openProviderIntelligence(cid); });
       const ref = c.querySelector('.pi-refresh');
-      if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(c.dataset.id); });
+      if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(cid); });
+      const detailsBtn = c.querySelector('.cp-details-btn');
+      if (detailsBtn) detailsBtn.addEventListener('click', (e) => { e.stopPropagation(); if (window.openCustomProvider) window.openCustomProvider(cid); });
+      const refreshBtn = c.querySelector('.cp-refresh-btn');
+      if (refreshBtn) refreshBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = '⟳';
+        try {
+          const { fetchCustomProviderModels } = await import('../providers/customProviderService.js');
+          const r = await fetchCustomProviderModels(cid, Storage.getKey(cid));
+          if (r?.ok && r.models?.length) {
+            const fetchedModels = r.models.map(m => ({ ...m, source: 'fetched' }));
+            workspace.liveModels[cid] = {
+              models: fetchedModels,
+              freeModels: fetchedModels.filter(m => m.pricing?.input === 0 || m.pricing?.output === 0),
+              source: { type: 'custom-api', fetchedAt: new Date().toISOString() },
+            };
+            const freeN = workspace.liveModels[cid].freeModels.length;
+            const totalN = fetchedModels.length;
+            const badge = c.querySelector('.badge.cnt');
+            if (badge) badge.textContent = freeN + ' free · ' + totalN + ' total';
+            notify.toast(`Refreshed ${totalN} models`, 'success');
+          } else {
+            notify.toast('No models found', 'info');
+          }
+        } catch (err) { notify.toast('Refresh failed', 'error'); }
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '↻';
+      });
     });
     grid.querySelectorAll('.eco-cp-card').forEach(c => {
       const id = c.dataset.id;
-      const open = () => { if (id.startsWith('dyn:')) { if (window.openDynamicProvider) window.openDynamicProvider(id); } else if (window.openEcosystemProvider) window.openEcosystemProvider(id); };
+      const open = () => { if (id.startsWith('dyn:')) { if (window.openDynamicProvider) window.openDynamicProvider(id); } else if (id.startsWith('cst:')) { if (window.openCustomProvider) window.openCustomProvider(id); } else if (window.openEcosystemProvider) window.openEcosystemProvider(id); };
       c.addEventListener('click', open);
     });
   };
 
-  // A discovered/adopted ecosystem provider rendered inside the Cloud Providers grid.
-  // It links to the Ecosystem detail view and never pretends to be configured here.
   function ecoCard(e) {
     const adopted = (e.registryState || 'discovered') === 'adopted';
     const cfg = e.validation && e.validation.configurable === true;
@@ -2659,9 +2956,7 @@ export function renderCloudProviders() {
         <div class="provider-meta"><b>${esc(e.name)}</b><span class="provider-compat">${esc(e.category || 'unknown')}</span></div>
       </div>
       <div class="pc-card-foot">
-        <span class="badge pi-src">ecosystem</span>
-        ${stateBadge}
-        ${cfgBadge}
+        <span class="badge pi-src">ecosystem</span>${stateBadge}${cfgBadge}
       </div>
       <div class="pc-intel-row"><span class="pi-status">discovery only</span></div>
     </div>`;
@@ -2671,22 +2966,25 @@ export function renderCloudProviders() {
   }
 
   const search = document.getElementById('cpSearch');
-  if (search) search.addEventListener('input', (e) => { q = e.target.value; drawGrid(); });
+  if (search) {
+    search.value = q;
+    search.addEventListener('input', (e) => { q = e.target.value; drawGrid(); });
+  }
   drawFilters();
   drawGrid();
-  // Populate intelligence once (no loop: only when empty), then redraw the grid.
+
   if (!Object.keys(workspace.providerIntel).length) {
     fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
-  // Load discovered ecosystem records + active dynamic providers so the Registry
-  // filter can surface them. Fetched once per session; adoption changes are
-  // reflected via the Ecosystem page or an explicit refresh.
   if (!workspace.ecoDiscovered) {
     fetch('/api/ecosystem/providers?registryState=discovered').then((r) => r.json()).then((d) => { workspace.ecoDiscovered = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
   if (!workspace.dynamicProviders) {
     fetch('/api/providers?origin=ecosystem').then((r) => r.json()).then((d) => { workspace.dynamicProviders = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
+
+  fetch('/api/custom-providers').then(r => r.json()).then((d) => { customProviders = d.providers || []; drawGrid(); }).catch(() => {});
+
   window.refreshCloudProviders = renderCloudProviders;
 }
 

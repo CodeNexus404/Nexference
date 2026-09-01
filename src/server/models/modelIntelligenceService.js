@@ -40,9 +40,21 @@ export function isNonChatModel(providerId, id) {
 
 export function isFreeModel(providerId, m) {
   if (m.paid) return false;
-  if (providerId === 'openrouter') {
-    return (m.id || '').endsWith(':free') || (m.pricing && parseFloat(m.pricing.prompt || 0) === 0 && parseFloat(m.pricing.completion || 0) === 0);
+  const p = m.pricing;
+  // When a model carries real per-token pricing (cents/$, OpenAI style
+  // prompt/completion), "free" means exactly $0 for both. This is the honest,
+  // source-of-truth signal where it exists (cerebras, chutes, openrouter, …).
+  if (p && typeof p.prompt !== 'undefined' && p.prompt != null) {
+    const pr = Number(p.prompt) || 0;
+    const co = p.completion != null ? (Number(p.completion) || 0) : pr;
+    return pr === 0 && co === 0;
   }
+  if (providerId === 'openrouter') {
+    return (m.id || '').endsWith(':free');
+  }
+  // No pricing signal: fall back to the per-provider heuristic. For the
+  // "utility catalogue" platforms (NVIDIA, HF, …) the NON_CHAT scrub excludes
+  // embeddings/rerank/vision/audio utility models from the usable "chat" list.
   if (NON_CHAT_PROVIDERS.includes(providerId)) {
     return !isNonChatModel(providerId, m.id);
   }

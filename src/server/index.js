@@ -27,6 +27,7 @@ import { registerIntelligenceRoutes } from './routes/intelligence.js';
 import { registerEcosystemRoutes } from './routes/ecosystem.js';
 import { registerDynamicProviderRoutes } from './routes/dynamicProviders.js';
 import { registerProviderIntegrationRoutes } from './routes/providerIntegrations.js';
+import { registerCustomProviderRoutes } from './routes/customProviders.js';
 import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
@@ -74,11 +75,41 @@ export function createApp() {
   registerEcosystemRoutes(app);
   registerDynamicProviderRoutes(app);
   registerProviderIntegrationRoutes(app);
+  registerCustomProviderRoutes(app);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);
 
   return app;
+}
+
+async function fetchCustomProviderModelsBackground() {
+  try {
+    const { loadCustomProviders, upsertCustomProvider } = await import('./providers/custom/customProviderStore.js');
+    const { fetchCustomProviderModelsList } = await import('./providers/custom/customModelFetch.js');
+    const providers = loadCustomProviders();
+    if (!providers?.length) return;
+    console.log(`  🔄 Fetching models for ${providers.length} custom providers…`);
+    for (const rec of providers) {
+      try {
+        // No key at startup — the keyless pricing API and strict website
+        // scrape tiers cover this; the user's key is only used transiently
+        // when a fetch is triggered from the UI.
+        const result = await fetchCustomProviderModelsList(rec, '');
+        if (result.ok && result.models.length) {
+          rec.modelSupport = { status: 'verified', models: result.models, count: result.models.length };
+          rec.integration = { status: 'metadata-only' };
+          upsertCustomProvider(rec);
+          console.log(`    ✓ ${rec.identity?.name || rec.id}: ${result.models.length} models (${result.source})`);
+        } else {
+          console.log(`    ⏭️  ${rec.identity?.name || rec.id}: ${result.reason?.slice(0, 60) || 'no models'}`);
+        }
+      } catch {}
+    }
+    console.log(`  ✅ Custom provider models fetched`);
+  } catch (err) {
+    console.log(`  ⚠ Custom provider model fetch failed: ${err.message}`);
+  }
 }
 
 export function startServer() {
@@ -96,6 +127,8 @@ export function startServer() {
     startWatcher();
     // Fetch models in background — don't block the server
     fetchAllModels('startup');
+    // Fetch models for all custom providers in background
+    fetchCustomProviderModelsBackground();
   });
 
   return app;

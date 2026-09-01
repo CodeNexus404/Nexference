@@ -17,6 +17,7 @@
 import { PROVIDERS, getProvider } from '../registry.js';
 import { loadDynamicProviders, getDynamicProvider } from '../dynamic/dynamicProviderStore.js';
 import { loadDiscovered } from '../ecosystem/ecosystemStore.js';
+import { getCustomProvider, listCustomProviders } from '../custom/customProviderStore.js';
 import {
   getIntegration, upsertIntegration, loadIntegrations,
 } from './integrationStore.js';
@@ -84,6 +85,37 @@ function gatherContext(providerId) {
       evidence: buildEvidenceFromEco(eco),
     };
   }
+  // Custom (user-created) providers — the user explicitly declared the API format
+  // at creation time, which is direct user-declared evidence (never inferred from
+  // name/website). The adapter still only gets assigned via that declared format
+  // through the resolver's compatibility-flags path — MEDIUM confidence, not the
+  // curated HIGH. "user-declared" is honest provenance for the evidence record.
+  const cust = getCustomProvider(providerId);
+  if (cust) {
+    const fmt = cust.api?.format || 'unknown';
+    return {
+      providerId, origin: 'custom', name: cust.identity?.name || providerId, curated: false,
+      format: fmt === 'unknown' ? null : fmt,
+      compatibility: {
+        openaiCompatible: fmt === 'openai',
+        anthropicCompatible: fmt === 'anthropic',
+        geminiCompatible: fmt === 'gemini',
+        customProtocol: false,
+      },
+      integrationAdapterType: null,
+      baseUrl: cust.api?.baseUrl || null,
+      evidence: fmt === 'unknown'
+        ? []
+        : [normalizeEvidence({
+            sourceType: 'user-declared',
+            sourceUrl: cust.identity?.website || null,
+            claim: fmt === 'openai' ? EVIDENCE_CLAIM.OPENAI_COMPATIBLE_API
+              : fmt === 'anthropic' ? EVIDENCE_CLAIM.ANTHROPIC_COMPATIBLE_API
+              : EVIDENCE_CLAIM.GEMINI_COMPATIBLE_API,
+            confidence: CONFIDENCE.MEDIUM,
+          })].filter(Boolean),
+    };
+  }
   return null;
 }
 
@@ -132,6 +164,9 @@ function buildRecord(context, resolution) {
       supportsModelListing: caps.modelListing,
       supportsConnectionTest: caps.connectionTest,
     },
+    // Custom providers carry their stored base URL so transient test/model
+    // calls work without the caller re-supplying it.
+    baseUrl: context.baseUrl || null,
     evidence: context.evidence || [],
     warnings: deriveWarnings(context, resolution),
     assessedBy: 'manual',
@@ -232,6 +267,15 @@ export function listProviderIntegrations() {
     }
     seen.add(d.id);
   }
+  // Custom (user-created) providers.
+  for (const c of listCustomProviders()) {
+    if (seen.has(c.id)) continue;
+    if (stored[c.id]) out[c.id] = { ...stored[c.id], providerActive: c.lifecycle === 'active' };
+    else {
+      const ctx = gatherContext(c.id);
+      if (ctx) out[c.id] = { ...computeIntegration(c.id, ctx), providerActive: c.lifecycle === 'active' };
+    }
+  }
   return out;
 }
 
@@ -256,7 +300,11 @@ export async function testProviderIntegration(providerId, config = {}) {
     return { supported: false, reason: 'No verified adapter is available for this provider.' };
   }
   const adapter = getAdapter(rec.adapterType);
-  return adapter.testConnection({ ...config, providerId });
+  // Custom providers store their base URL at creation — inject it when the
+  // caller (dialog test) didn't supply one. The key stays transient.
+  const cfg = { ...config, providerId };
+  if (!cfg.baseUrl && rec.baseUrl) cfg.baseUrl = rec.baseUrl;
+  return adapter.testConnection(cfg);
 }
 
 export async function listProviderModels(providerId, config = {}) {
@@ -266,7 +314,9 @@ export async function listProviderModels(providerId, config = {}) {
     return { supported: false, status: 'unsupported', reason: 'No verified adapter is available for this provider.' };
   }
   const adapter = getAdapter(rec.adapterType);
-  return adapter.listModels({ ...config, providerId });
+  const cfg = { ...config, providerId };
+  if (!cfg.baseUrl && rec.baseUrl) cfg.baseUrl = rec.baseUrl;
+  return adapter.listModels(cfg);
 }
 
 // Coverage summary for the Intelligence Center / dashboard.

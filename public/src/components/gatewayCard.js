@@ -99,7 +99,7 @@ export function createGatewayCard(provider) {
 
     <div class="card-desc">${provider.desc}</div>
 
-    ${provider.hasCustomUrl ? '' : `
+    ${(provider.hasCustomUrl && !provider.id.startsWith('cst:')) ? '' : `
     <div class="model-now">
       <span class="mn-label">Current Model</span>
       <span class="mn-val" title="${esc(modelDisplay)}">${esc(modelDisplay)}</span>
@@ -113,7 +113,7 @@ export function createGatewayCard(provider) {
         <span class="paid-text">Paid</span>
       </label>
     </div>`}
-    ${provider.hasCustomUrl ? `
+    ${(provider.hasCustomUrl && !provider.id.startsWith('cst:')) ? `
     <div class="inp-row" onclick="event.stopPropagation()">
       <input class="inp base-url-${provider.id}" type="text" value="${esc(workspace.customUrl)}" placeholder="Gateway base URL (e.g. https://your-gateway.com/v1/)" oninput="setCustomUrl(this.value)">
       <select class="fmt-sel" onchange="setFmt(this.value)">
@@ -140,15 +140,15 @@ export function createGatewayCard(provider) {
           ? `<select class="inp model-${provider.id}" onchange="chooseModel('${provider.id}', this.value)">
               ${listModels.map(m => `<option value="${esc(m.id)}" ${model === m.id ? 'selected' : ''}>${esc(m.name || m.id)}${freeIds.has(m.id) ? '  ·free' : ''}</option>`).join('')}
             </select>`
-          : `<input class="inp model-${provider.id}" type="text" value="${esc(model)}" placeholder="Enter model ID (e.g. ${provider.format === 'openai' ? 'gpt-4o' : 'claude-sonnet-4'})" oninput="setModel('${provider.id}', this.value)">`}
-        <button class="btn-refresh refresh-${provider.id}" onclick="event.stopPropagation(); refreshProviderModels('${provider.id}')" title="Refresh models from provider" aria-label="Refresh models">
+          : `<input class="inp model-${provider.id}" type="text" value="${esc(model)}" placeholder="${provider.id.startsWith('cst:') ? 'Enter model ID' : 'Enter model ID (e.g. ' + (provider.format === 'openai' ? 'gpt-4o' : 'claude-sonnet-4') + ')'}" oninput="setModel('${provider.id}', this.value)">`}
+        <button class="btn-refresh refresh-${provider.id}" onclick="event.stopPropagation(); ${provider.id.startsWith('cst:') ? `window.fetchCustomProviderModelsSilent && window.fetchCustomProviderModelsSilent('${provider.id}')` : `refreshProviderModels('${provider.id}')`}" title="Refresh models" aria-label="Refresh models">
           <svg class="refresh-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
       </div>
     </div>
     `}
     <div class="inp-row" onclick="event.stopPropagation()" style="margin-top: 8px;">
-      <button type="button" class="btn btn-test test-btn-${provider.id}" onclick="event.stopPropagation(); testConnection('${provider.id}', ${provider.hasCustomUrl ? `document.querySelector('.base-url-${provider.id}').value || '${norm(provider.baseUrl)}'` : `'${norm(provider.baseUrl)}'`})">Test Connection</button>
+      <button type="button" class="btn btn-test test-btn-${provider.id}" onclick="event.stopPropagation(); testConnection('${provider.id}', ${provider.id.startsWith('cst:') ? `'${norm(provider.baseUrl || '')}'` : provider.hasCustomUrl ? `document.querySelector('.base-url-${provider.id}').value || '${norm(provider.baseUrl)}'` : `'${norm(provider.baseUrl)}'`})">Test Connection</button>
       <button type="button" class="btn btn-go" onclick="event.stopPropagation(); handleApply(event, '${provider.id}')">Apply Config</button>
     </div>
   `;

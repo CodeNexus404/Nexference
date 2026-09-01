@@ -10,6 +10,7 @@ import { getProvider } from '../providers/registry.js';
 import { getRuntime } from '../local/runtimes.js';
 import { getIntegration } from '../providers/integrations/integrationStore.js';
 import { isExecutable } from '../providers/integrations/integrationTypes.js';
+import { getCustomProvider } from '../providers/custom/customProviderStore.js';
 import { getRuntimeExec, EXEC_FORMATS } from './executionRegistry.js';
 
 export const EXEC_ROUTE = {
@@ -47,11 +48,23 @@ function resolveLocalRoute(runtimeId) {
   };
 }
 
+// Custom providers store their declared format at creation; expose the shape
+// the cloud-route/status logic expects (never inferred — user-declared).
+function getExecutableProvider(providerId) {
+  const curated = getProvider(providerId);
+  if (curated) return curated;
+  const cust = getCustomProvider(providerId);
+  if (cust && cust.api?.format && cust.api.format !== 'unknown') {
+    return { id: cust.id, name: cust.identity?.name, format: cust.api.format, baseUrl: cust.api.baseUrl || null, isCustom: true };
+  }
+  return null;
+}
+
 function resolveCloudRoute(providerId, key) {
   if (!providerId) {
     return { executable: false, route: EXEC_ROUTE.UNSUPPORTED, reason: 'No provider specified.', adapterType: null };
   }
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   if (!provider) {
     return { executable: false, route: EXEC_ROUTE.UNSUPPORTED, reason: `Unknown provider: "${providerId}".`, adapterType: null };
   }
@@ -59,11 +72,12 @@ function resolveCloudRoute(providerId, key) {
   // Check integration status first
   const integration = getIntegration(providerId);
   if (integration && isExecutable(integration)) {
+    const adapterType = integration.adapterType || integration.integrationAdapterType || provider.format;
     return {
       executable: true,
       route: EXEC_ROUTE.INTEGRATION_ADAPTER_BRIDGE,
-      reason: `Integration adapter: ${integration.integrationAdapterType || provider.format}`,
-      adapterType: integration.integrationAdapterType || provider.format,
+      reason: `Integration adapter: ${adapterType}`,
+      adapterType,
     };
   }
 
@@ -100,7 +114,7 @@ export function resolveExecutionStatus(providerId, runtimeId, key) {
     return { status: 'ready', reason: `${rt.name} available.`, route: EXEC_ROUTE.RUNTIME_EXECUTION_BRIDGE };
   }
 
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   if (!provider) return { status: 'unsupported', reason: 'Unknown provider.' };
 
   const integration = getIntegration(providerId);

@@ -158,7 +158,12 @@ export function initIntegrationActions(refreshFn) {
         // v1.9.0: do NOT auto-write dynamic provider configuration into Claude Code
         // settings. Route to the provider's configuration modal; the config modal itself
         // honours the safe apply/show-config split and never fabricates compatibility.
-        if (getProvider(providerId) && window.openProviderConfig) window.openProviderConfig(providerId);
+        // Custom (user-created) providers have their own configuration dialog.
+        if (providerId.startsWith('cst:')) {
+          if (window.openCustomProvider) window.openCustomProvider(providerId);
+          else if (window.navigate) window.navigate('cloud-providers');
+        }
+        else if (getProvider(providerId) && window.openProviderConfig) window.openProviderConfig(providerId);
         else if (window.openDynamicProvider) window.openDynamicProvider(providerId);
         else if (window.navigate) window.navigate('configuration');
         return;
