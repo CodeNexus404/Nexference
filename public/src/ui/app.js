@@ -17,6 +17,7 @@ import { createGatewayCard } from '../components/gatewayCard.js';
 import { dynamicProviderCard } from './dynamicProvider.js';
 import { customProviderCard, initCustomProviderActions, openAddCustomProviderWizard } from './customProvider.js';
 import { integrationCoverageHTML } from './providerIntegrations.js';
+import { getExecutionCoverage } from '../providers/integrationService.js';
 import { openProviderConfig } from '../components/providerConfig.js';
 import { toggleCommandPalette } from '../components/commandPalette.js';
 import { openModal, confirmModal } from '../components/modal.js';
@@ -49,7 +50,14 @@ export async function fetchCachedModels() {
     // model picker the instant the user toggles free/paid.
     const server = data.providers || {};
     const merged = { ...(workspace.liveModels || {}) };
-    for (const [k, v] of Object.entries(server)) merged[k] = v;
+    for (const [k, v] of Object.entries(server)) {
+      // Custom (cst:) providers: the server seeds these from the stored
+      // record. Never clobber a client-fetched (fresher or user-triggered)
+      // entry — only seed when the client has nothing yet, so the card badge
+      // stays consistent with the last refresh instead of flashing "0 free".
+      if (k.startsWith('cst:') && merged[k]?.models?.length) continue;
+      merged[k] = v;
+    }
     workspace.liveModels = merged;
     return true;
   } catch (err) {
@@ -877,7 +885,7 @@ function renderWorkspaceFromEnv(env) {
 function fillWsExecGateway() {
   const host = document.getElementById('wsExecGateway');
   if (!host) return;
-  intg.getExecutionCoverage().then((cov) => {
+  getExecutionCoverage().then((cov) => {
     if (!cov) return;
     host.innerHTML = `
       <h3>Execution Gateway</h3>

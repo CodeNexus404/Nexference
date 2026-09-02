@@ -46,7 +46,9 @@ export function createApp() {
   process.on('uncaughtException', (err) => console.error('[uncaught]', err.message));
   process.on('unhandledRejection', (err) => console.error('[unhandled rejection]', err?.message || err));
 
-  app.use(express.json());
+  // Favicons/logos are persisted as base64 data URLs inside provider records,
+  // so the JSON body must accept multi-MB payloads on create/update.
+  app.use(express.json({ limit: '5mb' }));
   app.use(express.static(join(__dirname, '..', '..', 'public'), {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'),
   }));
@@ -127,8 +129,15 @@ export function startServer() {
     startWatcher();
     // Fetch models in background — don't block the server
     fetchAllModels('startup');
-    // Fetch models for all custom providers in background
-    fetchCustomProviderModelsBackground();
+    // Fetch models for all custom providers, THEN backfill persisted logo data
+    // URLs. Sequencing matters: both jobs upsert the same records, and a
+    // concurrent model fetch would clobber the freshly cached logo back to the
+    // remote URL. After the backfill, custom cards render their favicons
+    // inline (data:) so they load instantly on refresh with no re-fetch.
+    fetchCustomProviderModelsBackground()
+      .then(() => import('./providers/custom/customProviderLogoCache.js'))
+      .then(({ backfillCustomProviderLogoCache }) => backfillCustomProviderLogoCache())
+      .catch(() => {});
   });
 
   return app;

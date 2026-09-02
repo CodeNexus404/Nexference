@@ -51,12 +51,16 @@ async function tryOfficialApi(rec, key) {
     if (!resp.ok) return null;
     const data = await resp.json().catch(() => null);
     const list = data?.data || data?.models || data?.results || data?.model_list || (Array.isArray(data) ? data : []);
+    // Some gateways (Kira AI…) mark free models with an explicit is_free/free
+    // flag and return no pricing object — synthesize a zero pricing from it so
+    // free models aren't misclassified as paid by the no-signal default.
+    const flagFree = (m) => m.is_free === true || m.is_free === 1 || m.free === true || m.free === 1 || m.isFree === true;
     const models = list
       .filter((m) => m && (m.id || m.model_name || m.name))
       .map((m) => ({
         id: m.id || m.model_name || m.name,
         name: m.display_name || m.displayName || m.name || m.id,
-        pricing: m.pricing || null,
+        pricing: m.pricing || (flagFree(m) ? { input: 0, output: 0 } : null),
         context_length: m.context_length || m.contextLength || m.max_context_tokens || null,
         capabilities: m.capabilities || null,
       }));
@@ -198,6 +202,9 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
           context_length: m.context_length || pm.context_length,
           capabilities: m.capabilities || pm.capabilities,
         });
+      } else if (m.pricing) {
+        // Real pricing came from /models itself (gateway flag or native field) — keep it.
+        merged.push({ ...m });
       } else {
         // No pricing signal for this id — fall back to the free-id convention.
         const free = freeConvention(m.id);

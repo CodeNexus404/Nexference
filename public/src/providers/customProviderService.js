@@ -101,7 +101,12 @@ export async function getStoredModels(id) {
 
 export async function scrapeFavicon(url) {
   try {
-    const r = await fetch(`${BASE}/favicon?url=${encodeURIComponent(url)}`);
+    // Request format=data so the favicon is fetched server-side and returned as a
+    // base64 data URL. Persisting that data URL in the provider record lets the
+    // card render the logo inline — it loads instantly on page refresh with no
+    // re-fetch. If the server can't produce a data URL (huge/non-image/blocked
+    // favicon) it falls back to the raw URL, which still renders via the proxy.
+    const r = await fetch(`${BASE}/favicon?url=${encodeURIComponent(url)}&format=data`);
     return r.json().catch(() => ({ ok: false, url: null }));
   } catch { return { ok: false, url: null }; }
 }

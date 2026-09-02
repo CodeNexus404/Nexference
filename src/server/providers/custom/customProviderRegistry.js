@@ -18,6 +18,7 @@ export function toCustomUnified(rec) {
     origin: 'custom',
     registryType: 'custom',
     sub: rec.identity?.website ? (() => { try { return new URL(rec.identity.website).hostname; } catch { return rec.identity.website; } })() : null,
+    website: rec.identity?.website || null,
     logo: rec.logo?.url || null,
     accent: '#6366f1',
     glow: 'rgba(99,102,241,.18)',

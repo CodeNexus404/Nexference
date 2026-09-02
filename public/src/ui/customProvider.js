@@ -64,15 +64,22 @@ export function customProviderCard(p) {
   const totalModels = intel?.models?.total ?? modelCount;
   const freeModelsN = intel?.models?.free ?? freeCount;
   const lastChecked = intel?.source?.lastCheckedAt ? relTime(intel.source.lastCheckedAt) : 'not checked';
+  // Favicon rendering with graceful fallback. The /api/ecosystem/logo proxy
+  // only accepts https image/* URLs, so favicons served over http or as .ico
+  // (image/x-icon) fail there. On failure we swap src to the provider's website
+  // scrape endpoint before ceding to the initial monogram. `data:` logos render
+  // directly.
+  const site = p.website || p.sub || '';
+  const logoImg = (src, fbUrl) => `<img src="${src}" alt="" loading="lazy" onerror="if(!this.hu){this.hu=1;fetch('${fbUrl}').then(r=>r.json()).then(d=>{if(d&&d.ok&&d.url){this.src=d.url}else{this.style.display='none';this.nextElementSibling.style.display=''}}).catch(()=>{this.style.display='none';this.nextElementSibling.style.display=''})}else{this.style.display='none';this.nextElementSibling.style.display=''}" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`;
+  const favSrc = p.logo
+    ? (p.logo.startsWith('data:')
+      ? `<img src="${p.logo}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`
+      : logoImg(`/api/ecosystem/logo?url=${encodeURIComponent(p.logo)}`, site ? `/api/custom-providers/favicon?url=${encodeURIComponent(site)}&format=data` : ''))
+    : `<span class="mono-fallback">${svgLogo(p)}</span>`;
 
   return `<div class="panel provider-card cp-card" data-id="${id}" data-origin="custom" role="button" tabindex="0">
     <div class="pc-head">
-      <div class="pc-logo-sm">${p.logo
-        ? (p.logo.startsWith('data:')
-          ? `<img src="${p.logo}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`
-          : `<img src="/api/ecosystem/logo?url=${encodeURIComponent(p.logo)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`)
-        : `<span class="mono-fallback">${svgLogo(p)}</span>`
-      }</div>
+      <div class="pc-logo-sm">${favSrc}</div>
       <div class="provider-meta"><b>${name}</b><span class="provider-compat">Custom · ${fmt}</span></div>
       ${dot}
     </div>
@@ -108,7 +115,7 @@ function fileToDataUrl(file) {
 // ─── Onboarding Wizard ───
 export function openAddCustomProviderWizard() {
   let step = 1;
-  let formData = { name: '', website: '', description: '', baseUrl: '', format: 'openai', logoChoice: 'initials', logoDataUrl: null, logoUrl: null };
+  let formData = { name: '', website: '', description: '', baseUrl: '', format: 'openai', logoChoice: 'website', logoDataUrl: null, logoUrl: null };
   let ctrlRef = null;
 
   function renderStep() {
@@ -126,19 +133,32 @@ export function openAddCustomProviderWizard() {
 
     // Auto-scrape favicon on ENTERING step 3 — the radio `change` event alone
     // misses the case where "Website" is already selected (default or re-entry),
-    // leaving logoUrl null and the card without a logo.
-    if (step === 3 && formData.logoChoice === 'website' && !formData.logoUrl && formData.website) {
+    // leaving logoUrl null and the card without a logo. Uses the website URL,
+    // falling back to the base URL, so the logo populates whenever ANY url was
+    // entered (the server also falls back to the bare domain for API hosts).
+    if (step === 3 && formData.logoChoice === 'website' && !formData.logoUrl && !formData.logoDataUrl && !formData.logoFetching && (formData.website || formData.baseUrl)) {
       (async () => {
+        formData.logoFetching = true;
         const previewWrap = body.querySelector('.cpw-logo-preview-wrap');
         if (previewWrap) previewWrap.innerHTML = '<span class="muted">Fetching favicon…</span>';
-        const result = await cpService.scrapeFavicon(formData.website);
+        const result = await cpService.scrapeFavicon(formData.website || formData.baseUrl);
+        formData.logoFetching = false;
         if (formData.logoChoice !== 'website') return; // user switched while fetching
-        formData.logoUrl = result?.ok ? (result.url || null) : null;
+        // scrapeFavicon now returns a base64 data URL. Storing that data URL as the
+        // provider logo lets the created card render it inline — no proxy round-trip,
+        // so it loads instantly on page refresh instead of re-fetching. Fall back to
+        // the raw URL when the server can't produce a data URL (huge/non-image/blocked).
+        const dataUrl = result?.ok && result.url?.startsWith('data:') ? result.url : null;
+        formData.logoDataUrl = dataUrl;
+        formData.logoUrl = dataUrl ? null : (result?.ok ? (result.url || null) : null);
+        formData.logoSrc = dataUrl ? 'website' : (formData.logoUrl ? 'website' : null);
         const preview = body.querySelector('.cpw-logo-preview-wrap');
         if (preview) {
-          preview.innerHTML = formData.logoUrl
-            ? `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(formData.logoUrl)}" alt="Logo" onerror="this.parentElement.innerHTML='<span class=muted>Not found</span>'" /></div>`
-            : '<div class="cpw-logo-preview cpw-logo-fallback">' + esc(initials(formData.name)) + '</div>';
+          preview.innerHTML = formData.logoDataUrl
+            ? `<div class="cpw-logo-preview"><img src="${formData.logoDataUrl}" alt="Logo" /></div>`
+            : (formData.logoUrl
+              ? `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(formData.logoUrl)}" alt="Logo" onerror="this.parentElement.innerHTML='<span class=muted>Not found</span>'" /></div>`
+              : '<div class="cpw-logo-preview cpw-logo-fallback">' + esc(initials(formData.name)) + '</div>');
         }
       })();
     }
@@ -274,27 +294,32 @@ export function openAddCustomProviderWizard() {
         body.querySelectorAll(`input[name="${r.name}"]`).forEach((x) => {
           x.closest('.cpw-format-opt')?.classList.toggle('selected', x.checked);
         });
-        // Auto-scrape favicon when "Website" logo is selected
-        if (r.name === 'cpwLogo' && r.value === 'website' && formData.website) {
+        // Auto-scrape favicon when "Website" logo is selected — website URL,
+        // falling back to base URL so any entered URL populates the logo.
+        if (r.name === 'cpwLogo' && r.value === 'website' && (formData.website || formData.baseUrl) && !formData.logoFetching) {
+          formData.logoFetching = true;
           const previewWrap = body.querySelector('.cpw-logo-preview-wrap');
           if (previewWrap) previewWrap.innerHTML = '<span class="muted">Fetching favicon…</span>';
-          const result = await cpService.scrapeFavicon(formData.website);
-          if (result?.ok && result.url) {
-            formData.logoUrl = result.url;
-            formData.logoDataUrl = null;
-          } else {
-            formData.logoUrl = null;
-          }
+          const result = await cpService.scrapeFavicon(formData.website || formData.baseUrl);
+          formData.logoFetching = false;
+          const dataUrl = result?.ok && result.url?.startsWith('data:') ? result.url : null;
+          formData.logoDataUrl = dataUrl;
+          formData.logoUrl = dataUrl ? null : (result?.ok && result.url ? result.url : null);
+          formData.logoSrc = dataUrl || formData.logoUrl ? 'website' : null;
           const preview = body.querySelector('.cpw-logo-preview-wrap');
           if (preview) {
-            preview.innerHTML = formData.logoUrl
-              ? `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(formData.logoUrl)}" alt="Logo" onerror="this.parentElement.innerHTML='<span class=muted>Not found</span>'" /></div>`
-              : '<div class="cpw-logo-preview cpw-logo-fallback">' + esc(initials(formData.name)) + '</div>';
+            preview.innerHTML = formData.logoDataUrl
+              ? `<div class="cpw-logo-preview"><img src="${formData.logoDataUrl}" alt="Logo" /></div>`
+              : (formData.logoUrl
+                ? `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(formData.logoUrl)}" alt="Logo" onerror="this.parentElement.innerHTML='<span class=muted>Not found</span>'" /></div>`
+                : '<div class="cpw-logo-preview cpw-logo-fallback">' + esc(initials(formData.name)) + '</div>');
           }
         }
         if (r.name === 'cpwLogo' && r.value === 'initials') {
           formData.logoDataUrl = null;
           formData.logoUrl = null;
+          formData.logoSrc = null;
+          formData.logoFetching = false;
         }
         // Re-render step when logo choice changes so file input appears/disappears
         if (r.name === 'cpwLogo') {
@@ -315,6 +340,7 @@ export function openAddCustomProviderWizard() {
         if (dataUrl) {
           formData.logoDataUrl = dataUrl;
           formData.logoUrl = null;
+          formData.logoSrc = 'upload';
           const preview = body.querySelector('.cpw-logo-preview-wrap');
           if (preview) preview.innerHTML = `<div class="cpw-logo-preview"><img src="${dataUrl}" alt="Logo" /></div>`;
         }
@@ -360,10 +386,12 @@ export function openAddCustomProviderWizard() {
           btn.disabled = true;
           btn.textContent = 'Creating…';
           try {
-            // Build logo object
+            // Build logo object. When the favicon was fetched from the website it's
+            // persisted as a `data:` URL so the card renders it inline and loads
+            // instantly on page refresh (no re-fetch).
             let logo;
             if (formData.logoDataUrl) {
-              logo = { url: formData.logoDataUrl, source: 'upload', status: 'resolved' };
+              logo = { url: formData.logoDataUrl, source: formData.logoSrc || 'website', status: 'resolved' };
             } else if (formData.logoUrl) {
               logo = { url: formData.logoUrl, source: 'website', status: 'resolved' };
             } else {
@@ -549,7 +577,9 @@ export async function openCustomProviderDetail(id) {
         <div class="pc-logo">${logoUrl
           ? (logoUrl.startsWith('data:')
             ? `<img src="${logoUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(logoP)}</span>`
-            : `<img src="/api/ecosystem/logo?url=${encodeURIComponent(logoUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(logoP)}</span>`)
+            : website
+              ? `<img src="/api/ecosystem/logo?url=${encodeURIComponent(logoUrl)}" alt="" loading="lazy" onerror="if(!this.hu){this.hu=1;fetch('/api/custom-providers/favicon?url=${encodeURIComponent(website)}&format=data').then(r=>r.json()).then(d=>{if(d&&d.ok&&d.url){this.src=d.url}else{this.style.display='none';this.nextElementSibling.style.display=''}}).catch(()=>{this.style.display='none';this.nextElementSibling.style.display=''})}else{this.style.display='none';this.nextElementSibling.style.display=''}" /><span class="mono-fallback" style="display:none">${svgLogo(logoP)}</span>`
+              : `<img src="/api/ecosystem/logo?url=${encodeURIComponent(logoUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display=''" /><span class="mono-fallback" style="display:none">${svgLogo(logoP)}</span>`)
           : `<span class="mono-fallback">${svgLogo(logoP)}</span>`
         }</div>
         <div class="pc-meta">

@@ -2,6 +2,7 @@ import { norm } from '../utils/index.js';
 import { PROVIDERS } from '../providers/registry.js';
 import { modelCache } from '../providers/modelCache.js';
 import { fetchModelsForProvider } from '../providers/modelService.js';
+import { listCustomProviders } from '../providers/custom/customProviderStore.js';
 import {
   getUnifiedModels, getModelDetails, getRecommendedModels, getModelStats,
   refreshProviderModels, refreshAllModels, isFreeModel,
@@ -35,6 +36,23 @@ export function registerModelRoutes(app) {
       } else {
         summary[p.id] = { models: null, freeModels: null, total: 0, freeCount: 0, fetchedAt: null, source: null };
       }
+    }
+    // Custom (cst:) providers — seed from the models persisted in each record's
+    // modelSupport so the card badges stay consistent across page refreshes (no
+    // "0 free" flash until a manual card refresh happens). The client merges
+    // these under its (possibly fresher) client-side liveModels entries.
+    for (const rec of listCustomProviders()) {
+      const models = rec.modelSupport?.models || [];
+      if (!models.length) continue;
+      const freeModels = models.filter(m => m?.pricing?.input === 0 || m?.pricing?.output === 0);
+      summary[rec.id] = {
+        models,
+        freeModels,
+        total: models.length,
+        freeCount: freeModels.length,
+        fetchedAt: rec.modelSupport?.fetchedAt || rec.updatedAt || null,
+        source: 'stored',
+      };
     }
     res.json({ providers: summary, cacheTime: Date.now() });
   });
