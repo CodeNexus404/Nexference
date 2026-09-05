@@ -72,8 +72,18 @@ export function identitySignals(entry) {
 
 // Conservative category inference from free-text + declared type. Only assigns an
 // explicit category when a strong keyword is present; otherwise UNKNOWN.
-export function inferCategory(entry) {
+export function inferCategory(entry, sourceMeta) {
   if (entry.category && Object.values(PROVIDER_CATEGORIES).includes(entry.category)) return entry.category;
+  
+  // Check source metadata for type hints
+  const sourceType = sourceMeta?.type || '';
+  if (sourceType.includes('gateway') || sourceType.includes('aggregator')) return PROVIDER_CATEGORIES.API_GATEWAY;
+  if (sourceType.includes('inference')) return PROVIDER_CATEGORIES.INFERENCE_PROVIDER;
+  if (sourceType.includes('catalog')) return PROVIDER_CATEGORIES.MODEL_CATALOG;
+  if (sourceType === 'litellm') return PROVIDER_CATEGORIES.MODEL_CATALOG;
+  if (sourceType === 'openrouter') return PROVIDER_CATEGORIES.MODEL_AGGREGATOR;
+  if (sourceType === 'huggingface') return PROVIDER_CATEGORIES.INFERENCE_PROVIDER;
+  
   const text = `${entry.name || ''} ${entry.description || ''} ${entry.type || ''}`.toLowerCase();
   if (/(local runtime|ollama|lm studio|llama\.cpp|localai|local llm)/.test(text)) return PROVIDER_CATEGORIES.LOCAL_RUNTIME;
   if (/(api gateway|gateway|reverse proxy|proxy server)/.test(text)) return PROVIDER_CATEGORIES.API_GATEWAY;
@@ -82,6 +92,15 @@ export function inferCategory(entry) {
   if (/(inference provider|inference platform|serverless inference|hosted models)/.test(text)) return PROVIDER_CATEGORIES.INFERENCE_PROVIDER;
   if (/(model catalog|catalog of|directory of providers|model library)/.test(text)) return PROVIDER_CATEGORIES.MODEL_CATALOG;
   if (/(community|open source project|github project|self-hosted toolkit)/.test(text)) return PROVIDER_CATEGORIES.COMMUNITY_PROJECT;
+  
+  // Fallback based on source metadata
+  if (sourceMeta) {
+    if (sourceMeta.type?.includes('gateway') || sourceMeta.type?.includes('aggregator')) return PROVIDER_CATEGORIES.API_GATEWAY;
+    if (sourceMeta.type?.includes('inference')) return PROVIDER_CATEGORIES.INFERENCE_PROVIDER;
+    if (sourceMeta.type?.includes('catalog')) return PROVIDER_CATEGORIES.MODEL_CATALOG;
+    if (sourceMeta.trustLevel === 'official') return PROVIDER_CATEGORIES.DIRECT_PROVIDER;
+  }
+  
   return PROVIDER_CATEGORIES.UNKNOWN;
 }
 
@@ -90,8 +109,49 @@ export function inferCategory(entry) {
 export function matchDuplicates(a, b) {
   const sa = identitySignals(a);
   const sb = identitySignals(b);
+
+  // Strong match: same canonical domain (normalized, without generic subdomains)
   if (sa.domainTok && sb.domainTok && sa.domainTok === sb.domainTok) return 'confirmed';
   if (sa.domain && sb.domain && sa.domain === sb.domain) return 'confirmed';
+
+  // Strong match: same explicit provider identity slug (the provider's OWN id,
+  // e.g. HF slug "groq" or OpenRouter slug "groq" — NEVER the discovery source
+  // name like "huggingface", which every record from that source would share).
+  const aId = String(a.sourceId || a.id || '').split(':').pop()?.toLowerCase() || '';
+  const bId = String(b.sourceId || b.id || '').split(':').pop()?.toLowerCase() || '';
+  if (aId && bId && aId.length >= 3 && aId === bId) return 'confirmed';
+
+  // Strong match: same canonical website (normalized domain)
+  if (sa.domain && sb.domain && sa.domain === sb.domain) return 'confirmed';
+
+  // Likely match: same normalized name token (length >= 4 to avoid false positives)
   if (sa.nameTok && sb.nameTok && sa.nameTok.length >= 4 && sa.nameTok === sb.nameTok) return 'likely';
+
+  // Likely match: shared aliases declared on the provider record itself
+  const aAliases = extractAliases(a);
+  const bAliases = extractAliases(b);
+  if (aAliases.size && bAliases.size) {
+    for (const alias of aAliases) {
+      if (bAliases.has(alias)) return 'likely';
+    }
+  }
+
   return 'none';
+}
+
+// Extract aliases from the provider record itself (never from its discovery
+// source metadata — the source name is shared by every provider it found and
+// would wrongly mark all of them as duplicates of each other).
+function extractAliases(record) {
+  const aliases = new Set();
+  if (record.aliases) {
+    for (const a of record.aliases) aliases.add(tokenize(a));
+  }
+  if (record.name) aliases.add(tokenize(record.name));
+  if (record.normalizedName) aliases.add(tokenize(record.normalizedName));
+  if (record.website) {
+    const d = domainOf(record.website);
+    if (d) aliases.add(tokenize(d));
+  }
+  return aliases;
 }

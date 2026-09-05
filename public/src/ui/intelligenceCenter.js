@@ -91,11 +91,25 @@ function recommendationCard(r) {
 }
 
 // ── Recent activity ──
+function prettifyType(type) {
+  return String(type || '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
 function activityItem(a) {
   const ts = a.timestamp ? relTime(a.timestamp) : '';
+  const sev = String(a.severity || 'INFO').toUpperCase();
+  const badgeKind = sev === 'WARNING' ? 'badge-warn' : sev === 'ERROR' ? 'badge-err' : 'badge-info';
+  const type = prettifyType(a.type || a.kind || 'event');
+  const text = a.title || a.description || a.summary || 'Activity event';
+  const sub = a.description && a.description !== (a.title || a.summary) ? `<span class="ic-activity-sub muted">${esc(a.description)}</span>` : '';
   return `<div class="ic-activity-item">
-    <span class="badge ${a.severity === 'WARNING' ? 'badge-warn' : a.severity === 'ERROR' ? 'badge-err' : 'badge-info'}">${esc(a.type || 'event')}</span>
-    <span class="ic-activity-text">${esc(a.title || a.description || '')}</span>
+    <span class="badge ${badgeKind}">${esc(type)}</span>
+    <div class="ic-activity-body">
+      <span class="ic-activity-text">${esc(text)}</span>
+      ${sub}
+    </div>
     <span class="ic-activity-ts muted">${esc(ts)}</span>
   </div>`;
 }

@@ -1,4 +1,4 @@
-// Ecosystem Discovery constants (v1.7.0) — the vocabulary for the NEW, separate
+// Ecosystem Discovery constants (v2.2.0) — the vocabulary for the NEW, separate
 // discovery layer. These sit alongside (never replace) the curated provider
 // registry and the v1.4–v1.6 discovery-status model.
 //
@@ -59,6 +59,27 @@ export const VALIDATION_IDENTITY = {
   UNKNOWN: 'unknown',
 };
 
+// Confidence levels for evidence assessment — must be explainable.
+export const CONFIDENCE_LEVELS = {
+  HIGH: 'high',
+  MEDIUM: 'medium',
+  LOW: 'low',
+  UNKNOWN: 'unknown',
+};
+
+// Discovery lifecycle phase (tracks evidence strength and validation state).
+export const DISCOVERY_PHASE = {
+  DISCOVERED: 'discovered',       // Just discovered from a source
+  OBSERVED: 'observed',           // Has website/reachable endpoint
+  VALIDATED: 'validated',         // Passed validation checks
+  VERIFIED: 'verified',           // Officially validated (website + docs + API)
+  AVAILABLE: 'available',         // Actively available
+  STALE: 'stale',                 // Not seen in recent source runs
+  UNAVAILABLE: 'unavailable',     // Validation failed / unreachable
+  DEPRECATED: 'deprecated',       // Explicitly deprecated/shut down
+  UNKNOWN: 'unknown',             // Insufficient data
+};
+
 // Logo provenance — what produced the logo we show.
 export const LOGO_SOURCE = {
   CURATED: 'curated',
@@ -67,17 +88,6 @@ export const LOGO_SOURCE = {
   FAVICON: 'favicon',
   GITHUB: 'github',
   FALLBACK: 'fallback',
-};
-
-// Discovery lifecycle phase (loosely tracks evidence strength).
-export const DISCOVERY_PHASE = {
-  DISCOVERED: 'discovered',
-  OBSERVED: 'observed',
-  VALIDATED: 'validated',
-  AVAILABLE: 'available',
-  UNAVAILABLE: 'unavailable',
-  STALE: 'stale',
-  DEPRECATED: 'deprecated',
 };
 
 export const TRUST_LEVELS = {

@@ -103,15 +103,38 @@ function mapChangeToEvent(c) {
   return {
     id: c.id,
     kind: 'change',
+    type: String(c.type || 'change').replace(/[-_]/g, ' '),
     title: c.summary || `${c.type} on ${c.providerName || c.providerId}`,
     description: c.details ? (c.details.before ? `Changed from ${c.details.before} to ${c.details.after}` : '') : '',
     category: c.category || 'model',
-    severity: c.severity || 'INFO',
+    severity: String(c.severity || 'info').toUpperCase(),
     confidence: c.confidence || CONFIDENCE.UNKNOWN,
     timestamp: c.detectedAt,
     relatedProviderId: c.providerId,
     relatedModelId: c.modelId,
     action: 'view_changes',
+  };
+}
+
+// Raw activity entries ({ timestamp, category, action, status, summary, details })
+// are normalised to the same event shape as changes so the feed renders every
+// row with a label, body text and severity-coloured badge.
+function mapActivityToEvent(a) {
+  const status = String(a.status || 'info').toLowerCase();
+  const severity = status === 'error' ? 'ERROR' : status === 'warning' ? 'WARNING' : 'INFO';
+  const detail = a.details && typeof a.details === 'object' ? ((a.details.message || a.details.note || '') || '') : '';
+  return {
+    id: a.id,
+    kind: 'activity',
+    type: String(a.action || a.category || 'event').replace(/[-_]/g, ' '),
+    title: a.summary || a.action || a.category || 'Activity',
+    description: detail,
+    category: a.category || 'system',
+    severity,
+    confidence: status,
+    timestamp: a.timestamp || null,
+    relatedProviderId: a.provider ? (Array.isArray(a.provider) ? a.provider[0] : null) : null,
+    action: null,
   };
 }
 
@@ -138,7 +161,7 @@ export async function getIntelligence({ period = '7d', workspaceProviderId = nul
   const changeTimeline = changes.map(mapChangeToEvent);
 
   const rawActivity = listActivities(20);
-  const activityList = Array.isArray(rawActivity) ? rawActivity : (rawActivity?.activities || []);
+  const activityList = (Array.isArray(rawActivity) ? rawActivity : (rawActivity?.activities || [])).map(mapActivityToEvent);
 
   return {
     generatedAt: new Date().toISOString(),

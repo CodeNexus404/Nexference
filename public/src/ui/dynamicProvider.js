@@ -44,6 +44,8 @@ export function dynamicProviderCard(p) {
   const integ = p.integration || {};
   const models = p.modelSupport || {};
   const cfg = integ.level === 'adapter-ready' || integ.level === 'configurable';
+  const modelList = models.models || [];
+  const modelChips = modelList.slice(0, 3).map((m) => `<span class="chip chip-sm">${esc(m.name || m.modelId)}</span>`).join(' ');
   const meta = [
     badge('Ecosystem', 'badge-muted'),
     integrationBadge(integ.level),
@@ -54,6 +56,7 @@ export function dynamicProviderCard(p) {
       <div class="pc-logo-sm">${logoHtml(p)}</div>
       <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(p.category || 'discovered')}</span></div>
     </div>
+    ${modelList.length ? `<div class="eco-card-models">${modelChips}${models.count > 3 ? `<span class="chip chip-sm muted">+${models.count - 3} more</span>` : ''}</div>` : `<div class="eco-card-models muted">no discovered models</div>`}
     <div class="pc-card-foot">
       <span class="badge pi-src">ecosystem</span>
       ${integrationBadge(integ.level)}

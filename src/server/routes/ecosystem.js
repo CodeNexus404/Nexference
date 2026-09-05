@@ -14,10 +14,11 @@ import { Router } from 'express';
 import {
   getSources, discoverEcosystem, listEcosystemProviders, getEcosystemProvider,
   validateProvider, adoptProvider, ignoreProvider, restoreProvider, markForReview, getEcosystemSummary,
+  deactivateProvider, reactivateProvider, deleteProvider, getProviderEvidence, fetchProviderModels,
 } from '../providers/ecosystem/ecosystemDiscoveryService.js';
 import { proxyLogo, validateLogoUrl } from '../providers/ecosystem/logoResolver.js';
 
-const DISCOVER_TIMEOUT_MS = 60000;
+const DISCOVER_TIMEOUT_MS = 120000;
 
 function withTimeout(promise, ms) {
   return Promise.race([
@@ -95,6 +96,16 @@ export function registerEcosystemRoutes(app) {
       res.json({ ok: true, provider: rec });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
+  // Fetch full model list for a discovered provider from its source API.
+  router.post('/ecosystem/providers/:id/fetch-models', async (req, res) => {
+    try {
+      const p = getEcosystemProvider(req.params.id);
+      if (!p) return res.status(404).json({ error: 'Unknown ecosystem provider' });
+      const result = await fetchProviderModels(req.params.id);
+      if (!result) return res.status(404).json({ error: 'Unknown ecosystem provider' });
+      res.json({ ok: true, ...result });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
   router.post('/ecosystem/providers/:id/adopt', async (req, res) => {
     try {
       const p = getEcosystemProvider(req.params.id);
@@ -106,6 +117,38 @@ export function registerEcosystemRoutes(app) {
   router.post('/ecosystem/providers/:id/ignore', providerAction(ignoreProvider));
   router.post('/ecosystem/providers/:id/restore', providerAction(restoreProvider));
   router.post('/ecosystem/providers/:id/review', providerAction(markForReview));
+  router.post('/ecosystem/providers/:id/deactivate', providerAction(deactivateProvider));
+  router.post('/ecosystem/providers/:id/reactivate', providerAction(reactivateProvider));
+  router.delete('/ecosystem/providers/:id', providerAction(deleteProvider));
+
+  router.get('/ecosystem/providers/:id/evidence', async (req, res) => {
+    try {
+      const ev = getProviderEvidence(req.params.id);
+      if (!ev) return res.status(404).json({ error: 'Unknown ecosystem provider' });
+      res.json(ev);
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  router.get('/ecosystem/sources/:id/health', async (req, res) => {
+    try {
+      const sources = getSources();
+      const src = sources.find((s) => s.id === req.params.id);
+      if (!src) return res.status(404).json({ error: 'Unknown source' });
+      // Try to get health from adapter if available
+      let health = { status: 'unknown', lastAttempt: null, lastSuccess: null, lastFailure: null, providerCount: 0, freshnessMs: null };
+      try {
+        const { createOpenRouterSource } = await import('../providers/sources/openRouterSource.js');
+        const { createHuggingFaceSource } = await import('../providers/sources/huggingFaceSource.js');
+        const { createLiteLLMSource } = await import('../providers/sources/liteLLMSource.js');
+        let adapter = null;
+        if (req.params.id === 'openrouter') adapter = createOpenRouterSource();
+        else if (req.params.id === 'huggingface') adapter = createHuggingFaceSource();
+        else if (req.params.id === 'litellm') adapter = createLiteLLMSource();
+        if (adapter) health = await adapter.getSourceHealth();
+      } catch { /* ignore */ }
+      res.json({ ...src, health });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
 
   router.get('/ecosystem/summary', (req, res) => {
     try { res.json(getEcosystemSummary()); }

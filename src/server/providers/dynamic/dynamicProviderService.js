@@ -171,6 +171,9 @@ export function createDynamicFromEcosystem(ecoId) {
   rec.status = 'active';
   rec.updatedAt = new Date().toISOString();
   rec.website = rec.website || eco.website || null;
+  // Always reflect the latest discovery state — models + logo refresh on re-adoption too.
+  rec.modelSupport = buildModelSupport(eco);
+  if (eco.logo) rec.logo = { url: eco.logo, source: eco.logoSource || 'fallback', status: eco.logo ? 'resolved' : 'none' };
   upsertDynamicProvider(rec);
 
   // Link the ecosystem record to its dynamic counterpart.
@@ -223,6 +226,23 @@ export function removeDynamicProviderRecord(id) {
   const removed = removeDynamicProvider(id);
   recordActivity('provider', 'dynamic-remove', 'info', `${rec.name} removed from dynamic registry (provenance kept)`, { id });
   return removed;
+}
+
+// One-way sync from an Ecosystem discovery record to its adopted Dynamic provider:
+// copies the discovered model list (by provenances) + logo into the dynamic record
+// so the Cloud Providers "Adopted" filter reflects the latest discovery state.
+export function syncEcosystemModels(ecoId) {
+  if (!ecoId) return null;
+  const rec = findByEcosystemId(ecoId);
+  if (!rec) return null;
+  const eco = loadDiscovered()[ecoId];
+  if (!eco) return rec;
+  rec.modelSupport = buildModelSupport(eco);
+  if (eco.logo) rec.logo = { url: eco.logo, source: eco.logoSource || 'fallback', status: eco.logo ? 'resolved' : 'none' };
+  rec.website = rec.website || eco.website || null;
+  rec.updatedAt = new Date().toISOString();
+  upsertDynamicProvider(rec);
+  return rec;
 }
 
 // Re-read the source ecosystem record and recompute integration + model support.

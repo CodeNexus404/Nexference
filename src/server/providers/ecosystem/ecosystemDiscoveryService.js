@@ -18,26 +18,54 @@ import {
 import { recordChange, CHANGE_TYPES } from '../providerChangeStore.js';
 import { recordActivity } from '../../activity/activityService.js';
 import {
-  PROVIDER_CATEGORIES, REGISTRY_STATES, DUPLICATE_STATES, VALIDATION_IDENTITY, LOGO_SOURCE, DISCOVERY_PHASE, TRUST_LEVELS,
+  PROVIDER_CATEGORIES, REGISTRY_STATES, DUPLICATE_STATES, VALIDATION_IDENTITY, LOGO_SOURCE, DISCOVERY_PHASE, TRUST_LEVELS, CONFIDENCE_LEVELS,
 } from './constants.js';
 import {
   tokenize, normalizeName, domainOf, siteKey, makeId, identitySignals, inferCategory, matchDuplicates,
 } from './normalization.js';
-import { resolveLogo, validateLogoUrl } from './logoResolver.js';
+import { resolveLogo, candidateLogoUrls, validateLogoUrl } from './logoResolver.js';
 import { createStructuredRegistrySource } from './sources/structuredRegistrySource.js';
+import { createOpenRouterSource } from '../sources/openRouterSource.js';
+import { createHuggingFaceSource } from '../sources/huggingFaceSource.js';
+import { createLiteLLMSource } from '../sources/liteLLMSource.js';
 import { providerDiscoveryService } from '../providerDiscoveryService.js';
-import { createDynamicFromEcosystem } from '../dynamic/dynamicProviderService.js';
+import { createDynamicFromEcosystem, syncEcosystemModels } from '../dynamic/dynamicProviderService.js';
 import { assessProviderIntegration } from '../integrations/providerIntegrationService.js';
 
 const BASE_DIR = process.cwd();
 const SOURCES_FILE = join(BASE_DIR, 'data', 'discovery-sources.json');
 const FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGO_VERIFY_MS = 6000;
 
 function confidenceForTrust(trust) {
-  if (trust === 'official') return 'MEASURED';
-  if (trust === 'curated') return 'CURATED';
-  if (trust === 'community') return 'OBSERVED';
-  return 'OBSERVED';
+  if (trust === 'official') return CONFIDENCE_LEVELS.HIGH;
+  if (trust === 'curated') return CONFIDENCE_LEVELS.MEDIUM;
+  if (trust === 'community') return CONFIDENCE_LEVELS.LOW;
+  return CONFIDENCE_LEVELS.UNKNOWN;
+}
+
+// Deterministically pick a logo from a candidate's candidates, preferring ones
+// already proven to exist. Never blocks discovery on network — a slow/broken
+// logo fetch degrades to the initials fallback in the UI.
+async function resolveLogoLive(entry) {
+  if (!entry || (!entry.website && !entry.logo && !entry.repository)) return null;
+  const candidates = candidateLogoUrls(entry);
+  if (!candidates.length) return null;
+  for (const c of candidates) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), LOGO_VERIFY_MS);
+      const r = await fetch(c.url, { method: 'GET', redirect: 'follow', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) continue;
+      if (r.url && !validateLogoUrl(r.url).ok) continue; // redirected to unsafe host
+      const ct = r.headers.get('content-type') || '';
+      if (!/^image\//i.test(ct)) continue;
+      await r.arrayBuffer().then((b) => b.byteLength); // confirm body is readable
+      return { url: c.url, source: c.source };
+    } catch { /* try next candidate */ }
+  }
+  return null;
 }
 
 // ── Source registry (controlled, not scraped) ──
@@ -53,15 +81,67 @@ export function loadSourcesConfig() {
 
 function buildAdapters() {
   const { sources } = loadSourcesConfig();
-  return sources
+  const adapters = sources
     .filter((s) => s.enabled !== false)
     .map((cfg) => createStructuredRegistrySource(cfg, { baseDir: BASE_DIR }));
+
+  // Add programmatic source adapters (always enabled, no config file needed)
+  try {
+    const openRouterAdapter = createOpenRouterSource();
+    if (openRouterAdapter) adapters.push(openRouterAdapter);
+  } catch { /* ignore OpenRouter failures */ }
+
+  try {
+    const hfAdapter = createHuggingFaceSource();
+    if (hfAdapter) adapters.push(hfAdapter);
+  } catch { /* ignore HF failures */ }
+
+  try {
+    const litellmAdapter = createLiteLLMSource();
+    if (litellmAdapter) adapters.push(litellmAdapter);
+  } catch { /* ignore LiteLLM failures */ }
+
+  return adapters;
+}
+
+function getProgrammaticSourceConfigs() {
+  return [
+    {
+      id: 'openrouter',
+      name: 'OpenRouter',
+      type: 'aggregator-api',
+      homepage: 'https://openrouter.ai',
+      trustLevel: 'community',
+      enabled: true,
+      requiresManualRefresh: true,
+    },
+    {
+      id: 'huggingface',
+      name: 'Hugging Face Inference Providers',
+      type: 'inference-catalog',
+      homepage: 'https://huggingface.co/inference-providers',
+      trustLevel: 'community',
+      enabled: true,
+      requiresManualRefresh: true,
+    },
+    {
+      id: 'litellm',
+      name: 'LiteLLM Catalog',
+      type: 'community-catalog',
+      homepage: 'https://github.com/BerriAI/litellm',
+      trustLevel: 'community',
+      enabled: true,
+      requiresManualRefresh: true,
+    },
+  ];
 }
 
 export function getSources() {
-  const { sources } = loadSourcesConfig();
+  const { sources: fileSources } = loadSourcesConfig();
+  const programmaticSources = getProgrammaticSourceConfigs();
+  const allSources = [...fileSources, ...programmaticSources];
   const state = loadSourceState();
-  return sources.map((s) => {
+  return allSources.map((s) => {
     const st = state[s.id] || {};
     const stale = st.lastRefresh && (Date.now() - new Date(st.lastRefresh).getTime() > FRESH_MS);
     return {
@@ -116,7 +196,7 @@ function buildClaimedBySource(evidence) {
 // Merge one normalized candidate (with its source) into a partial record shell.
 function recordFromCandidate(candidate, sourceMeta, observedAt, fp) {
   const id = makeId(sourceMeta.id, fp);
-  const category = inferCategory(candidate);
+  const category = inferCategory(candidate, sourceMeta);
   const record = {
     id,
     _v: '1.7.0',
@@ -152,7 +232,9 @@ function recordFromCandidate(candidate, sourceMeta, observedAt, fp) {
     duplicateState: DUPLICATE_STATES.UNIQUE,
     registryState: REGISTRY_STATES.DISCOVERED,
     discoveryOrigin: sourceMeta.id,
+    sourceSlugs: {},  // { sourceId: candidateSlugWithinSource } — used for model fetching
     models: Array.isArray(candidate.models) ? candidate.models.map((m) => normalizeModel(m, sourceMeta)) : [],
+    modelsFetchedAt: null,
     missingFromSource: false,
     lastMissingAt: null,
   };
@@ -180,6 +262,11 @@ function mergeCandidate(record, candidate, sourceMeta, observedAt, fp) {
   const existing = record.sources.find((s) => s.sourceId === sourceMeta.id);
   if (existing) Object.assign(existing, srcEntry);
   else record.sources.push(srcEntry);
+  // Store the candidate's slug within this source (for model fetching later).
+  if (candidate.sourceId && sourceMeta.id) {
+    record.sourceSlugs = record.sourceSlugs || {};
+    record.sourceSlugs[sourceMeta.id] = candidate.sourceId;
+  }
   // Strengthen discovery status only with real observations.
   if (record.models && record.models.length) record.discoveryStatus = DISCOVERY_PHASE.VALIDATED;
   else if (record.website) record.discoveryStatus = DISCOVERY_PHASE.OBSERVED;
@@ -251,6 +338,7 @@ export async function discoverEcosystem({ force = false } = {}) {
           for (const ev of b.evidence) a.evidence.push(ev);
           a.claimedBySource = buildClaimedBySource(a.evidence);
           for (const s of b.sources) if (!a.sources.find((x) => x.sourceId === s.sourceId)) a.sources.push(s);
+          for (const [k, v] of Object.entries(b.sourceSlugs || {})) if (!(a.sourceSlugs || {})[k]) a.sourceSlugs = { ...(a.sourceSlugs || {}), [k]: v };
           a.duplicateState = DUPLICATE_STATES.CONFIRMED;
           delete working[ids[j]];
           ids.splice(j, 1); j--;
@@ -293,8 +381,67 @@ export async function discoverEcosystem({ force = false } = {}) {
       }
     }
 
+    // Filter out providers with "unknown" names or resolution-like names
+    for (const id of Object.keys(next)) {
+      const rec = next[id];
+      if (rec.name === 'unknown' || !rec.name || /^\d+[xX-].*\d+$/.test(rec.name) || /^\d+-\d+-\d+$/.test(rec.name)) {
+        delete next[id];
+      }
+    }
+
+    // Live-verify provider logos: upgrade the statically-chosen candidate
+    // (favicon.ico / explicit) to the first one that actually serves an image,
+    // trying explicit → favicon.ico → Google favicon → GitHub avatar.
+    // Degrades gracefully: failures keep the existing logo or fall back to the
+    // UI initials avatar. Bounded concurrency so discovery stays fast & polite.
+    const logoRecords = Object.values(next).filter((r) => r.registryState !== REGISTRY_STATES.IGNORED && r.registryState !== 'removed');
+    let logoIdx = 0;
+    const LOGO_CONCURRENCY = 8;
+    await Promise.all(
+      Array.from({ length: Math.min(LOGO_CONCURRENCY, logoRecords.length) }, async () => {
+        while (logoIdx < logoRecords.length) {
+          const rec = logoRecords[logoIdx++];
+          try {
+            const strongLogo = rec.logo && ['official', 'source-provided', 'curated'].includes(rec.logoSource) ? rec.logo : null;
+            const resolved = await resolveLogoLive({
+              website: rec.website,
+              documentationUrl: rec.documentationUrl,
+              repository: rec.repository,
+              logo: strongLogo,
+              logoSource: strongLogo ? rec.logoSource : null,
+            });
+            if (resolved && resolved.url !== rec.logo) {
+              rec.logo = resolved.url;
+              rec.logoSource = resolved.source;
+            }
+          } catch { /* non-fatal */ }
+        }
+      })
+    );
+
+    // Run validation for newly discovered and updated providers to populate validation fields
+    for (const rec of Object.values(next)) {
+      if (rec.registryState !== REGISTRY_STATES.IGNORED && rec.registryState !== 'removed') {
+        try {
+          const validated = await validateProviderRecord(rec);
+          if (validated) {
+            next[rec.id] = validated;
+          }
+        } catch { /* validation is best-effort */ }
+      }
+    }
+
     saveDiscovered(next);
     saveSourceState(sourceState);
+
+    // Keep adopted dynamic providers in sync with the discovery store: discovery
+    // rebuilds records (and may replace model lists), so mirror the latest
+    // discovery models + logo into every adopted record.
+    for (const rec of Object.values(next)) {
+      if (rec.dynamicId && rec.registryState === REGISTRY_STATES.ADOPTED) {
+        try { syncEcosystemModels(rec.id); } catch { /* non-fatal */ }
+      }
+    }
 
     // Honest change records (providerChangeStore de-dupes repeats within 24h).
     for (const rec of newlyDiscovered) {
@@ -355,15 +502,28 @@ export async function validateProvider(id) {
   const store = loadDiscovered();
   const rec = store[id];
   if (!rec) return null;
+  return validateProviderRecord(rec);
+}
+
+export async function validateProviderRecord(rec) {
+  if (!rec) return null;
   const v = rec.validation || {};
-  v.identity = rec.website || rec.repository ? VALIDATION_IDENTITY.LIKELY : VALIDATION_IDENTITY.UNKNOWN;
+  
+  // Use website, privacy policy URL, or terms of service URL for identity validation
+  const hasWebPresence = rec.website || rec.privacyPolicy || rec.termsOfService || rec.repository;
+  v.identity = hasWebPresence ? VALIDATION_IDENTITY.LIKELY : VALIDATION_IDENTITY.UNKNOWN;
   if (rec.apiDocumentationUrl) v.apiDocumented = true;
   v.endpointPubliclyKnown = Array.isArray(rec.endpoints) && rec.endpoints.length > 0;
   v.modelsObserved = Array.isArray(rec.models) && rec.models.length > 0;
-  if (rec.website) {
-    const ok = await checkReachable(rec.website);
-    v.websiteReachable = ok;
-  } else v.websiteReachable = null;
+  
+  // Check reachability of website or fallback URLs
+  let reachable = false;
+  for (const url of [rec.website, rec.privacyPolicy, rec.termsOfService, rec.statusPage].filter(Boolean)) {
+    const ok = await checkReachable(url);
+    if (ok) { reachable = true; break; }
+  }
+  v.websiteReachable = reachable;
+  
   // Configurable only when every positive signal is present; otherwise null (unknown).
   const signals = [v.websiteReachable, v.apiDocumented, v.endpointPubliclyKnown, v.identity !== VALIDATION_IDENTITY.UNKNOWN];
   if (signals.some((s) => s === false)) v.configurable = false;
@@ -372,8 +532,6 @@ export async function validateProvider(id) {
   v.lastValidatedAt = new Date().toISOString();
   rec.validation = v;
   rec.discoveryStatus = v.websiteReachable ? DISCOVERY_PHASE.OBSERVED : rec.discoveryStatus;
-  store[id] = rec;
-  saveDiscovered(store);
   return rec;
 }
 
@@ -435,6 +593,44 @@ export function restoreProvider(id) {
   return setRegistryState(id, state, CHANGE_TYPES.PROVIDER_RESTORED, `Restored ${rec?.name || id}`);
 }
 
+export function deactivateProvider(id) {
+  return setRegistryState(id, REGISTRY_STATES.DEPRECATED, CHANGE_TYPES.PROVIDER_DEACTIVATED, `Deactivated ${getEcosystemProvider(id)?.name || id}`);
+}
+export function reactivateProvider(id) {
+  const rec = getEcosystemProvider(id);
+  const state = rec && rec.duplicateState === DUPLICATE_STATES.LIKELY ? REGISTRY_STATES.REVIEW : REGISTRY_STATES.DISCOVERED;
+  return setRegistryState(id, state, CHANGE_TYPES.PROVIDER_REACTIVATED, `Reactivated ${getEcosystemProvider(id)?.name || id}`);
+}
+export function deleteProvider(id) {
+  const store = loadDiscovered();
+  const rec = store[id];
+  if (!rec) return null;
+  // Preserve discovery history - just mark as removed
+  rec.registryState = 'removed';
+  rec.removedAt = new Date().toISOString();
+  store[id] = rec;
+  saveDiscovered(store);
+  recordChange({ providerId: id, providerName: rec.name, type: CHANGE_TYPES.PROVIDER_DELETED, summary: `Deleted ${rec.name || id} (discovery history preserved)`, sourceType: 'ecosystem', confidence: 'observed' });
+  return rec;
+}
+
+// Get evidence graph for a provider (cross-source claim tracking)
+export function getProviderEvidence(id) {
+  const rec = getEcosystemProvider(id);
+  if (!rec) return null;
+  return {
+    id: rec.id,
+    name: rec.name,
+    confidence: rec.confidence,
+    discoveryStatus: rec.discoveryStatus,
+    evidence: rec.evidence || [],
+    claimedBySource: rec.claimedBySource || {},
+    sources: rec.sources || [],
+    duplicateState: rec.duplicateState,
+    duplicateOf: rec.duplicateOf,
+  };
+}
+
 // ── Summary for the Ecosystem page + Intelligence Center ──
 export function getEcosystemSummary() {
   const store = loadDiscovered();
@@ -467,6 +663,168 @@ export function getEcosystemSummary() {
     byCategory,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// ── Model enrichment (v2.2.0) ──
+// Fetches the full model list for a discovered provider from its source API.
+// Unlike the 10-model cap during discovery, this pulls the complete set.
+
+async function fetchWithTimeout(url, ms = 12000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const headers = { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
+    const hfToken = process.env.HF_TOKEN || process.env.HUGGINGFACE_TOKEN;
+    if (hfToken && url.includes('huggingface.co')) headers['authorization'] = `Bearer ${hfToken}`;
+    const resp = await fetch(url, { signal: ctrl.signal, headers });
+    clearTimeout(timer);
+    if (!resp.ok) throw new Error(`http ${resp.status}`);
+    return await resp.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeOrModel(m) {
+  if (typeof m === 'string') return { modelId: m, name: m };
+  return {
+    modelId: m.modelId || m.model_id || m.id || m.name,
+    name: m.name || m.modelId || m.model_id || m.id,
+    contextLength: m.contextLength || m.context_length || null,
+    pricing: m.pricing || null,
+    accessType: m.accessType || 'unknown',
+    availability: m.availability || 'unknown',
+    capabilities: m.capabilities || null,
+    status: m.status || null,
+    toolCalling: m.toolCalling ?? null,
+    structuredOutput: m.structuredOutput ?? null,
+    task: m.task || null,
+    source: m.source || null,
+  };
+}
+
+// Fetch ALL models for a specific provider from OpenRouter.
+// NOTE: OpenRouter's models API identifies the model *vendor* by id prefix
+// (e.g. "openai/gpt-..."), so this only yields results for providers whose
+// slug matches the model id prefix. Routing providers (groq, cerebras, ...)
+// are NOT discoverable this way — they fall back to HF/LiteLLM instead.
+async function fetchOpenRouterModels(slug) {
+  const data = await fetchWithTimeout('https://openrouter.ai/api/v1/models');
+  const all = Array.isArray(data?.data) ? data.data : [];
+  const target = slug.toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const filtered = all.filter((m) => {
+    const prefix = String(m.id || '').split('/')[0]?.toLowerCase() || '';
+    return prefix === target;
+  });
+  return filtered.map((m) => normalizeOrModel({
+    modelId: m.id,
+    name: m.name || m.id,
+    contextLength: m.context_length,
+    pricing: m.pricing ? { input: m.pricing.prompt, output: m.pricing.completion } : null,
+    capabilities: m.architecture ? { architecture: m.architecture, modalities: m.architecture.modality || null } : null,
+    source: 'openrouter',
+  }));
+}
+
+// Fetch ALL models for a specific provider from Hugging Face.
+async function fetchHuggingFaceModels(slug) {
+  const results = [];
+  const MAX_PAGES = 10;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const skip = page * 100;
+    const url = `https://huggingface.co/api/models?inference_provider=${encodeURIComponent(slug)}&limit=100&skip=${skip}&expand[]=inferenceProviderMapping`;
+    let batch;
+    try { batch = await fetchWithTimeout(url); } catch { break; }
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    for (const model of batch) {
+      const mapping = (Array.isArray(model.inferenceProviderMapping) ? model.inferenceProviderMapping : [])
+        .find((mp) => mp.provider === slug);
+      if (!mapping) continue;
+      const pricing = mapping.providerDetails?.pricing || null;
+      results.push(normalizeOrModel({
+        modelId: mapping.providerId || model.id,
+        name: model.id || model.modelId,
+        contextLength: mapping.providerDetails?.context_length || null,
+        pricing: pricing ? { input: pricing.input ?? null, output: pricing.output ?? null } : null,
+        status: mapping.status || null,
+        toolCalling: !!(mapping.features?.toolCalling),
+        structuredOutput: !!(mapping.features?.structuredOutput),
+        task: mapping.task || null,
+        source: 'huggingface',
+      }));
+    }
+    if (batch.length < 100) break;
+  }
+  return results;
+}
+
+// Fetch ALL models from LiteLLM catalog for a specific provider slug.
+async function fetchLiteLLMModels(slug) {
+  const data = await fetchWithTimeout('https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json');
+  const all = data && typeof data === 'object' ? data : {};
+  const results = [];
+  for (const [modelId, info] of Object.entries(all)) {
+    if (info && typeof info === 'object' && (info.litellm_provider || '').toLowerCase().includes(slug.toLowerCase())) {
+      results.push(normalizeOrModel({
+        modelId,
+        name: modelId,
+        contextLength: info.max_input_tokens || null,
+        pricing: (info.input_cost_per_token != null || info.output_cost_per_token != null)
+          ? { input: info.input_cost_per_token, output: info.output_cost_per_token } : null,
+        source: 'litellm',
+      }));
+    }
+  }
+  return results;
+}
+
+// Main enrichment: look up a provider, fetch its full model list from every
+// source that reported it, then merge + dedupe. Hugging Face gives per-provider
+// truth (live status/pricing), LiteLLM the full catalog, OpenRouter vendor
+// prefixes. Max coverage wins: a provider may be served by all three.
+export async function fetchProviderModels(providerId) {
+  const store = loadDiscovered();
+  const rec = store[providerId];
+  if (!rec) return null;
+
+  const srcIds = (rec.sources || []).map((s) => s.sourceId);
+  const recSourceSlugs = rec.sourceSlugs || {};
+  const available = srcIds.filter((id) => ['huggingface', 'litellm', 'openrouter'].includes(id));
+  if (!available.length) return { models: rec.models || [], enrichedFrom: null };
+
+  const slugFor = (id) => recSourceSlugs[id] || (rec.normalizedName || rec.name || '').toLowerCase().replace(/\s+/g, '-');
+
+  const seen = new Map(); // modelId -> model
+  const enrichedSources = [];
+  for (const srcId of available) {
+    const slug = slugFor(srcId);
+    let found = [];
+    try {
+      if (srcId === 'huggingface') found = await fetchHuggingFaceModels(slug);
+      else if (srcId === 'litellm') found = await fetchLiteLLMModels(slug);
+      else if (srcId === 'openrouter') found = await fetchOpenRouterModels(slug);
+    } catch { /* best-effort: one failing source does not block others */ }
+    if (found.length) {
+      enrichedSources.push(srcId);
+      for (const m of found) {
+        const key = m.modelId || m.name;
+        if (key && !seen.has(key)) seen.set(key, m);
+      }
+    }
+  }
+
+  const models = [...seen.values()];
+  if (models.length > 0) {
+    rec.models = models.map((m) => normalizeModel(m, { id: enrichedSources[0] || 'ecosystem' }));
+    rec.modelsFetchedAt = new Date().toISOString();
+    store[providerId] = rec;
+    saveDiscovered(store);
+    // Keep the adopted dynamic provider in sync so the Cloud Providers "Adopted"
+    // filter shows the freshly discovered model list.
+    if (rec.dynamicId) { try { syncEcosystemModels(providerId); } catch { /* non-fatal */ } }
+  }
+
+  return { models: rec.models || [], enrichedFrom: enrichedSources.join('+') || null, modelCount: (rec.models || []).length };
 }
 
 function safeCount(fn) { try { return fn(); } catch { return 0; } }
