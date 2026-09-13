@@ -3,6 +3,14 @@ import { restoreBackup, listBackups } from '../config/backupStore.js';
 import { getClient, getClientCapabilities, detectClient } from './registry.js';
 import { checkCompatibility } from './compatibilityService.js';
 import { spawn } from 'node:child_process';
+import {
+  readOpenCodeConfig, readOpenCodeConfigRaw, writeOpenCodeConfig,
+  getOpenCodeStatus, listOpenCodeBackups, restoreOpenCodeBackup,
+} from '../config/opencodeStore.js';
+import {
+  readCodexConfig, writeCodexConfig, getCodexStatus,
+  listCodexBackups, restoreCodexBackup,
+} from '../config/codexStore.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Server-side Client Adapter interface (v0.6.0).
@@ -95,8 +103,102 @@ export class ClaudeCodeAdapter extends ClientAdapter {
   }
 }
 
+// ═══ OpenCode adapter ════════════════════════════════════════════════════════
+// opencode reads ~/.config/opencode/opencode.json at startup (no hot-reload).
+// The config format is schema-validated ($schema declaration + provider map);
+// API keys are referenced as {env:VAR} — Nexference never touches the actual
+// secret, so the safety pipeline (Backup → Atomic → Verified Re-read → Restore)
+// operates on the config shape only.
+export class OpenCodeAdapter extends ClientAdapter {
+  constructor(client) { super(client); }
+
+  readConfig() { return readOpenCodeConfig(); }
+
+  applyConfig(config) { return writeOpenCodeConfig(config); }
+
+  validateConfig(config) {
+    if (!config || typeof config !== 'object') return { valid: false, error: 'Config must be an object' };
+    if (typeof config.model !== 'string' || !config.model) return { valid: false, error: 'opencode config requires a model' };
+    if (!config.provider || typeof config.provider !== 'object' || !Object.keys(config.provider).length) {
+      return { valid: false, error: 'opencode config requires at least one provider entry' };
+    }
+    const unprefixed = Object.entries(config.provider).some(([k, v]) => k !== 'model' && k !== '$schema');
+    if (!unprefixed) return { valid: false, error: 'opencode config provider entries are malformed' };
+    for (const [k, v] of Object.entries(config.provider)) {
+      if (!v || typeof v !== 'object') return { valid: false, error: `opencode provider '${k}' must be an object` };
+      if (typeof v.options?.baseURL !== 'string' || !v.options.baseURL) {
+        return { valid: false, error: `opencode provider '${k}' requires options.baseURL` };
+      }
+    }
+    return { valid: true };
+  }
+
+  status() { return getOpenCodeStatus(); }
+
+  backup() { const list = listOpenCodeBackups(); return list[0] || null; }
+
+  restore(backupId) { return restoreOpenCodeBackup(backupId); }
+
+  getConfigLocation() { return this.client.configPath; }
+
+  // OpenCode uses `claude` CLI to launch? Actually opencode binary is `opencode`.
+  launch() {
+    try {
+      const p = spawn('opencode', [], { stdio: 'ignore', detached: true });
+      p.on('error', () => {});
+      p.unref();
+      return { launched: true, supported: true, note: 'Launched opencode' };
+    } catch (err) {
+      return { launched: false, supported: true, note: `Launch failed: ${err.message}` };
+    }
+  }
+}
+
+// ═══ Codex adapter ═══════════════════════════════════════════════════════════
+// Codex reads ~/.codex/config.json at startup.  The config maps a model +
+// provider with an env_key reference (no secret in file).  Nexference applies
+// the same safety pipeline (Backup → Atomic → Verified Re-read → Restore).
+export class CodexAdapter extends ClientAdapter {
+  constructor(client) { super(client); }
+
+  readConfig() { return readCodexConfig(); }
+  applyConfig(config) { return writeCodexConfig(config); }
+  status() { return getCodexStatus(); }
+
+  validateConfig(config) {
+    if (!config || typeof config !== 'object') return { valid: false, error: 'Config must be an object' };
+    if (typeof config.model !== 'string' || !config.model) return { valid: false, error: 'Codex config requires a model' };
+    if (!config.model_provider || typeof config.model_provider !== 'string') return { valid: false, error: 'Codex config requires model_provider' };
+    if (!config.model_providers || typeof config.model_providers !== 'object' || !Object.keys(config.model_providers).length) {
+      return { valid: false, error: 'Codex config requires at least one model_providers entry' };
+    }
+    for (const [k, v] of Object.entries(config.model_providers)) {
+      if (!v || typeof v !== 'object') return { valid: false, error: `Codex provider '${k}' must be an object` };
+      if (typeof v.base_url !== 'string' || !v.base_url) return { valid: false, error: `Codex provider '${k}' requires base_url` };
+    }
+    return { valid: true };
+  }
+
+  backup() { const list = listCodexBackups(); return list[0] || null; }
+  restore(backupId) { return restoreCodexBackup(backupId); }
+  getConfigLocation() { return this.client.configPath; }
+
+  launch() {
+    try {
+      const p = spawn('codex', [], { stdio: 'ignore', detached: true });
+      p.on('error', () => {});
+      p.unref();
+      return { launched: true, supported: true, note: 'Launched codex' };
+    } catch (err) {
+      return { launched: false, supported: true, note: `Launch failed: ${err.message}` };
+    }
+  }
+}
+
 const MAP = {
   'claude-code': ClaudeCodeAdapter,
+  'opencode-cli': OpenCodeAdapter,
+  'codex': CodexAdapter,
 };
 
 export function getClientAdapter(id) {

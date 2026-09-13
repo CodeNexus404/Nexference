@@ -6,59 +6,17 @@
 //  credentials only.
 // ═══════════════════════════════════════════════════════════════
 
-import {
-  createCustomProvider, updateCustomProvider, deleteCustomProvider,
+import { createCustomProvider, updateCustomProvider, deleteCustomProvider,
   duplicateCustomProvider, deactivateCustomProvider, reactivateCustomProvider,
   validateCustomProvider, detectDuplicates,
 } from '../providers/custom/customProviderService.js';
 import { listCustomProviders, getCustomProvider } from '../providers/custom/customProviderStore.js';
 import { getAllCustomProviders, getCustomUnifiedProvider } from '../providers/custom/customProviderRegistry.js';
+import { scrapeFavicon } from '../providers/custom/customLogoResolver.js';
 import { getProviderAdapter } from '../providers/providerAdapter.js';
 import { recordActivity } from '../activity/activityService.js';
 
 export function registerCustomProviderRoutes(app) {
-  const MAX_FAVICON_BYTES = 2 * 1024 * 1024;
-
-  // Fetch favicon bytes server-side and return them as a base64 data URL. Used by
-  // the card/detail favicon fallback so favicons served over http or as .ico
-  // (image/x-icon, which the https-only /api/ecosystem/logo proxy rejects) still
-  // render in the UI. Never persisted — only returned for display.
-  function faviconDataUrl(href) {
-    return new Promise(async (resolve) => {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 5000);
-        const resp = await fetch(href, { method: 'GET', redirect: 'follow', signal: ctrl.signal });
-        clearTimeout(timer);
-        if (!resp.ok) return resolve(null);
-        const ct = resp.headers.get('content-type') || '';
-        if (!/^image\//i.test(ct)) return resolve(null);
-        const bytes = Buffer.from(await resp.arrayBuffer());
-        if (bytes.length > MAX_FAVICON_BYTES) return resolve(null);
-        const mime = (ct.split(';')[0] || 'image/png').trim().toLowerCase();
-        return resolve(`data:${mime};base64,${bytes.toString('base64')}`);
-      } catch { resolve(null); }
-    });
-  }
-
-  // Candidate origins for favicon scraping, in priority order. API hosts
-  // (api.example.com) often serve no HTML site and no favicon, so when the
-  // URL itself fails we also try the bare domain (api.xkiro.com → xkiro.com).
-  function faviconOrigins(url) {
-    try {
-      const u = new URL(url);
-      const host = u.hostname;
-      const origins = [u.origin];
-      const parts = host.split('.');
-      const first = (parts[0] || '').toLowerCase();
-      if ((first === 'api' || first === 'www') && parts.length > 2) {
-        const bare = parts.slice(1).join('.');
-        try { origins.push(new URL(`${u.protocol}//${bare}`).origin); } catch { /* skip */ }
-      }
-      return [...new Set(origins)];
-    } catch { return []; }
-  }
-
   // Scrape favicon URL from a website. With `?format=data`, also fetch the image
   // bytes and return a base64 data URL so the browser can render it directly.
   // Tries the given URL first, then the bare domain when the URL is an API
@@ -67,47 +25,7 @@ export function registerCustomProviderRoutes(app) {
     const { url, format } = req.query;
     if (!url) return res.status(400).json({ error: 'url parameter required.' });
     try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL.' }); }
-    const failure = () => res.json({ ok: false, url: null });
-
-    // rel matches icon/shortcut icon/apple-touch-icon in any attribute order.
-    const findIcon = (html) => {
-      const m = html.match(/<link\b[^>]*>/gi) || [];
-      for (const tag of m) {
-        const rel = tag.match(/rel\s*=\s*["'][^"']*icon[^"']*["']/i);
-        if (!rel) continue;
-        const href = tag.match(/href\s*=\s*["']([^"']+)["']/i);
-        if (href) return href[1];
-      }
-      return null;
-    };
-
-    for (const origin of faviconOrigins(url)) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
-        const resp = await fetch(origin, {
-          signal: controller.signal,
-          headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' },
-        });
-        clearTimeout(timer);
-        // API gateways often serve a 404 HTML error page with no favicon —
-        // skip to the next candidate origin (e.g. the bare domain).
-        if (!resp.ok) continue;
-        const html = await resp.text();
-        let href = findIcon(html) || origin + '/favicon.ico';
-        if (href.startsWith('//')) href = 'https:' + href;
-        else if (href.startsWith('/')) href = origin + href;
-        else if (!href.startsWith('http')) href = origin + '/' + href;
-        if (format === 'data') {
-          const dataUrl = await faviconDataUrl(href);
-          if (dataUrl) return res.json({ ok: true, url: dataUrl });
-          // fall through to next origin only when data conversion failed
-          continue;
-        }
-        return res.json({ ok: true, url: href });
-      } catch { continue; }
-    }
-    return failure();
+    res.json(await scrapeFavicon(url, { data: format === 'data' }));
   });
 
   // Scrape model names from a website's HTML page
@@ -204,8 +122,8 @@ export function registerCustomProviderRoutes(app) {
   });
 
   // Create a custom provider
-  app.post('/api/custom-providers', (req, res) => {
-    const result = createCustomProvider(req.body || {});
+  app.post('/api/custom-providers', async (req, res) => {
+    const result = await createCustomProvider(req.body || {});
     if (!result.success) {
       return res.status(400).json({ error: result.errors?.[0] || 'Validation failed', errors: result.errors, warnings: result.warnings, duplicates: result.duplicates });
     }
@@ -220,8 +138,8 @@ export function registerCustomProviderRoutes(app) {
   });
 
   // Edit a custom provider
-  app.patch('/api/custom-providers/:id', (req, res) => {
-    const result = updateCustomProvider(req.params.id, req.body || {});
+  app.patch('/api/custom-providers/:id', async (req, res) => {
+    const result = await updateCustomProvider(req.params.id, req.body || {});
     if (!result.success) {
       return res.status(400).json({ error: result.errors?.[0] || 'Update failed', errors: result.errors, warnings: result.warnings });
     }

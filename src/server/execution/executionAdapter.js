@@ -8,7 +8,7 @@
 //  No token counts are invented — usage is whatever the source reports.
 // ═══════════════════════════════════════════════════════════════
 
-import { getProvider } from '../providers/registry.js';
+import { getExecutableProvider } from './executionResolver.js';
 import { getProviderAdapter } from '../providers/providerAdapter.js';
 import { getRuntimeExec } from './executionRegistry.js';
 
@@ -61,7 +61,7 @@ async function readOpenAISSE(res, onToken) {
 }
 
 async function executeCloud({ providerId, model, messages, systemPrompt, parameters, stream, key, signal, onToken }) {
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   if (!provider) throw new Error(`Unknown provider: ${providerId}`);
   const adapter = getProviderAdapter(provider);
   return adapter.chat({

@@ -16,6 +16,7 @@ import {
 import { getProvider, PROVIDERS } from '../registry.js';
 import { recordChange, CHANGE_TYPES } from '../providerChangeStore.js';
 import { recordActivity } from '../../activity/activityService.js';
+import { scrapeFavicon } from './customLogoResolver.js';
 
 const SUPPORTED_FORMATS = ['openai', 'anthropic', 'gemini', 'unknown'];
 const SAFE_URL_PROTOCOLS = ['https:'];
@@ -160,7 +161,24 @@ export function buildCustomProviderRecord(input) {
   };
 }
 
-export function createCustomProvider(input) {
+// Best-effort favicon resolution when a provider was created/updated with only a
+// website or base URL and no explicit logo. Tries the website first (a human
+// site), then the base URL (API hosts often serve no site — the resolver falls
+// back to the bare domain). Any failure keeps the caller's `fallback` logo.
+async function resolveLogoFromUrls({ website, baseUrl }, fallback) {
+  for (const url of [website, baseUrl]) {
+    if (!url || typeof url !== 'string') continue;
+    try {
+      const result = await scrapeFavicon(url, { data: true });
+      if (result.ok && result.url && result.url.startsWith('data:')) {
+        return { url: result.url, source: 'website', status: 'resolved' };
+      }
+    } catch { /* try next source */ }
+  }
+  return fallback;
+}
+
+export async function createCustomProvider(input) {
   const validation = validateCustomProvider(input);
   if (!validation.valid) return { success: false, errors: validation.errors, warnings: validation.warnings };
 
@@ -170,6 +188,17 @@ export function createCustomProvider(input) {
   }
 
   const record = buildCustomProviderRecord(input);
+  if (!record) return { success: false, errors: ['Failed to build custom provider record.'] };
+
+  // Auto-resolve a favicon when the user provided a website/base URL but no
+  // explicit logo. Best-effort — failures keep the generated placeholder.
+  if (!input.logo || !input.logo.url) {
+    const resolved = await resolveLogoFromUrls({
+      website: record.identity.website, baseUrl: record.api.baseUrl,
+    }, record.logo);
+    if (resolved && resolved.url) record.logo = resolved;
+  }
+
   const saved = upsertCustomProvider(record);
   if (!saved) return { success: false, errors: ['Failed to save custom provider (store full or error).'] };
 
@@ -185,7 +214,7 @@ export function createCustomProvider(input) {
   return { success: true, provider: record, warnings: validation.warnings };
 }
 
-export function updateCustomProvider(id, input) {
+export async function updateCustomProvider(id, input) {
   const existing = getCustomProvider(id);
   if (!existing) return { success: false, errors: ['Custom provider not found.'] };
 
@@ -216,6 +245,25 @@ export function updateCustomProvider(id, input) {
   if (input.baseUrl || input.format) {
     updated.connection = { status: 'not-tested', lastTestedAt: null };
     updated.integration = { status: 'unverified' };
+  }
+
+  // Auto-resolve a logo when the site/base URL was edited and the provider does
+  // not already carry an uploaded/strong logo. Best-effort — network failures
+  // keep the current logo untouched.
+  const explicitLogo = input.logo;
+  if (!explicitLogo || !explicitLogo.url) {
+    const urlKey = (v) => sanitizeUrl(v) || '';
+    const urlChanged =
+      (input.website !== undefined && urlKey(input.website) !== urlKey(existing.identity.website)) ||
+      (input.baseUrl !== undefined && urlKey(input.baseUrl) !== urlKey(existing.api.baseUrl));
+    const logoLacksUrl = !updated.logo || !updated.logo.url;
+    const logoNotUpload = !updated.logo || updated.logo.source !== 'upload';
+    if (logoNotUpload && (urlChanged || logoLacksUrl)) {
+      const resolved = await resolveLogoFromUrls({
+        website: updated.identity.website, baseUrl: updated.api.baseUrl,
+      }, updated.logo);
+      if (resolved && resolved.url) updated.logo = resolved;
+    }
   }
 
   const saved = upsertCustomProvider(updated);

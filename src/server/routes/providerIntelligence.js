@@ -16,10 +16,10 @@ export function registerProviderIntelligenceRoutes(app) {
     }
   });
 
-  // One provider's intelligence.
+  // One provider's intelligence. Works for curated AND user-created custom
+  // (cst:*) providers — the service resolves custom ids from their store.
   app.get('/api/provider-intelligence/:id', (req, res) => {
     const id = req.params.id;
-    if (!getProvider(id)) return res.status(404).json({ error: 'Unknown provider' });
     const rec = providerDiscoveryService.getProviderIntelligence(id);
     if (!rec) return res.status(404).json({ error: 'No intelligence for provider' });
     const changes = providerDiscoveryService.getChangesForProvider(id, 20);

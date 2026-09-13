@@ -11,6 +11,8 @@
 import { PROVIDERS, getProvider } from '../providers/registry.js';
 import { RUNTIMES } from '../local/runtimes.js';
 import { getIntegration } from '../providers/integrations/integrationStore.js';
+import { getCustomProvider, listCustomProviders } from '../providers/custom/customProviderStore.js';
+import { loadDynamicProviders } from '../providers/dynamic/dynamicProviderStore.js';
 import { isExecutable, ADAPTER_TYPE } from '../providers/integrations/integrationTypes.js';
 import { EXEC_FORMATS, getRuntimeExec, probeRuntime } from './executionRegistry.js';
 import { resolveExecutionRoute, resolveExecutionStatus, EXEC_ROUTE } from './executionResolver.js';
@@ -18,36 +20,62 @@ import { isAvailable as legacyAvailable, getCapabilities as legacyCaps } from '.
 import { isAvailable as integrationAvailable, getCapabilities as integrationCaps } from './adapters/integrationAdapterBridge.js';
 import { isAvailable as runtimeAvailable, getCapabilities as runtimeCaps } from './adapters/runtimeExecutionBridge.js';
 
-export function getExecutionCapabilitiesFull() {
-  const cloud = PROVIDERS.map((p) => {
-    const status = resolveExecutionStatus(p.id, null, null);
-    const integration = getIntegration(p.id);
-    const hasIntegration = !!integration;
-    const isIntegExec = hasIntegration && isExecutable(integration);
-    const adapterType = isIntegExec ? integration.integrationAdapterType : (EXEC_FORMATS.includes(p.format) ? p.format : null);
-    const route = status.route;
-    const caps = route === EXEC_ROUTE.INTEGRATION_ADAPTER_BRIDGE ? integrationCaps()
-      : route === EXEC_ROUTE.LEGACY_PROVIDER_BRIDGE ? legacyCaps()
-      : { chat: false, streaming: false, connectionTest: false, modelListing: false };
+// Build a capability entry for a single cloud provider-like object. Works for
+// the curated registry and for dynamic/custom providers (their `format` is
+// user/evidence-declared, never inferred).
+function cloudCapabilityEntry(p) {
+  const status = resolveExecutionStatus(p.id, null, null);
+  const integration = getIntegration(p.id);
+  const hasIntegration = !!integration;
+  const isIntegExec = hasIntegration && isExecutable(integration);
+  const adapterType = isIntegExec ? (integration.adapterType || integration.integrationAdapterType) : (EXEC_FORMATS.includes(p.format) ? p.format : null);
+  const route = status.route;
+  const caps = route === EXEC_ROUTE.INTEGRATION_ADAPTER_BRIDGE ? integrationCaps()
+    : route === EXEC_ROUTE.LEGACY_PROVIDER_BRIDGE ? legacyCaps()
+    : { chat: false, streaming: false, connectionTest: false, modelListing: false };
 
-    return {
-      id: p.id,
-      name: p.name || p.id,
-      format: p.format,
-      executable: status.status === 'ready',
-      status: status.status,
-      statusReason: status.reason,
-      route,
-      adapterType,
-      capabilities: caps,
-      integrationStatus: integration?.status || null,
-      note: status.status === 'metadata_only'
-        ? 'Provider has integration support but no execution adapter.'
-        : status.status === 'unsupported'
-        ? `Format "${p.format}" is not supported for execution.`
-        : null,
-    };
-  });
+  return {
+    id: p.id,
+    name: p.name || p.id,
+    format: p.format,
+    baseUrl: p.baseUrl || null,
+    executable: status.status === 'ready',
+    status: status.status,
+    statusReason: status.reason,
+    route,
+    adapterType,
+    capabilities: caps,
+    integrationStatus: integration?.status || null,
+    note: status.status === 'metadata_only'
+      ? 'Provider has integration support but no execution adapter.'
+      : status.status === 'unsupported'
+      ? `Format "${p.format}" is not supported for execution.`
+      : null,
+  };
+}
+
+export function getExecutionCapabilitiesFull() {
+  const cloud = PROVIDERS.map(cloudCapabilityEntry);
+
+  // Adopted ecosystem providers (dyn:*) with a declared, executable dialect.
+  for (const d of loadDynamicProviders().providers) {
+    if (d.status !== 'active') continue;
+    const fmt = d.integration && d.integration.adapterType;
+    if (!fmt || !EXEC_FORMATS.includes(fmt)) continue;
+    cloud.push(cloudCapabilityEntry({
+      id: d.id, name: d.name, format: fmt, baseUrl: d.integration.baseUrl || null,
+    }));
+  }
+
+  // User-created custom providers (cst:*) — user-declared format.
+  for (const c of listCustomProviders()) {
+    if (c.lifecycle !== 'active') continue;
+    const fmt = c.api?.format;
+    if (!fmt || fmt === 'unknown' || !EXEC_FORMATS.includes(fmt)) continue;
+    cloud.push(cloudCapabilityEntry({
+      id: c.id, name: c.identity?.name || c.id, format: fmt, baseUrl: c.api.baseUrl || null,
+    }));
+  }
 
   const local = RUNTIMES.map((rt) => {
     const cfg = getRuntimeExec(rt.id);

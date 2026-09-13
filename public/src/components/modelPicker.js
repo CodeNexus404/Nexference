@@ -27,9 +27,9 @@ export function renderModelPicker(host, providerId, opts = {}) {
   let query = '';
 
   const paidToggle = wrap.querySelector('.mp-paid input');
-  if (paidToggle) paidToggle.addEventListener('change', (e) => { showPaid = e.target.checked; draw(); });
+  if (paidToggle) paidToggle.addEventListener('change', (e) => { showPaid = e.target.checked; draw({ force: true }); });
 
-  function draw() {
+  function draw({ force = false } = {}) {
     const all = showPaid ? getModels(providerId) : getFreeModels(providerId);
     const q = query.trim().toLowerCase();
     const matches = all.filter((m) =>
@@ -38,6 +38,16 @@ export function renderModelPicker(host, providerId, opts = {}) {
     // The custom gateway has no model catalogue of its own — the user types the
     // model name manually, so don't show the generic empty states.
     const isCustom = providerId === 'custom';
+
+    // Skip a repaint when nothing observable changed. The 800ms background poll
+    // re-renders this list on every tick, which resets the scroll position of a
+    // long list while the user is hovering/scrolling — that is the model-list
+    // "flicker". Signing the rendered state and bailing out when identical keeps
+    // the list stable; scrollTop is preserved across genuine re-renders too.
+    const sig = `${showPaid}|${isFetching(providerId)}|${getModelSource(providerId) || ''}|${q}|${matches.length ? matches.map((m) => m.id).join(',') : ''}`;
+    if (!force && list.dataset.sig === sig) return;
+    list.dataset.sig = sig;
+    const prevScroll = list.scrollTop;
 
     if (!all.length) {
       if (isCustom) { list.innerHTML = ''; return; }
@@ -56,6 +66,7 @@ export function renderModelPicker(host, providerId, opts = {}) {
         ${freeIds.has(m.id) ? '<span class="mp-free">free</span>' : ''}
         <span class="mp-id">${esc(m.id)}</span>
       </button>`).join('');
+    list.scrollTop = prevScroll;
     list.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', () => {
       const id = b.dataset.id;
       list.querySelectorAll('.mp-item').forEach((x) => x.classList.remove('sel'));
@@ -68,8 +79,14 @@ export function renderModelPicker(host, providerId, opts = {}) {
   draw();
 
   // Trigger a background fetch if the cache is empty (uses the global helper).
-  if (getModels(providerId).length === 0 && (provider.publicModels || Storage.getKey(providerId))) {
-    if (window.fetchProviderSilent) window.fetchProviderSilent(providerId);
+  // Non-curated providers resolve their models via their own endpoints:
+  //   cst:* → fetchCustomProviderModelsSilent (/api/custom-providers/:id/fetch-models)
+  //   dyn:* → fetchProviderSilent        (/api/refresh-models)
+  //   curated → fetchProviderSilent only when it makes sense (public models or a key).
+  if (getModels(providerId).length === 0) {
+    if (providerId.startsWith('cst:') && window.fetchCustomProviderModelsSilent) window.fetchCustomProviderModelsSilent(providerId);
+    else if (providerId.startsWith('dyn:') && window.fetchProviderSilent) window.fetchProviderSilent(providerId);
+    else if ((provider.publicModels || Storage.getKey(providerId)) && window.fetchProviderSilent) window.fetchProviderSilent(providerId);
     let tries = 0;
     const poll = setInterval(() => {
       draw();

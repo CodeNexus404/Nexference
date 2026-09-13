@@ -13,18 +13,18 @@
 //  - The existing ProviderAdapter is the safest execution path
 // ═══════════════════════════════════════════════════════════════
 
-import { getProvider } from '../../providers/registry.js';
+import { getExecutableProvider } from '../executionResolver.js';
 import { getProviderAdapter } from '../../providers/providerAdapter.js';
 
 export const BRIDGE_TYPE = 'legacy-provider-bridge';
 
 export function isAvailable(providerId) {
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   return !!provider && ['openai', 'anthropic', 'gemini'].includes(provider.format);
 }
 
 export async function execute({ providerId, model, messages, systemPrompt, parameters, stream, key, signal, onToken }) {
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   if (!provider) throw new Error(`Unknown provider: ${providerId}`);
   const adapter = getProviderAdapter(provider);
   return adapter.chat({

@@ -3,7 +3,7 @@ import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { theme } from '../core/theme.js';
 import { router } from '../core/router.js';
-import { PROVIDERS, getProvider, providerTags } from '../providers/registry.js';
+import { PROVIDERS, getProvider, providerTags, allProviders, setProviderExtras } from '../providers/registry.js';
 import { configEngine } from '../config/engine.js';
 import { CopyableRuntime, LocalSettingsRuntime } from '../config/runtimeAdapter.js';
 import { CLIENTS, getClient, isClientSupported } from '../config/clientAdapter.js';
@@ -62,6 +62,29 @@ export async function fetchCachedModels() {
     return true;
   } catch (err) {
     console.warn('Failed to fetch cached models:', err);
+    return false;
+  }
+}
+
+// Refresh the non-curated provider index (adopted dyn:* + custom cst:*).
+// Registers UI-safe descriptors so `getProvider()`/model pickers resolve them
+// exactly like curated providers. Called at boot and every time the playground
+// mounts, so the provider dropdown always reflects dashboard changes
+// (custom-provider add/edit/delete, ecosystem adoptions).
+export async function refreshProviderIndex() {
+  try {
+    const [dyn, cst] = await Promise.all([
+      fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => ({ providers: [] })),
+      fetch('/api/custom-providers').then((r) => r.json()).catch(() => ({ providers: [] })),
+    ]);
+    const dynamic = Array.isArray(dyn.providers) ? dyn.providers : [];
+    const custom = Array.isArray(cst.providers) ? cst.providers : [];
+    workspace.dynamicProviders = dynamic;
+    workspace.customProviders = custom;
+    setProviderExtras(allProviders({ dynamic, custom }));
+    return true;
+  } catch (err) {
+    console.warn('Failed to refresh provider index:', err);
     return false;
   }
 }
@@ -336,6 +359,7 @@ export async function handleApply(event, providerId) {
       notify.log(`Applied ${provider.name} · model ${model}`, 't-ok');
       await loadConfig();
       renderGateways();
+      syncAppliedHighlights();
     }
   } catch (error) {
     notify.toast(`Error: ${error.message}`, 'error');
@@ -564,9 +588,21 @@ export async function loadConfig() {
       const jsonStr = JSON.stringify(config, null, 2);
       jsonEl.innerHTML = highlightJSON(jsonStr);
     }
-    // Detect which provider this config points at → persistent "active" state
+    // Detect which provider this config points at → persistent "active" state.
+    // Curated match first; custom providers are user-defined, so also resolve
+    // their base URL against the config. buildConfig writes ANTHROPIC_BASE_URL
+    // with a trailing `/v1/` stripped, so apply the same transform when
+    // comparing (covers every custom card, present and future).
     const base = config?.env?.ANTHROPIC_BASE_URL || '';
-    const match = PROVIDERS.find(p => norm(p.baseUrl) === norm(base));
+    let match = PROVIDERS.find(p => norm(p.baseUrl) === norm(base));
+    if (!match && base) {
+      const cfgForm = (u) => (u || '').replace(/\/v1\/?$/, '/').replace(/\/v1beta\/?$/, '/');
+      try {
+        const custRes = await fetch('/api/custom-providers').then(r => r.json()).catch(() => ({ providers: [] }));
+        match = (custRes.providers || []).find(p => norm(cfgForm(p.baseUrl)) === norm(base) || norm(p.baseUrl) === norm(base)) || null;
+      } catch {}
+    }
+    match = match || null;
     workspace.appliedProviderId = match ? match.id : null;
     const liveText = document.getElementById('liveText');
     if (liveText) {
@@ -756,12 +792,41 @@ function renderWorkspaceFromEnv(env) {
   if (!cfgValid) healthAction = '<div class="ws-health-action"><button class="btn btn-go sm" onclick="openWorkflow()">Configure…</button></div>';
   else if (healthStatus !== 'healthy') healthAction = '<div class="ws-health-action"><button class="btn ghost sm" onclick="openHealthModal()">Review details</button></div>';
 
+// ── Status dot ──
+  const dotMap = {
+    healthy: ['dev-ok', 'Connected'],
+    attention: ['dev-warn', 'Attention'],
+    'config-required': ['dev-warn', 'Configuration needed'],
+    partial: ['dev-warn', 'Partial'],
+    offline: ['dev-err', 'Offline'],
+    critical: ['dev-err', 'Error'],
+    unknown: ['dev-idle', 'Detecting…'],
+  };
+  const [dotCls, dotLabel] = dotMap[healthStatus] || dotMap.unknown;
+  const loadedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
   body.innerHTML = `
     <div class="ws-hero">
       <div class="ws-kpi reveal-f" style="--d:.04s"><span class="kpi-ico">${ICON.client}</span><b>${installedClients.length}</b><span>Clients</span><small>installed &amp; detected</small></div>
       <div class="ws-kpi reveal-f" style="--d:.08s"><span class="kpi-ico">${ICON.provider}</span><b>${providersConfigured}</b><span>Providers</span><small>API keys configured</small></div>
       <div class="ws-kpi reveal-f" style="--d:.12s"><span class="kpi-ico">${ICON.runtime}</span><b>${runningRt.length}</b><span>Runtimes</span><small>running locally</small></div>
       <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">${ICON.model}</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
+    </div>
+
+    <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
+      <div class="ws-health-head">
+        <div>
+          <span class="ws-eyebrow">Environment Health</span>
+          <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+        </div>
+        <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
+      </div>
+      <p class="ws-health-headline">${esc(healthHeadline)}</p>
+      <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
+      ${healthAction}
+      <div class="health-factors">
+        ${(health.factors || []).map((f) => `<div class="health-factor ${f.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`).join('')}
+      </div>
     </div>
 
     <div class="panel ws-quick reveal" style="--d:.07s">
@@ -786,26 +851,21 @@ function renderWorkspaceFromEnv(env) {
       </div>
     </div>
 
-    <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
-      <div class="ws-health-head">
-        <div>
-          <span class="ws-eyebrow">Environment Health</span>
-          <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
-        </div>
-        <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
-      </div>
-      <p class="ws-health-headline">${esc(healthHeadline)}</p>
-      <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
-      ${healthAction}
-      <div class="health-factors">
-        ${(health.factors || []).map((f) => `<div class="health-factor ${f.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`).join('')}
-      </div>
+    <div class="panel ws-summary reveal" style="--d:.15s">
+      <h3>Environment Overview</h3>
+      <div class="stat-row"><div class="stat"><b>${installedClients.length}</b><span>clients detected</span></div><div class="stat"><b>${providersConfigured}</b><span>providers configured</span></div></div>
+      <div class="stat-row"><div class="stat"><b>${runningRt.length}</b><span>runtimes running</span></div><div class="stat"><b>${models.length}</b><span>local models</span></div></div>
     </div>
 
-    <div class="panel ws-config reveal" style="--d:.10s">
+    <div class="panel ws-next reveal" style="--d:.20s">
+      <h3>Recommendations</h3>
+      <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
+    </div>
+
+    <div class="panel ws-config ws-full reveal" style="--d:.10s">
       <div class="ws-config-head">
         <span class="ws-eyebrow">Current Workspace</span>
-        <span class="badge ${cfgValid ? 'configured' : 'needs'}">${cfgValid ? 'Valid' : 'Attention'}</span>
+        <span class="dev-status"><span class="dev-dot ${dotCls}"></span><span>${esc(dotLabel)}</span></span>
       </div>
       <div class="ws-chain">
         <div class="chain-node clickable" role="button" tabindex="0" title="Open Clients" aria-label="Open Clients page" onclick="navigate('clients')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.client}</span><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
@@ -817,21 +877,11 @@ function renderWorkspaceFromEnv(env) {
         <div class="chain-node clickable" role="button" tabindex="0" title="Open Model Library" aria-label="Open Model Library" onclick="navigate('models')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.model}</span><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
       </div>
       <div class="ws-config-path muted">Config: <span class="mono">${esc(client.configPath || '~/.claude/settings.json')}</span></div>
+      <div class="ws-config-asof">Loaded ${esc(loadedAt)}</div>
       <div class="ws-actions-row">
         <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
         <button class="btn btn2" onclick="navigate('configuration')">Configuration</button>
       </div>
-    </div>
-
-    <div class="panel ws-summary reveal" style="--d:.15s">
-      <h3>Environment Overview</h3>
-      <div class="stat-row"><div class="stat"><b>${installedClients.length}</b><span>clients detected</span></div><div class="stat"><b>${providersConfigured}</b><span>providers configured</span></div></div>
-      <div class="stat-row"><div class="stat"><b>${runningRt.length}</b><span>runtimes running</span></div><div class="stat"><b>${models.length}</b><span>local models</span></div></div>
-    </div>
-
-    <div class="panel ws-next reveal" style="--d:.20s">
-      <h3>Recommendations</h3>
-      <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
     </div>
 
     <div class="panel ws-models reveal" id="wsModelIntel" style="--d:.25s">
@@ -854,7 +904,7 @@ function renderWorkspaceFromEnv(env) {
       <div class="muted">Loading execution capabilities…</div>
     </div>
 
-    <div class="panel ws-profiles reveal" style="--d:.30s">
+    <div class="panel ws-profiles ws-full reveal" style="--d:.30s">
       <h3>Profiles</h3>
       <p class="muted">Saved configuration selections — never store secrets.</p>
       <div id="wsProfiles" class="ws-profile-list"></div>
@@ -906,8 +956,15 @@ function fillWsExecGateway() {
 function fillWsIntegration() {
   const host = document.getElementById('wsIntegration');
   if (!host) return;
+  // Inject coverage inside the aligned grid panel (keeping the panel card
+  // frame) rather than replacing it with the standalone ic-section wrapper.
   integrationCoverageHTML().then((html) => {
-    if (html) host.outerHTML = html.replace('<section', '<div').replace('</section>', '</div>');
+    if (!html) return;
+    const inner = html
+      .replace(/^<section class="ic-section">\s*/, '')
+      .replace(/<h2 class="ic-h2">[\s\S]*?<\/h2>\s*/, '')
+      .replace(/<\/section>\s*$/, '');
+    host.innerHTML = `<h3>Provider Integration</h3>${inner}`;
   }).catch(() => {});
 }
 
@@ -2401,15 +2458,35 @@ function patchCloudCard(providerId) {
   const changeBadge = changeN ? `<span class="badge pi-change" title="Recent discovery changes">${changeN} change${changeN > 1 ? 's' : ''}</span>` : '';
   const statusText = avail === 'available' ? 'available' : (avail === 'unavailable' ? 'unavailable' : (ds === 'curated' ? 'known · curated' : 'unknown'));
   const key = Storage.getKey(providerId);
+  const applied = workspace.appliedProviderId === providerId;
   const dotHTML = ds ? `<span class="pi-dot ${dsDotClass(ds)}" title="${esc(dsLabel(ds))}"></span>` : '';
   const dot = card.querySelector('.pc-head .pi-dot');
   if (dot) dot.outerHTML = dotHTML;
   else if (dotHTML) { const meta = card.querySelector('.pc-head .provider-meta'); if (meta) meta.insertAdjacentHTML('afterend', dotHTML); }
+  card.classList.toggle('applied', applied);
   const foot = card.querySelector('.pc-card-foot');
-  if (foot) foot.innerHTML = `<span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>${srcBadge}${changeBadge}${key ? '<span class="badge cc">configured</span>' : ''}`;
+  if (foot) foot.innerHTML = `<span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>${srcBadge}${changeBadge}${applied ? '<span class="applied-badge">active</span>' : ''}${key ? '<span class="badge cc">configured</span>' : ''}`;
   const intelRow = card.querySelector('.pc-intel-row');
   if (intelRow) intelRow.innerHTML = `<span class="pi-status">${esc(statusText)}</span><span class="pi-checked">· ${esc(lastChecked)}</span>`;
 }
+
+// Sync the "active provider" highlight across every card already in the grid
+// (curated, ecosystem, custom — including any added in future) without a full
+// re-render. Called after applying a provider so the highlight moves instantly.
+function syncAppliedHighlights() {
+  const grid = document.getElementById('cpGrid');
+  if (!grid) return;
+  grid.querySelectorAll('.provider-card.cp-card, .provider-card.eco-cp-card').forEach((card) => {
+    const isActive = workspace.appliedProviderId === card.dataset.id;
+    card.classList.toggle('applied', isActive);
+    const foot = card.querySelector('.pc-card-foot');
+    if (!foot) return;
+    const existing = foot.querySelector('.applied-badge');
+    if (isActive && !existing) foot.insertAdjacentHTML('beforeend', '<span class="applied-badge">active</span>');
+    else if (!isActive && existing) existing.remove();
+  });
+}
+window.syncAppliedHighlights = syncAppliedHighlights;
 
 export async function refreshProviderIntelligence(providerId) {
   const btn = providerId
@@ -2870,10 +2947,12 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       const freeModelsN = intel?.models?.free ?? free;
       const srcBadge = intel ? `<span class="badge pi-src">${intel.source.type === 'official-api' ? 'verified' : 'curated'}</span>` : '';
       const lastChecked = intel?.source?.lastCheckedAt ? relTime(intel.source.lastCheckedAt) : 'not checked';
+      const applied = workspace.appliedProviderId === p.id;
+      const appliedBadge = applied ? '<span class="applied-badge">active</span>' : '';
       const changeN = workspace.providerChangeCounts[p.id] || 0;
       const changeBadge = changeN ? `<span class="badge pi-change" title="Recent discovery changes">${changeN} change${changeN > 1 ? 's' : ''}</span>` : '';
       const statusText = avail === 'available' ? 'available' : (avail === 'unavailable' ? 'unavailable' : (ds === 'curated' ? 'known · curated' : 'unknown'));
-      return `<div class="panel provider-card cp-card" data-id="${p.id}" role="button" tabindex="0">
+      return `<div class="panel provider-card cp-card${applied ? ' applied' : ''}" data-id="${p.id}" role="button" tabindex="0">
         <div class="pc-head">
           <div class="pc-logo-sm">${logoHtml(p)}</div>
           <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(compat)}</span></div>
@@ -2881,7 +2960,7 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
         </div>
         <div class="pc-card-foot">
           <span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>
-          ${srcBadge}${changeBadge}${key ? '<span class="badge cc">configured</span>' : ''}
+          ${srcBadge}${changeBadge}${appliedBadge}${key ? '<span class="badge cc">configured</span>' : ''}
         </div>
         <div class="pc-intel-row">
           <span class="pi-status">${esc(statusText)}</span>
@@ -2932,6 +3011,10 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
             const totalN = fetchedModels.length;
             const badge = c.querySelector('.badge.cnt');
             if (badge) badge.textContent = freeN + ' free · ' + totalN + ' total';
+            // Re-sync provider intel so the "· last checked" row updates in place
+            // (server bumped updatedAt on this fetch), like default cards do.
+            await fetchProviderIntel().catch(() => {});
+            patchCloudCard(cid);
             notify.toast(`Refreshed ${totalN} models`, 'success');
           } else {
             notify.toast('No models found', 'info');
@@ -2958,13 +3041,15 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       : `<div class="pc-logo-sm">${esc(ecoInitials(e.name))}</div>`;
     const stateBadge = adopted ? '<span class="badge ok">adopted</span>' : '<span class="badge">discovered</span>';
     const cfgBadge = cfg && adopted ? '<span class="badge cc">configurable</span>' : '';
-    return `<div class="panel provider-card eco-cp-card" data-id="${esc(e.id)}" role="button" tabindex="0">
+    const appliedBadge = workspace.appliedProviderId === e.id ? '<span class="applied-badge">active</span>' : '';
+    const appliedCls = workspace.appliedProviderId === e.id ? ' applied' : '';
+    return `<div class="panel provider-card eco-cp-card${appliedCls}" data-id="${esc(e.id)}" role="button" tabindex="0">
       <div class="pc-head">
         <div class="pc-logo-sm">${logo}</div>
         <div class="provider-meta"><b>${esc(e.name)}</b><span class="provider-compat">${esc(e.category || 'unknown')}</span></div>
       </div>
       <div class="pc-card-foot">
-        <span class="badge pi-src">ecosystem</span>${stateBadge}${cfgBadge}
+        <span class="badge pi-src">ecosystem</span>${stateBadge}${cfgBadge}${appliedBadge}
       </div>
       <div class="pc-intel-row"><span class="pi-status">discovery only</span></div>
     </div>`;
@@ -2981,9 +3066,10 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
   drawFilters();
   drawGrid();
 
-  if (!Object.keys(workspace.providerIntel).length) {
-    fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
-  }
+  // Always re-sync intelligence on mount — providerIntel may be non-empty but
+  // stale (e.g. populated before a custom provider was created), which would
+  // otherwise leave new custom cards showing "· not checked".
+  fetchProviderIntel().then(() => { if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   if (!workspace.ecoDiscovered) {
     fetch('/api/ecosystem/providers?registryState=discovered').then((r) => r.json()).then((d) => { workspace.ecoDiscovered = d.providers || []; if (document.body.dataset.page === 'cloud-providers') drawGrid(); }).catch(() => {});
   }
@@ -3110,6 +3196,10 @@ export async function renderPlayground() {
   if (pgLiveTimer) { clearInterval(pgLiveTimer); pgLiveTimer = null; }
   if (pgES && pgES.abort) { try { pgES.abort(); } catch { /* ignore */ } }
   pgES = null; pgExecId = null;
+
+  // Ensure the provider dropdown reflects dashboard changes (new custom
+  // providers, ecosystem adoptions) — re-register the index every mount.
+  await refreshProviderIndex();
 
   const draft = historyStore.loadDraft() || {};
   const state = {

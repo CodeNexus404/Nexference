@@ -11,6 +11,7 @@ import { getRuntime } from '../local/runtimes.js';
 import { getIntegration } from '../providers/integrations/integrationStore.js';
 import { isExecutable } from '../providers/integrations/integrationTypes.js';
 import { getCustomProvider } from '../providers/custom/customProviderStore.js';
+import { getDynamicProvider } from '../providers/dynamic/dynamicProviderStore.js';
 import { getRuntimeExec, EXEC_FORMATS } from './executionRegistry.js';
 
 export const EXEC_ROUTE = {
@@ -50,12 +51,20 @@ function resolveLocalRoute(runtimeId) {
 
 // Custom providers store their declared format at creation; expose the shape
 // the cloud-route/status logic expects (never inferred — user-declared).
-function getExecutableProvider(providerId) {
+export function getExecutableProvider(providerId) {
   const curated = getProvider(providerId);
   if (curated) return curated;
   const cust = getCustomProvider(providerId);
   if (cust && cust.api?.format && cust.api.format !== 'unknown') {
     return { id: cust.id, name: cust.identity?.name, format: cust.api.format, baseUrl: cust.api.baseUrl || null, isCustom: true };
+  }
+  // Adopted (dynamic) providers carry their declared adapter dialect from the
+  // integration record — only treat it as an executable format if it is one of
+  // the known EXEC_FORMATS dialects (never invented from metadata).
+  const dyn = getDynamicProvider(providerId);
+  const dfmt = dyn && dyn.integration && dyn.integration.adapterType;
+  if (dyn && dfmt && EXEC_FORMATS.includes(dfmt)) {
+    return { id: dyn.id, name: dyn.name, format: dfmt, baseUrl: dyn.integration.baseUrl || null, isDynamic: true };
   }
   return null;
 }

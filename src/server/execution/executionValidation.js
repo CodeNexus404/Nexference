@@ -7,10 +7,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 import os from 'os';
-import { getProvider } from '../providers/registry.js';
 import { getRuntime, getLmStudioModelDetails } from '../local/runtimes.js';
 import { getModelDetails } from '../models/modelIntelligenceService.js';
 import { getRuntimeExec, probeRuntime, EXEC_FORMATS } from './executionRegistry.js';
+import { getExecutableProvider } from './executionResolver.js';
 
 // Registry providers expose `id` (not `name`); resolve a display label safely.
 const pname = (p) => (p && (p.name || p.id)) || 'provider';
@@ -165,7 +165,10 @@ export async function validateExecution(req = {}) {
   }
 
   // ── Cloud ──
-  const provider = getProvider(providerId);
+  // Resolve curated + adopted (dyn:) + custom (cst:) providers through the same
+  // unified resolver used by the rest of the gateway, so execution validation
+  // never rejects a provider the rest of the dashboard knows about.
+  const provider = getExecutableProvider(providerId);
   if (!provider) { r.reasons.push(`Unknown provider: "${providerId}".`); return r; }
   if (!EXEC_FORMATS.includes(provider.format)) {
     r.reasons.push(`${pname(provider)} supports model discovery, but execution is not yet implemented for its ${provider.format} API format.`);

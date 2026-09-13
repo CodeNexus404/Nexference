@@ -155,8 +155,27 @@ export const PROVIDERS = [
 ];
 
 export function getProvider(id) {
-  return PROVIDERS.find((p) => p.id === id);
+  return PROVIDERS.find((p) => p.id === id) || registryExtras[id] || null;
 }
+
+// ─── Non-curated provider resolution (v2.2.1) ───
+// Curated `getProvider` only knows the static PROVIDERS list. Adopted ecosystem
+// (dyn:*) and user-created custom (cst:*) providers live in stores, so the app
+// registers their UI-safe descriptors here. Every dropdown / model picker that
+// calls getProvider() then resolves them identically to curated providers.
+let registryExtras = {};
+
+export function setProviderExtras(list) {
+  registryExtras = {};
+  (Array.isArray(list) ? list : []).forEach((p) => { if (p && p.id) registryExtras[p.id] = p; });
+}
+
+// Register the merged, UI-safe list (from allProviders) as the fallback index.
+export function registerProviderExtras({ dynamic = [], custom = [] } = {}) {
+  setProviderExtras(allProviders({ dynamic, custom }));
+}
+
+export function getProviderExtras() { return registryExtras; }
 
 // Filter tags used by the Cloud Providers explorer (All / Popular / Free /
 // Anthropic Compatible / OpenAI Compatible / Google). Presentation-only.
@@ -187,6 +206,58 @@ export function providerTags(id) {
 // excluded (their configs are shown copyable, not written to settings.json).
 export function claudeCodeProviders() {
   return PROVIDERS.filter((p) => p.claudeCode || p.id === 'openrouter');
+}
+
+// ─── Global provider list (v2.2.1) ───
+// The curated registry is static, but the app also has adopted ecosystem
+// (dynamic) providers and user-created custom providers. Every provider
+// dropdown in the dashboard (config wizard, playground, etc.) must reflect what
+// actually exists, so this merges all three sources into one list of UI-safe
+// descriptors. `logo` may be null for dynamic/custom → logoHtml falls back to a
+// monogram; `format` drives compatibility via clientProviderCompatibility.
+function hostFromUrl(url) {
+  if (!url) return '';
+  try { return new URL(url).hostname; } catch { return url; }
+}
+
+export function allProviders({ dynamic = [], custom = [] } = {}) {
+  const base = PROVIDERS.filter((p) => p.id !== 'custom');
+  const dyn = (Array.isArray(dynamic) ? dynamic : [])
+    .filter((d) => d && typeof d === 'object' && d.id && d.status === 'active')
+    .map((d) => {
+      const fmt = d.integration?.adapterType || d.format || null;
+      const baseUrl = d.integration?.baseUrl || d.baseUrl || '';
+      return {
+        id: d.id, name: d.name || d.id,
+        sub: hostFromUrl(baseUrl) || 'adopted provider',
+        logo: d.logo && typeof d.logo === 'object' && d.logo.url ? d.logo.url : null,
+        accent: '#6366f1', glow: 'rgba(99,102,241,.2)',
+        format: fmt, claudeCode: fmt === 'anthropic',
+        baseUrl,
+        desc: d.compatibilityNote
+          || (d.modelSupport && d.modelSupport.count ? `Adopted provider with ${d.modelSupport.count} models.` : 'Adopted from ecosystem discovery.'),
+        signup: '', defaultKey: '', hasCustomUrl: true, publicModels: false,
+        isFree: () => false, origin: 'ecosystem',
+      };
+    });
+  const cst = (Array.isArray(custom) ? custom : [])
+    .filter((c) => c && typeof c === 'object' && c.id && c.lifecycle === 'active')
+    .map((c) => {
+      const fmt = c.format || null;
+      const baseUrl = c.baseUrl || '';
+      return {
+        id: c.id, name: c.name || c.id,
+        sub: hostFromUrl(baseUrl) || c.sub || 'custom gateway',
+        logo: typeof c.logo === 'string' && c.logo ? c.logo : null,
+        accent: '#f59e0b', glow: 'rgba(245,158,11,.2)',
+        format: fmt, claudeCode: fmt === 'anthropic',
+        baseUrl,
+        desc: c.desc || 'Manually configured provider.',
+        signup: '', defaultKey: '', hasCustomUrl: true, publicModels: false,
+        isFree: () => false, origin: 'custom',
+      };
+    });
+  return [...base, ...dyn, ...cst, ...PROVIDERS.filter((p) => p.id === 'custom')];
 }
 
 // ─── Provider capabilities (v0.4.0) ───

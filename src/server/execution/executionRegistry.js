@@ -10,6 +10,8 @@
 
 import { RUNTIMES } from '../local/runtimes.js';
 import { PROVIDERS, getProvider } from '../providers/registry.js';
+import { loadDynamicProviders } from '../providers/dynamic/dynamicProviderStore.js';
+import { listCustomProviders } from '../providers/custom/customProviderStore.js';
 
 // API dialects we can genuinely execute against today.
 export const EXEC_FORMATS = ['openai', 'anthropic', 'gemini'];
@@ -67,6 +69,39 @@ export function getExecutionCapabilities() {
         : 'Model discovery supported; execution not yet implemented for this API format.',
     };
   });
+
+  // Adopted ecosystem providers (dyn:*) with a declared, executable dialect.
+  for (const d of loadDynamicProviders().providers) {
+    if (d.status !== 'active') continue;
+    const fmt = d.integration && d.integration.adapterType;
+    if (!fmt || !EXEC_FORMATS.includes(fmt)) continue;
+    cloud.push({
+      id: d.id,
+      name: d.name || d.id,
+      format: fmt,
+      supportsExecution: true,
+      streaming: true,
+      requiresKey: d.requiresKey !== false,
+      note: 'Adopted provider.',
+    });
+  }
+
+  // User-created custom providers (cst:*) — user-declared format.
+  for (const c of listCustomProviders()) {
+    if (c.lifecycle !== 'active') continue;
+    const fmt = c.api && c.api.format;
+    if (!fmt || fmt === 'unknown' || !EXEC_FORMATS.includes(fmt)) continue;
+    cloud.push({
+      id: c.id,
+      name: (c.identity && c.identity.name) || c.id,
+      format: fmt,
+      supportsExecution: true,
+      streaming: true,
+      requiresKey: c.requiresKey !== false,
+      note: 'Custom provider.',
+    });
+  }
+
   const local = RUNTIMES.map((rt) => {
     const cfg = RUNTIME_EXEC[rt.id];
     if (!cfg) {

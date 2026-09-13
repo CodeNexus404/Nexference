@@ -63,7 +63,11 @@ export function customProviderCard(p) {
   const dot = ds ? `<span class="pi-dot ds-${ds || 'unknown'}" title="${esc(ds || 'unknown')}"></span>` : '';
   const totalModels = intel?.models?.total ?? modelCount;
   const freeModelsN = intel?.models?.free ?? freeCount;
-  const lastChecked = intel?.source?.lastCheckedAt ? relTime(intel.source.lastCheckedAt) : 'not checked';
+  const lastChecked = intel?.source?.lastCheckedAt
+    ? relTime(intel.source.lastCheckedAt)
+    : ((p.updatedAt || p.createdAt) ? relTime(p.updatedAt || p.createdAt) : 'not checked');
+  // Active highlight — this provider is the one current in settings.json.
+  const active = workspace.appliedProviderId === p.id;
   // Favicon rendering with graceful fallback. The /api/ecosystem/logo proxy
   // only accepts https image/* URLs, so favicons served over http or as .ico
   // (image/x-icon) fail there. On failure we swap src to the provider's website
@@ -77,7 +81,7 @@ export function customProviderCard(p) {
       : logoImg(`/api/ecosystem/logo?url=${encodeURIComponent(p.logo)}`, site ? `/api/custom-providers/favicon?url=${encodeURIComponent(site)}&format=data` : ''))
     : `<span class="mono-fallback">${svgLogo(p)}</span>`;
 
-  return `<div class="panel provider-card cp-card" data-id="${id}" data-origin="custom" role="button" tabindex="0">
+  return `<div class="panel provider-card cp-card${active ? ' applied' : ''}" data-id="${id}" data-origin="custom" role="button" tabindex="0">
     <div class="pc-head">
       <div class="pc-logo-sm">${favSrc}</div>
       <div class="provider-meta"><b>${name}</b><span class="provider-compat">Custom · ${fmt}</span></div>
@@ -85,7 +89,7 @@ export function customProviderCard(p) {
     </div>
     <div class="pc-card-foot">
       <span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>
-      ${key ? '<span class="badge cc">configured</span>' : ''}
+      ${active ? '<span class="applied-badge">active</span>' : ''}${key ? '<span class="badge cc">configured</span>' : ''}
     </div>
     <div class="pc-intel-row">
       <span class="pi-status">${esc(p.identity?.description || 'Custom provider')}</span>
@@ -284,9 +288,58 @@ export function openAddCustomProviderWizard() {
     }
   }
 
+  // Scrape + store the website favicon into formData and refresh the preview.
+  // Centralised so the "enter step 3", radio-change and URL-typing paths share
+  // one implementation. Best-effort: failures leave the generated initials.
+  async function scrapeLogoFor(url) {
+    if (!url || formData.logoFetching || formData.logoChoice !== 'website') return;
+    formData.logoFetching = true;
+    const body = document.querySelector('.modal-card-body');
+    const previewWrap = body?.querySelector('.cpw-logo-preview-wrap');
+    if (previewWrap) previewWrap.innerHTML = '<span class="muted">Fetching favicon…</span>';
+    try {
+      const result = await cpService.scrapeFavicon(url);
+      if (formData.logoChoice !== 'website') return; // user switched while fetching
+      const dataUrl = result?.ok && result.url?.startsWith('data:') ? result.url : null;
+      formData.logoDataUrl = dataUrl;
+      formData.logoUrl = dataUrl ? null : (result?.ok && result.url ? result.url : null);
+      formData.logoSrc = dataUrl || formData.logoUrl ? 'website' : null;
+      const preview = body?.querySelector('.cpw-logo-preview-wrap');
+      if (preview) {
+        preview.innerHTML = formData.logoDataUrl
+          ? `<div class="cpw-logo-preview"><img src="${formData.logoDataUrl}" alt="Logo" /></div>`
+          : (formData.logoUrl
+            ? `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(formData.logoUrl)}" alt="Logo" onerror="this.parentElement.innerHTML='<span class=muted>Not found</span>'" /></div>`
+            : '<div class="cpw-logo-preview cpw-logo-fallback">' + esc(initials(formData.name)) + '</div>');
+      }
+    } finally {
+      formData.logoFetching = false;
+    }
+  }
+
   function bindStep() {
     const body = document.querySelector('.modal-card-body');
     if (!body) return;
+
+    // Auto-fetch the favicon as soon as the user types a website/base URL and the
+    // logo choice is "Website favicon" (the default). Debounced so a URL typed in
+    // characters doesn't fire a scrape per keystroke; the result is cached in
+    // formData so the review step and the created card show it immediately.
+    let urlScrapeTimer = null;
+    function triggerUrlScrape() {
+      clearTimeout(urlScrapeTimer);
+      urlScrapeTimer = setTimeout(() => {
+        const url = formData.logoChoice === 'website' ? (formData.website || formData.baseUrl) : '';
+        if (!url || url.length < 8 || formData.logoFetching) return;
+        scrapeLogoFor(formData.website || formData.baseUrl);
+      }, 700);
+    }
+
+    // Debounced input listeners on the URL fields (best effort, non-blocking).
+    const wsInput = body.querySelector('#cpwWebsite');
+    if (wsInput) wsInput.addEventListener('input', (e) => { formData.website = e.target.value; triggerUrlScrape(); });
+    const buInput = body.querySelector('#cpwBaseUrl');
+    if (buInput) buInput.addEventListener('input', (e) => { formData.baseUrl = e.target.value; triggerUrlScrape(); });
 
     // Highlight selected radio on change
     body.querySelectorAll('input[type="radio"]').forEach((r) => {
@@ -762,6 +815,7 @@ export async function openCustomProviderDetail(id) {
             notify.toast(`Applied ${p.identity?.name || id} to Claude Code!`, 'success');
             if (window.renderWorkspace) window.renderWorkspace();
             if (window.updateShellStatus) window.updateShellStatus();
+            if (window.syncAppliedHighlights) window.syncAppliedHighlights();
           }
         } else {
           CopyableRuntime.show(cfg, `${p.identity?.name || id} config`);

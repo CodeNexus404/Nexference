@@ -2,9 +2,11 @@
 // AI client can consume a given cloud provider, and how Nexference would
 // configure it. All compatibility logic lives here, not scattered through the UI.
 //
-// Claude Code is the only fully VERIFIED, auto-applied adapter. Other clients
-// may be SUPPORTED/EXPERIMENTAL at the connection level but remain MANUAL for
-// automatic configuration — Nexference is honest about that.
+// Claude Code is the fully VERIFIED auto-applied adapter for Anthropic-format
+// gateways. OpenCode and Codex are VERIFIED for OpenAI-compatible endpoints
+// (their config files are well-defined and Nexference writes them via the
+// same safe pipeline). Gemini CLI has no written-config path yet — it stays
+// MANUAL/SUPPORTED. Nexference remains honest about that distinction.
 import { getProvider, providerProtocols } from '../providers/registry.js';
 import { verified, supported, experimental, unsupported } from './result.js';
 
@@ -76,9 +78,9 @@ export function checkClientProvider(clientId, providerId) {
 
   if (overlap.length) {
     if (clientId === 'opencode-cli' || clientId === 'codex') {
-      return supported('openai-compatible', clientId, [
-        'OpenCode/Codex consume OpenAI-compatible endpoints.',
-        'Auto-apply guidance only — Nexference does not write this client config yet.',
+      return verified('openai-compatible', clientId, [
+        'OpenCode/Codex consume OpenAI-compatible endpoints — the config format is well-defined.',
+        'Nexference can write the client config file automatically.',
       ]);
     }
     if (clientId === 'gemini-cli') {

@@ -6,12 +6,14 @@ import { ClaudeCodeAdapter } from './claudeCode.js';
 import { OpenCodeCliAdapter } from './opencodeCli.js';
 import { CodexCliAdapter } from './codexCli.js';
 import { GeminiCliAdapter } from './geminiCli.js';
+import { CursorAdapter } from './cursor.js';
 
 const MAP = {
   'claude-code': ClaudeCodeAdapter,
   'opencode-cli': OpenCodeCliAdapter,
   'codex': CodexCliAdapter,
   'gemini-cli': GeminiCliAdapter,
+  'cursor': CursorAdapter,
 };
 
 export function getClientAdapter(id) {
@@ -25,3 +27,4 @@ export { ClaudeCodeAdapter } from './claudeCode.js';
 export { OpenCodeCliAdapter } from './opencodeCli.js';
 export { CodexCliAdapter } from './codexCli.js';
 export { GeminiCliAdapter } from './geminiCli.js';
+export { CursorAdapter } from './cursor.js';

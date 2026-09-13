@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await UI.fetchCachedModels();
   await UI.fetchProviderIntel();
   await UI.loadConfig();
+  await UI.refreshProviderIndex();
   navigate(workspace.currentPage || 'workspace');
 
   // Keep pulling the server cache until its startup fetch settles.

@@ -20,6 +20,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { PROVIDERS, getProvider } from './registry.js';
+import { listCustomProviders, getCustomProvider } from './custom/customProviderStore.js';
 import { modelCache } from './modelCache.js';
 import { isFreeModel } from '../models/modelIntelligenceService.js';
 import { curatedSource } from './sources/curatedSource.js';
@@ -126,6 +127,57 @@ function buildBaseline(provider) {
     timestamps: { firstSeenAt: now, lastSeenAt: null, lastCheckedAt: null, lastChangedAt: null },
     discovered: false,
     _baseline: true,
+    _fetchedAt: Date.now(),
+  };
+}
+
+// Intel record for a user-created custom provider (cst:*). Custom providers are
+// not part of the curated DISCOVERABLE set or the discovery baseline, so they
+// get a synthetic-but-honest record built from the store. `lastCheckedAt` is
+// always the latest real activity on the record (creation, model fetch, or
+// connection test) so the UI never reports "not checked" for a provider the
+// user has actually added. Verified state comes only from a successful model
+// fetch (modelSupport == verified); otherwise UNKNOWN.
+function buildCustomIntel(rec) {
+  if (!rec || !rec.id) return null;
+  const models = rec.modelSupport?.models || [];
+  const free = models.filter((m) => m?.pricing?.input === 0 || m?.pricing?.output === 0).length;
+  const total = models.length;
+  const paid = total - free;
+  const verified = rec.modelSupport?.status === 'verified';
+  const lastChecked = rec.connection?.lastTestedAt || rec.updatedAt || rec.createdAt || null;
+  const format = rec.api?.format || 'unknown';
+  return {
+    id: rec.id,
+    identity: {
+      name: rec.identity?.name || rec.id,
+      website: rec.identity?.website || null,
+      description: rec.identity?.description || null,
+    },
+    status: {
+      availability: verified ? AVAILABILITY.AVAILABLE : AVAILABILITY.UNKNOWN,
+      discoveryStatus: verified ? DISCOVERY_STATUS.OBSERVED : DISCOVERY_STATUS.UNKNOWN,
+      sourceStatus: null,
+    },
+    access: {
+      requiresApiKey: true,
+      supportsFreeModels: free > 0,
+      supportsPaidModels: paid > 0,
+      accessType: deriveAccessType(free, paid),
+    },
+    compatibility: compatFromFormat(format, [format]),
+    source: {
+      type: 'custom',
+      url: rec.api?.baseUrl || null,
+      confidence: CONFIDENCE.MEDIUM,
+      verifiedAt: lastChecked,
+      lastCheckedAt: lastChecked,
+    },
+    models: { total, free, paid, unknown: 0, modelIds: models.map((m) => m.id).filter(Boolean).sort() },
+    timestamps: { firstSeenAt: rec.createdAt || null, lastSeenAt: lastChecked, lastCheckedAt: lastChecked, lastChangedAt: rec.updatedAt || null },
+    discovered: false,
+    _baseline: true,
+    _custom: true,
     _fetchedAt: Date.now(),
   };
 }
@@ -390,16 +442,27 @@ async function discoverAllProviders({ force = false } = {}) {
 function getProviderIntelligence(id) {
   if (!id) return null;
   const r = ensureBaseline(id);
-  if (!r) return null;
-  return { ...r, changes: listChanges({ provider: id, limit: 5 }) };
+  if (r) return { ...r, changes: listChanges({ provider: id, limit: 5 }) };
+  const custom = getCustomProvider(id);
+  if (custom) return { ...buildCustomIntel(custom), changes: [] };
+  return null;
 }
 
 function getAllProviderIntelligence() {
   for (const p of DISCOVERABLE) ensureBaseline(p.id);
-  return DISCOVERABLE.map((p) => {
+  const curated = DISCOVERABLE.map((p) => {
     const r = intel[p.id];
     return r ? { ...r, changes: listChanges({ provider: p.id, limit: 5 }) } : null;
   }).filter(Boolean);
+  // Custom providers are user-declared (cst:*), so they join the same
+  // intelligence feed — every card surface shows a real "checked" time
+  // and honest model counts instead of "not checked".
+  const custom = listCustomProviders()
+    .filter((r) => r.lifecycle !== 'removed')
+    .map((r) => buildCustomIntel(r))
+    .filter(Boolean)
+    .map((r) => ({ ...r, changes: [] }));
+  return [...curated, ...custom];
 }
 
 function getDiscoverySummary() {

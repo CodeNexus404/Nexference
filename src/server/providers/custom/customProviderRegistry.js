@@ -35,6 +35,8 @@ export function toCustomUnified(rec) {
     hasCustomUrl: !!rec.api?.baseUrl,
     requiresKey: rec.authentication?.required !== false,
     claudeCode: rec.api?.format === 'anthropic',
+    createdAt: rec.createdAt || null,
+    updatedAt: rec.updatedAt || null,
   };
 }
 

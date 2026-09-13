@@ -19,8 +19,13 @@ export class RuntimeAdapter {
 
 export class LocalSettingsRuntime extends RuntimeAdapter {
   // Returns true on success, false on HTTP failure (caller surfaces the toast).
-  static async write(config) {
-    const response = await fetch('/api/config', {
+  // clientId='claude-code' uses the legacy /api/config endpoint (untouched).
+  // Any other clientId routes to /api/config/:clientId (generic, dispatches via adapter).
+  static async write(config, clientId) {
+    const url = clientId && clientId !== 'claude-code'
+      ? `/api/config/${encodeURIComponent(clientId)}`
+      : '/api/config';
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config),

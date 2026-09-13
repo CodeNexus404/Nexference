@@ -7,7 +7,7 @@
 //  only providers.
 // ═══════════════════════════════════════════════════════════════
 
-import { getProvider } from '../../providers/registry.js';
+import { getExecutableProvider } from '../executionResolver.js';
 import { getIntegration } from '../../providers/integrations/integrationStore.js';
 import { isExecutable, ADAPTER_TYPE } from '../../providers/integrations/integrationTypes.js';
 import { getAdapter } from '../../providers/integrations/integrationRegistry.js';
@@ -26,7 +26,7 @@ export function isAvailable(providerId) {
 }
 
 export async function execute({ providerId, model, messages, systemPrompt, parameters, stream, key, signal, onToken }) {
-  const provider = getProvider(providerId);
+  const provider = getExecutableProvider(providerId);
   if (!provider) throw new Error(`Unknown provider: ${providerId}`);
   const integration = getIntegration(providerId);
   if (!integration) throw new Error(`No integration record for ${providerId}`);

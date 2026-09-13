@@ -44,7 +44,7 @@ export const CLIENTS = [
   },
   {
     id: 'opencode-cli', name: 'OpenCode', logo: '/clients/opencode-cli.png', support: 'manual', level: 2, adapter: 'opencode-cli',
-    connectionTypes: ['cloud', 'local'], configPath: '~/.config/opencode/config.json',
+    connectionTypes: ['cloud', 'local'], configPath: '~/.config/opencode/opencode.json',
     capabilities: CAP.assisted,
     note: 'OpenCode consumes OpenAI-compatible endpoints. Auto-configure guidance only.',
   },

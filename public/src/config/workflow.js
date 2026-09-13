@@ -8,7 +8,7 @@ import { renderModelPicker } from '../components/modelPicker.js';
 import { renderModelPickerUnified } from '../components/modelLibrary.js';
 import { configEngine } from './engine.js';
 import { LocalSettingsRuntime, CopyableRuntime } from './runtimeAdapter.js';
-import { getProvider, claudeCodeProviders, PROVIDERS } from '../providers/registry.js';
+import { getProvider, claudeCodeProviders, PROVIDERS, allProviders, setProviderExtras } from '../providers/registry.js';
 import { getClient, isClientSupported, normalizeClientId, CLIENTS } from '../clients/registry.js';
 import { getClientAdapter } from '../clients/index.js';
 import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
@@ -120,6 +120,12 @@ export function openWorkflow(opts = {}) {
       wf.bodyEl = body.querySelector('#wfBody');
       wf.actionsEl = body.querySelector('#wfActions');
       renderStep();
+      // Load adopted (dynamic) + custom providers once so the provider step can
+      // offer them alongside the curated registry. Best-effort — the wizard is
+      // fully functional with curated providers alone.
+      if (!workspace.dynamicProviders || !workspace.customProviders) {
+        loadProviderExtras().finally(() => renderStep());
+      }
     },
     onClose: () => {
       if (wf.generated && !wf.appliedRecorded) workspace.unsaved = true;
@@ -159,6 +165,25 @@ export function openWorkflow(opts = {}) {
   }
 
   function el(cls) { const d = document.createElement('div'); d.className = cls; return d; }
+
+  // Load adopted (dynamic) + user-created custom providers into workspace state
+  // so the provider dropdown reflects reality. Idempotent per open; cached on
+  // workspace so other views (playground, model picker) reuse the same list.
+  async function loadProviderExtras() {
+    const [dyn, cst] = await Promise.all([
+      workspace.dynamicProviders
+        ? Promise.resolve({ providers: workspace.dynamicProviders })
+        : fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => ({ providers: [] })),
+      workspace.customProviders
+        ? Promise.resolve({ providers: workspace.customProviders })
+        : fetch('/api/custom-providers').then((r) => r.json()).catch(() => ({ providers: [] })),
+    ]);
+    if (!workspace.dynamicProviders) workspace.dynamicProviders = dyn.providers || [];
+    if (!workspace.customProviders) workspace.customProviders = (cst.providers || []).filter((p) => p.lifecycle === 'active');
+    // Register the merged index so getProvider()/model pickers resolve the
+    // adopted/custom providers exactly like curated ones.
+    setProviderExtras(allProviders({ dynamic: workspace.dynamicProviders, custom: workspace.customProviders }));
+  }
 
   // ── Step 1: Client ──
   function stepClient() {
@@ -223,7 +248,10 @@ export function openWorkflow(opts = {}) {
   // ── Step 3a: Provider (cloud) ──
   function stepProvider() {
     const host = el('wf-pane');
-    const providers = PROVIDERS.filter((p) => checkClientProvider(wf.client, p.id).compatible);
+    const providers = allProviders({
+      dynamic: workspace.dynamicProviders || [],
+      custom: workspace.customProviders || [],
+    }).filter((p) => checkClientProvider(wf.client, p.id).compatible);
     host.innerHTML = `<h4 class="wf-h">Select provider</h4>
       <p class="wf-sub">Providers compatible with ${esc(getClient(wf.client).name)} for a cloud connection.</p>
       <input class="inp wf-prov-search" placeholder="Filter providers…" aria-label="Filter providers" />`;
@@ -392,7 +420,10 @@ export function openWorkflow(opts = {}) {
     if (canApply && wf.lastConfig) {
       const diffEl = host.querySelector('#wfDiff');
       diffEl.innerHTML = '<div class="muted">Computing configuration diff…</div>';
-      fetch('/api/config/preview', {
+      const previewUrl = wf.client === 'claude-code'
+        ? '/api/config/preview'
+        : `/api/config/${encodeURIComponent(wf.client)}/preview`;
+      fetch(previewUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ next: wf.lastConfig }),
@@ -430,7 +461,7 @@ export function openWorkflow(opts = {}) {
 
     if (canApply && wf.lastConfig) {
       try {
-        const ok = await LocalSettingsRuntime.write(wf.lastConfig);
+        const ok = await LocalSettingsRuntime.write(wf.lastConfig, wf.client);
         if (ok) {
           discardDraft();
           recordApplied(targetMeta, 'configured');
