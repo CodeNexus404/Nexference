@@ -9,7 +9,7 @@
 //   and providers never share ids.
 export const CLIENTS = [
   {
-    id: 'claude-code', name: 'Claude Code', monogram: 'CC', color: '#d97757', logo: '/clients/claude-code.png',
+    id: 'claude-code', name: 'Claude Code', monogram: 'CC', color: '#d97757', logo: '/clients/claude-code.svg',
     configPath: '~/.claude/settings.json',
     support: 'verified',
     capabilities: { detect: true, generateConfig: true, applyConfig: true, backup: true, launch: true, openFolder: true },

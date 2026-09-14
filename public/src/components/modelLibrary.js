@@ -5,6 +5,7 @@ import { getProvider } from '../providers/registry.js';
 import { notify } from '../core/notifications.js';
 import { historyStore } from '../playground/historyStore.js';
 import { workspace, fetchModelChanges } from '../core/state.js';
+import { Storage } from '../core/storage.js';
 
 // ═══════════════════════════════════════════════════
 //  Model Library (v0.9.0) — the enhanced Models explorer.
@@ -523,17 +524,81 @@ export async function renderModelPickerUnified(host, providerId, opts = {}) {
   let showPaid = includePaid;
   let query = '';
   let models = [];
+  let fetching = false;
+  let loadedOnce = false;
 
   async function load() {
-    models = await modelService.getUnified({ provider: providerId, free: showPaid ? false : true });
+    fetching = true;
     draw();
+    models = await resolveModels();
+    fetching = false;
+    loadedOnce = true;
+    draw();
+  }
+
+  // Resolve the unified catalogue, falling back to the full (paid+free) list
+  // whenever a free-only request comes back empty. Some providers expose only
+  // paid models in their scraped/pricing catalogue (e.g. Agent Router) — a
+  // persistent free-only filter would otherwise leave the picker empty even
+  // though models exist.
+  const isCustomStyle = providerId.startsWith('cst:');
+  async function resolveModels() {
+    let list = [];
+    try {
+      list = await modelService.getUnified({ provider: providerId, free: showPaid ? false : true });
+      if (!list.length && !showPaid) {
+        list = await modelService.getUnified({ provider: providerId });
+      }
+    } catch { list = []; }
+    // Custom gateways (cst:) keep their fetched models in the CLIENT-side
+    // liveModels cache (the server catalogue never sees them) — merge those in.
+    if (isCustomStyle) {
+      const live = workspace.liveModels[providerId];
+      if (live?.models?.length) {
+        list = live.models.map((m) => ({
+          ...(m || {}),
+          isFree: m.isFree ?? (m.pricing ? parseFloat(m.pricing.input) === 0 && parseFloat(m.pricing.output) === 0 : false),
+        }));
+      }
+    }
+    return list;
+  }
+
+  // Catalogue escape hatch: pickers must never dead-end on a persistent
+  // "Loading models…". If the provider has no cached models yet (it needs a key
+  // that was never fetched, or the live catalogue is unreachable), surface that
+  // honestly and let the user type the model id directly.
+  function manualUseMarkup() {
+    const q = query.trim();
+    return q
+      ? `<button type="button" class="btn btn2 mp-use" data-q="${esc(q)}">Use “${esc(q)}” as the model</button>`
+      : '';
+  }
+  function emptyMessage() {
+    const hasKey = !!Storage.getKey(providerId);
+    const hint = hasKey
+      ? 'No models listed yet — the catalogue couldn’t be fetched. Check connectivity and try again.'
+      : (provider.publicModels
+        ? 'No models listed yet — try a refresh, or type a model id below.'
+        : 'Add an API key to list this provider’s models, or type a model id below.');
+    return `${hint}${manualUseMarkup()}`;
   }
 
   function draw() {
     const q = query.trim().toLowerCase();
     const matches = models.filter((m) => !q || (m.id || '').toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
+    if (fetching || (!loadedOnce && !models.length)) {
+      list.innerHTML = `<div class="mp-empty">Loading models…</div>`;
+      return;
+    }
     if (!matches.length) {
-      list.innerHTML = `<div class="mp-empty">${models.length ? 'No models match “' + esc(query) + '”.' : 'Loading models…'}</div>`;
+      if (models.length) {
+        list.innerHTML = `<div class="mp-empty">No models match “${esc(query)}”.${manualUseMarkup()}</div>`;
+      } else {
+        list.innerHTML = `<div class="mp-empty">${emptyMessage()}</div>`;
+      }
+      const use = list.querySelector('.mp-use');
+      if (use) use.addEventListener('click', () => { if (onSelect) onSelect(query.trim()); });
       return;
     }
     list.innerHTML = matches.map((m) => `
@@ -554,9 +619,38 @@ export async function renderModelPickerUnified(host, providerId, opts = {}) {
     list.querySelectorAll('.ml-det-sm').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); showDetails(providerId, b.dataset.id); }));
   }
 
+  // Mirror the legacy picker: if the catalogue is empty, nudge the fetch layer
+  // to build one using the stored key (public providers and custom gateways
+  // fetch keylessly). The unified catalogue reads the SAME server cache
+  // /api/refresh-models builds, so a successful fetch flows straight into this
+  // list; custom gateways populate the client liveModels cache the picker merges.
+  function maybeFetch() {
+    if (isCustomStyle) {
+      if (window.fetchCustomProviderModelsSilent) window.fetchCustomProviderModelsSilent(providerId);
+    } else {
+      if (!provider.publicModels && !Storage.getKey(providerId)) return;
+      if (!window.fetchProviderSilent) return;
+      window.fetchProviderSilent(providerId);
+    }
+    let tries = 0;
+    const timer = setInterval(async () => {
+      if (tries++ > 30) { clearInterval(timer); draw(); return; }
+      const fresh = await resolveModels();
+      if (fresh.length) {
+        models = fresh;
+        loadedOnce = true;
+        fetching = false;
+        draw();
+        clearInterval(timer);
+      } else {
+        draw();
+      }
+    }, 1000);
+  }
+
   const paidToggle = wrap.querySelector('.mp-paid input');
   if (paidToggle) paidToggle.addEventListener('change', (e) => { showPaid = e.target.checked; load(); });
   input.addEventListener('input', () => { query = input.value; draw(); });
-  load();
+  load().then(() => { if (!models.length) maybeFetch(); });
   return wrap;
 }

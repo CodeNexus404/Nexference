@@ -25,6 +25,7 @@ import { credentialsStore } from '../config/credentialsStore.js';
 import { recordActivity, getActivities } from '../core/activityStore.js';
 import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
 import { renderModelLibrary } from '../components/modelLibrary.js';
+import { renderFallbackPanel, refreshFallbackChip } from './fallbackUI.js';
 import { modelService } from '../models/modelService.js';
 import { renderModelPicker } from '../components/modelPicker.js';
 import { playgroundService } from '../playground/playgroundService.js';
@@ -1145,7 +1146,7 @@ function renderCfgSubConfig(host) {
     </div>
     <div class="cfg-ws-grid">
       <div class="panel cfg-current" id="cfgCurrentCard">
-        <div class="panel-h"><h3>Current Configuration</h3><span id="cfgStateBadge" class="badge"></span></div>
+        <div class="panel-h"><h3>Current Configuration</h3><span id="cfgStateBadge" class="badge"></span><span id="cfgFallbackChip" class="badge fb-chip" hidden></span></div>
         <div class="cfg-current-body" id="cfgCurrentBody"><div class="muted">Loading…</div></div>
         <div class="cfg-current-actions">
           <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
@@ -1164,6 +1165,7 @@ function renderCfgSubConfig(host) {
     </div>`;
   renderDraftBanner(host);
   refreshConfigStatus();
+  refreshFallbackChip();
   loadBackups();
   loadActivityCfg();
   startConfigEvents();
@@ -2217,6 +2219,7 @@ export function renderSettings() {
   }
   fillProviderIntelSettings();
   fetchProviderIntel().then(fillProviderIntelSettings).catch(() => {});
+  renderFallbackPanel();
 }
 
 export function setTheme(t) {
@@ -2393,7 +2396,10 @@ export function updateShellStatus() {
   const applied = workspace.applied;
   let state = 'needs';
   let label = 'Needs setup';
-  if (applied && applied.status === 'configured') {
+  // 'fallback' records are real applied configs too — the monitor physically
+  // wrote settings.json before marking them. Treating them as configured keeps
+  // the chip honest (no "Needs setup") when the fallback is later turned off.
+  if (applied && (applied.status === 'configured' || applied.status === 'fallback')) {
     if (workspace.unsaved) { state = 'unsaved'; label = 'Unsaved changes'; }
     else { state = 'ok'; label = 'Configured'; }
   } else if (applied && applied.status === 'copyable') {

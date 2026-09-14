@@ -7,7 +7,9 @@ import { notify } from './core/notifications.js';
 import { openProviderConfig } from './components/providerConfig.js';
 import { toggleCommandPalette } from './components/commandPalette.js';
 import { openWorkflow } from './config/workflow.js';
+import { startFallbackMonitor, tickFallbackMonitor } from './config/fallbackMonitor.js';
 import * as UI from './ui/app.js';
+import { renderFallbackPanel, refreshFallbackChip, fbSetMaster, fbSelectClient, fbEnableForClient, fbToggleTier, fbConfigureTier, fbTestTier, fbUpdateKnobs, fbCapturePrimary, fbClearPlan } from './ui/fallbackUI.js';
 import { renderIntelligenceCenter } from './ui/intelligenceCenter.js';
 import { renderEcosystem } from './ui/ecosystem.js';
 import { initIntegrationActions } from './ui/providerIntegrations.js';
@@ -56,6 +58,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await UI.loadConfig();
   await UI.refreshProviderIndex();
   navigate(workspace.currentPage || 'workspace');
+
+  // Fallback monitor — quietly probes enabled plans while a tab is open.
+  startFallbackMonitor();
+  window.addEventListener('nx-fallback', () => {
+    if (document.body.dataset.page === 'settings') renderFallbackPanel();
+    refreshFallbackChip();
+  });
 
   // Keep pulling the server cache until its startup fetch settles.
   UI.pollForModels();
@@ -164,6 +173,19 @@ const GLOBALS = {
   dismissExternalChange: UI.dismissExternalChange,
   discardDraftAndRefresh: UI.discardDraftAndRefresh,
   loadActivityCfg: UI.loadActivityCfg,
+  // v1.2.0 fallback (auto-switch)
+  renderFallbackPanel,
+  refreshFallbackChip,
+  fbSetMaster,
+  fbSelectClient,
+  fbEnableForClient,
+  fbToggleTier,
+  fbConfigureTier,
+  fbTestTier,
+  fbUpdateKnobs,
+  fbCapturePrimary,
+  fbClearPlan,
+  runFallbackTick: tickFallbackMonitor,
   notifyToast: (msg, type) => notify.toast(msg, type || 'error'),
 };
 Object.entries(GLOBALS).forEach(([name, fn]) => { window[name] = fn; });

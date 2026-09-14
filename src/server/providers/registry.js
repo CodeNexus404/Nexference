@@ -10,7 +10,6 @@
 // keyed /v1/models endpoint rejects us, this yields the live model list.
 // `publicModels: true` marks endpoints verifiably callable without an API key.
 export const PROVIDERS = [
-  { id: 'anthropic', baseUrl: 'https://api.anthropic.com/', format: 'anthropic', publicModels: false },
   { id: 'agentrouter', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: true, pricingApi: 'https://agentrouter.org/api/pricing?all=true' },
   { id: 'aerolink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: true },
   { id: 'freemodel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: true },

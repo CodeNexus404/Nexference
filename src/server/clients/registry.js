@@ -37,7 +37,7 @@ const CAP = {
 
 export const CLIENTS = [
   {
-    id: 'claude-code', name: 'Claude Code', logo: '/clients/claude-code.png', support: 'verified', level: 1, adapter: 'claude-code',
+    id: 'claude-code', name: 'Claude Code', logo: '/clients/claude-code.svg', support: 'verified', level: 1, adapter: 'claude-code',
     connectionTypes: ['cloud', 'local'], configPath: '~/.claude/settings.json',
     capabilities: CAP.claudeCodeFull,
     note: 'Fully supported — generate, preview, validate, backup & apply.',
