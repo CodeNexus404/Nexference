@@ -106,6 +106,11 @@ async function switchTo(clientId, targets, idx) {
 
   const provider = getProvider(t.provider);
   const label = `${provider?.name || t.provider} · ${t.model}`;
+  // Communicate what we switched FROM so the record reads as a transition
+  // (e.g. "Auto-switched … → Agent Router · m-1 (from FreeModel · m-p)").
+  const prev = targets[st.activeTier];
+  const prevLabel = prev ? `${getProvider(prev.provider)?.name || prev.provider} · ${prev.model}` : null;
+  const transition = prevLabel ? `${label} (from ${prevLabel})` : label;
   const clientName = getClient(clientId)?.name || clientId;
   const now = new Date().toISOString();
   fallbackStore.setState(clientId, {
@@ -113,10 +118,10 @@ async function switchTo(clientId, targets, idx) {
     failStreak: 0,
     lastSwitchAt: Date.now(),
     degraded: false,
-    lastAction: { at: now, kind: idx === 0 ? 'revert' : `switch-${t.kind}`, label },
+    lastAction: { at: now, kind: idx === 0 ? 'revert' : `switch-${t.kind}`, label: transition },
   });
-  recordActivity('fallback', `Auto-${idx === 0 ? 'reverted' : 'switched'} ${clientName} → ${label}`);
-  notify.log(`Fallback: ${clientName} → ${label}`, idx === 0 ? 't-ok' : 't-warn');
+  recordActivity('fallback', `Auto-${idx === 0 ? 'reverted' : 'switched'} ${clientName} → ${transition}`);
+  notify.log(`Fallback: ${clientName} → ${transition}`, idx === 0 ? 't-ok' : 't-warn');
   notify.toast(`Fallback: ${clientName} switched to ${label}`, idx === 0 ? 'info' : 'warning');
 
   // Reflect the switched config as the applied record (same client) so every
@@ -149,10 +154,13 @@ export async function tickFallbackMonitor() {
       const cooldownPassed = !st.lastSwitchAt || (Date.now() - st.lastSwitchAt) >= plan.knobs.cooldownMin * 60000;
 
       if (res.ok) {
-        fallbackStore.setState(clientId, { failStreak: 0 });
+        const st2 = fallbackStore.getState(clientId);
+        // Recovery: a healthy probe on the primary clears an earlier exhausted/
+        // degraded state ("monitoring paused until it recovers").
+        const recovered = st2.degraded && st2.activeTier === 0;
+        fallbackStore.setState(clientId, { failStreak: 0, ...(recovered ? { degraded: false } : {}) });
         // Auto-revert: healthy active tier, but we're on a fallback — check the
         // primary and go back when it is reachable again.
-        const st2 = fallbackStore.getState(clientId);
         const needsRevert = plan.knobs.autoRevert && st2.activeTier !== 0 && cur === st2.activeTier && targets[0];
         if (needsRevert) {
           const p0ok = (await probeTarget(targets[0])).ok;
