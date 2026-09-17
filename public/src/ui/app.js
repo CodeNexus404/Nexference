@@ -595,12 +595,21 @@ export async function loadConfig() {
     // with a trailing `/v1/` stripped, so apply the same transform when
     // comparing (covers every custom card, present and future).
     const base = config?.env?.ANTHROPIC_BASE_URL || '';
-    let match = PROVIDERS.find(p => norm(p.baseUrl) === norm(base));
+    const normBase = norm(base);
+    let match = PROVIDERS.find(p => norm(p.baseUrl) === normBase);
     if (!match && base) {
+      // The generator writes ANTHROPIC_BASE_URL with a trailing `/v1/` or
+      // `/v1beta/` stripped (see ccBase in config/clientAdapter.js), so a card
+      // whose baseUrl keeps that segment never matched by strict equality.
+      // Retry with the same transform on both sides — the exact match above
+      // still wins first, so unchanged configs behave exactly as before.
       const cfgForm = (u) => (u || '').replace(/\/v1\/?$/, '/').replace(/\/v1beta\/?$/, '/');
+      match = PROVIDERS.find(p => norm(cfgForm(p.baseUrl)) === norm(cfgForm(base))) || null;
+    }
+    if (!match && base) {
       try {
         const custRes = await fetch('/api/custom-providers').then(r => r.json()).catch(() => ({ providers: [] }));
-        match = (custRes.providers || []).find(p => norm(cfgForm(p.baseUrl)) === norm(base) || norm(p.baseUrl) === norm(base)) || null;
+        match = (custRes.providers || []).find(p => norm(cfgForm(p.baseUrl)) === normBase || norm(p.baseUrl) === normBase) || null;
       } catch {}
     }
     match = match || null;
@@ -1369,7 +1378,12 @@ export async function viewCurrentConfig() {
 function maskConfigForView(config) {
   if (!config || typeof config !== 'object') return config;
   const c = JSON.parse(JSON.stringify(config));
-  if (c.apiKeyHelper) c.apiKeyHelper = "echo '•••••••• (hidden)'";
+  if (c.apiKeyHelper) {
+    const m = /^(echo\s+)('?)(.*)\2$/.exec(c.apiKeyHelper);
+    c.apiKeyHelper = m
+      ? `${m[1]}${m[2]}•••••••• (hidden)${m[2]}`
+      : '•••••••• (hidden)';
+  }
   if (c.env) {
     for (const k of Object.keys(c.env)) {
       if (/key|token|secret|helper/i.test(k)) c.env[k] = '•••••••• (hidden)';
@@ -2000,7 +2014,7 @@ export async function renderLocalAI() {
       : '<div class="muted">No models detected on this device.</div>';
     const siteHTML = rt.site ? `<a class="btn btn2" href="${esc(rt.site)}" target="_blank" rel="noopener">Open ${esc(rt.name)} site ↗</a>` : '';
     const actions = [];
-    if (!running && rt.supportsStart) actions.push(`<button class="btn btn-go btn2" id="rtDetStart" type="button">Start runtime</button>`);
+    if (!running && rt.supportsStart && rt.installed !== false) actions.push(`<button class="btn btn-go btn2" id="rtDetStart" type="button">Start runtime</button>`);
     if (running) actions.push(`<button class="btn btn-go btn2" id="rtDetBench" type="button">Benchmark</button>`);
     const body = `
       <div class="ml-detail">

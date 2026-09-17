@@ -19,6 +19,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { atomicRenameSync } from '../utils/fs.js';
 import { PROVIDERS, getProvider } from './registry.js';
 import { listCustomProviders, getCustomProvider } from './custom/customProviderStore.js';
 import { modelCache } from './modelCache.js';
@@ -61,7 +62,11 @@ function writeDisk() {
       const { _fetchedAt, ...rest } = rec;
       out[id] = rest;
     }
-    writeFileSync(FILE, JSON.stringify(out, null, 2));
+    // Atomic write (temp + rename) so a truncated write can never destroy the
+    // last-known-good disk mirror — this store explicitly preserves that data.
+    const tmp = `${FILE}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmp, JSON.stringify(out, null, 2));
+    atomicRenameSync(tmp, FILE);
   } catch { /* best-effort persistence */ }
 }
 

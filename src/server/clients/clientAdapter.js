@@ -12,6 +12,11 @@ import {
   listCodexBackups, restoreCodexBackup,
 } from '../config/codexStore.js';
 
+// npm-installed CLIs ship as `.cmd` shims on Windows; Node's spawn() (shell:false)
+// cannot execute .bat/.cmd directly, so those launches silently failed there.
+// POSIX keeps shell:false (no shell interpretation), so Mac behaviour is unchanged.
+const launchOpts = () => ({ stdio: 'ignore', detached: true, shell: process.platform === 'win32' });
+
 // ═══════════════════════════════════════════════════════════════
 //  Server-side Client Adapter interface (v0.6.0).
 //
@@ -93,7 +98,7 @@ export class ClaudeCodeAdapter extends ClientAdapter {
 
   launch() {
     try {
-      const p = spawn('claude', [], { stdio: 'ignore', detached: true });
+      const p = spawn('claude', [], launchOpts());
       p.on('error', () => {});
       p.unref();
       return { launched: true, supported: true, note: 'Launched claude' };
@@ -144,7 +149,7 @@ export class OpenCodeAdapter extends ClientAdapter {
   // OpenCode uses `claude` CLI to launch? Actually opencode binary is `opencode`.
   launch() {
     try {
-      const p = spawn('opencode', [], { stdio: 'ignore', detached: true });
+      const p = spawn('opencode', [], launchOpts());
       p.on('error', () => {});
       p.unref();
       return { launched: true, supported: true, note: 'Launched opencode' };
@@ -185,7 +190,7 @@ export class CodexAdapter extends ClientAdapter {
 
   launch() {
     try {
-      const p = spawn('codex', [], { stdio: 'ignore', detached: true });
+      const p = spawn('codex', [], launchOpts());
       p.on('error', () => {});
       p.unref();
       return { launched: true, supported: true, note: 'Launched codex' };

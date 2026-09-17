@@ -748,13 +748,14 @@ export function configForSelection({ client, connectionType = 'cloud', provider 
   return { config: g.config, instructions: g.instructions };
 }
 
-// Mask the secret inside apiKeyHelper (`echo '<key>'`) for safe preview display.
+// Mask the secret inside apiKeyHelper (`echo '<key>'` on POSIX, `echo <key>`
+// on Windows — cmd.exe keeps single quotes literal) for safe preview display.
 function maskConfigForPreview(config) {
   const c = JSON.parse(JSON.stringify(config));
   if (c.apiKeyHelper) {
-    const m = /echo\s+'(.*)'/.exec(c.apiKeyHelper);
-    const key = m ? m[1] : c.apiKeyHelper;
-    c.apiKeyHelper = `echo '${maskKey(key)}'`;
+    const m = /^(echo\s+)('?)(.*)\2$/.exec(c.apiKeyHelper);
+    const key = m ? m[3] : c.apiKeyHelper;
+    c.apiKeyHelper = m ? `${m[1]}${m[2]}${maskKey(key)}${m[2]}` : maskKey(key);
   }
   return c;
 }

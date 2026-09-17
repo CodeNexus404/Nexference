@@ -68,7 +68,9 @@ export function startWatcher() {
   }
   lastKnown = computeSummary();
   process.on('SIGINT', stopWatcher);
-  process.on('SIGTERM', stopWatcher);
+  // Node never emits SIGTERM on Windows, so only register it where it exists —
+  // otherwise the handler is harmless dead weight that can never run.
+  if (process.platform !== 'win32') process.on('SIGTERM', stopWatcher);
 }
 
 export function stopWatcher() {

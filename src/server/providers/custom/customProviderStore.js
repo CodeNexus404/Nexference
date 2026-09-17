@@ -8,7 +8,8 @@
 
 import { join } from 'path';
 import { homedir } from 'os';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { atomicRenameSync } from '../../utils/fs.js';
 
 const STORE_DIR = join(homedir(), '.nexference');
 const STORE_FILE = join(STORE_DIR, 'custom-providers.json');
@@ -30,9 +31,9 @@ function loadState() {
 function saveState() {
   try {
     mkdirSync(STORE_DIR, { recursive: true });
-    const tmp = STORE_FILE + '.tmp.' + Date.now();
+    const tmp = `${STORE_FILE}.tmp-${process.pid}-${Date.now()}`;
     writeFileSync(tmp, JSON.stringify(state, null, 2));
-    renameSync(tmp, STORE_FILE);
+    atomicRenameSync(tmp, STORE_FILE);
   } catch { /* best effort */ }
 }
 

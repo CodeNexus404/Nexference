@@ -17,7 +17,7 @@
 
 ## Overview
 
-**Nexference v2.1.0 — Custom Provider Registry & Provider Onboarding** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v2.3.0 ([`d69183e`](https://github.com/CodeNexus404/Nexference/commit/d69183e)) — Custom Provider Registry & Provider Onboarding** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -33,9 +33,83 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 
 > 🔒 **Privacy-first:** Runs entirely on your machine. API keys live in your browser's `localStorage` and are only ever sent to the provider you choose (via the local server proxy). Profiles, history, and activity store provider/model references and summaries only — never secrets.
 
+### Recent releases
+
+- **v2.3.0** — Fallback auto-switch, model-list fixes, and UI polish ([`d69183e`](https://github.com/CodeNexus404/Nexference/commit/d69183e))
+- **v2.2.1** — Stabilize provider ecosystem and client configuration ([`7e5e2f4`](https://github.com/CodeNexus404/Nexference/commit/7e5e2f4))
+- **v2.2.0** — Multi-Source Provider Discovery & Discovered Models ([`8b8bdb9`](https://github.com/CodeNexus404/Nexference/commit/8b8bdb9))
+
 ---
 
-## What's new in v2.1.0
+## What's new in v2.3.0
+
+> Release commit: [`d69183e`](https://github.com/CodeNexus404/Nexference/commit/d69183e) — Fallback auto-switch, model-list fixes, and UI polish
+
+**Fallback Auto-Switch, Model-List Fixes & UI Polish** — the latest release adds an honest, safety-first fallback engine that keeps you running through provider outages, fixes the model picker so it never dead-ends, and polishes client identity.
+
+- **Fallback auto-switch** — while the dashboard is open, the new `fallbackMonitor` quietly probes the active provider/model once a minute. After `failThreshold` consecutive real failures it auto-switches to the next enabled tier by reusing the proven apply path (`configForSelection` → preview → backup → verified write). If every tier fails it reverts to the primary and marks the client degraded; with `autoRevert` enabled it keeps probing the primary and switches back the moment it is healthy again.
+- **Per-client fallback plans** — the new `fallbackStore` persists per-client plans (primary + up to two enabled tiers) plus knobs (`failThreshold`, `cooldownMin`, `autoRevert`) and live monitor state (active tier, fail streak, last switch time, degraded flag). Plans hold provider/model references only — no secrets ever.
+- **Fallback UI** — a dedicated `fallbackUI` manages plans and monitors state inline in the configuration workflow, with clear transition labels; a follow-up fix [`2ba1edd`](https://github.com/CodeNexus404/Nexference/commit/2ba1edd) sharpens those labels and auto-clears the degraded state when the primary recovers.
+- **Honesty & safety preserved** — detection and switching run only while a tab is open (closing the dashboard leaves the last written config exactly as-is); switching pauses while an external change is pending so it never fights manual edits; probes reuse the existing key store and `/api/test` — no secret material is persisted or logged.
+- **Model-list fixes** — the Model Library resolves the unified catalogue and falls back to the full list whenever a free-only request comes back empty (some providers expose only paid models in their pricing catalogue, e.g. Agent Router — the picker no longer dead-ends), merges client-side `liveModels` for custom (`cst:`) gateways, and never hangs on a persistent "Loading models…".
+- **Client logo polish** — the detected Claude Code logo is now an SVG (`claude-code.svg`, replacing the raster image) and the Codex logo was refreshed.
+- **Version** — bumped to `2.3.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the safety-critical configuration pipeline are all unchanged.
+
+---
+
+<details>
+<summary><h2>What's new in v2.2.1</h2></summary>
+
+> Release commit: [`7e5e2f4`](https://github.com/CodeNexus404/Nexference/commit/7e5e2f4) — stabilize provider ecosystem and client configuration
+
+**Stabilize Provider Ecosystem & Client Configuration** — Nexference extends its safe configuration pipeline beyond Claude Code to OpenCode and Codex, hardens the custom-provider and provider-intelligence layers, and rounds out the client catalogue so every registered client behaves honestly.
+
+- **OpenCode configuration support** — a new server-side `opencodeStore` manages `~/.config/opencode/opencode.json`, mirroring the Claude Code safety pipeline end-to-end: backup → atomic write → verified re-read → abort on mismatch. Config references API keys via environment variables only — Nexference never stores the secret. OpenCode does not hot-reload config, so a restart is surfaced as a required step after writing.
+- **Codex configuration support** — a new `codexStore` manages `~/.codex/config.json` with the same backup + atomic-write + verified-read guarantee. The Codex config references keys through `env_key` (the variable name only) — the secret is never written or touched.
+- **Per-client safe config API** — `GET /api/config/:clientId`, `GET /api/config/:clientId/status`, `POST /api/config/:clientId/preview`, and `POST /api/config/:clientId` route any registered client through the same Preview → Diff → Backup → Atomic Write → Verified Re-read → Restore lifecycle.
+- **New client adapters** — `opencodeCli.js`, `codexCli.js`, `geminiCli.js`, and `cursor.js` are registered in the frontend client catalogue. Cursor is handled honestly: Nexference does not fabricate a config — it returns manual guidance (Cursor manages providers through its own settings UI), and compatibility is reported `unsupported` rather than invented.
+- **Custom provider logo resolution moved server-side** — `customLogoResolver` centralizes icon discovery with safe validation and caching instead of the browser doing it.
+- **Custom provider service stabilized** — the custom-providers route layer was refactored and tightened (validation, duplicate detection, lifecycle) with the client-facing surface consolidated.
+- **Provider intelligence for custom providers** — `providerDiscoveryService` now builds intelligence records (`buildCustomIntel`) for user-created providers so they participate in provider intelligence honestly (no invented verification, models, or pricing).
+- **Execution registry & capabilities updated** — `executionCapabilities` and `executionRegistry` register the added clients so the execution coverage UI reflects the real client set; legacy and integration bridge resumes were re-verified.
+- **UI / configuration workflow updates** — the config workflow, provider registry, model picker, and client-provider compatibility matrix were updated to drive the per-client flows, with the dashboard polished for the wider client set.
+- **Version** — bumped to `2.2.1` across `package.json`, the UI, and this document.
+
+The architecture, provider adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the safety-critical Claude Code configuration flow are all unchanged.
+
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v2.2.0</h2></summary>
+
+> Release commit: [`8b8bdb9`](https://github.com/CodeNexus404/Nexference/commit/8b8bdb9) — Multi-Source Provider Discovery & Discovered Models
+
+**Multi-Source Provider Discovery & Discovered Models** — the ecosystem-discovery layer grows from a single structured registry into a pluggable, multi-source discovery engine with per-source trust, health, and failure isolation — plus model lists surfaced directly on discovered providers.
+
+- **Source adapter registry** — `baseSource.js` now exposes a `ProviderDiscoveryAdapter` registry (`registerSourceAdapter` / `getAllSourceAdapters`) with a `trustLevel` (`official` / `curated` / `community` / `unknown`), source-health snapshots (`status`, `lastAttempt`, `lastSuccess`, `lastFailure`, `providerCount`, `freshnessMs`), and source metadata (`id`, `name`, `type`, `url`, `trustLevel`).
+- **Three new discovery sources**:
+  - **OpenRouter source** — reads `openrouter.ai`'s public API for provider identity, website/privacy-policy/terms/status-page links, and model relationships. It carries explicit provenance and never implies direct API access or client compatibility.
+  - **Hugging Face Inference Providers source** — uses the keyless public models API (`inference_provider=all` + `expand[]=inferenceProviderMapping`) to collect provider slug, status, pricing, features, and performance. An optional `HF_TOKEN`/`HUGGINGFACE_TOKEN` raises rate limits but is never required or persisted.
+  - **LiteLLM catalog source** — consumes the community-maintained LiteLLM provider/model catalog (identities, aliases, model mappings, endpoint-compatibility and pricing where documented). Treated as community-curated evidence, never operational proof.
+- **Multi-source discovery orchestration** — `ecosystemDiscoveryService` drives the registered sources, isolates failures per source (one failing source never fails discovery), folds source evidence arrays and source names into provider records, and maps trust levels to explainable confidence (`official` → HIGH, `curated` → MEDIUM, …) via the new `CONFIDENCE_LEVELS` and `DISCOVERY_PHASE` vocabulary.
+- **Discovered models** — discovered providers now carry real fetched model lists shown as chips on ecosystem cards and details; sources flagged `openrouter` / `huggingface` / `litellm` support on-demand model fetching. `syncEcosystemModels` pushes discovered models into adopted dynamic provider records so the catalogue stays consistent.
+- **Model summary integrity** — `/api/models` seeds custom (`cst:`) provider counts from each record's persisted `modelSupport`, so cards never flash a misleading "0 free" state before a manual refresh.
+- **Custom provider logo cache** — `customProviderLogoCache` backfills older wizard records by fetching their logo once server-side and persisting it as a base64 `data:` URL, so every custom provider card renders instantly with no network round-trip. Deleting the provider deletes the cache.
+- **Free-Model accuracy** — custom model fetching and provider intelligence compute free-model counts from actual pricing signals (input/output price `0`), removing guesswork from "free" badges.
+- **Version** — bumped to `2.2.0` across `package.json`, the UI, and this document.
+
+The architecture, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the safe Claude Code configuration flow are all unchanged.
+
+</details>
+
+---
+
+<details>
+<summary><h2>What's new in v2.1.0</h2></summary>
 
 **Custom Provider Registry & Provider Onboarding** — Nexference now allows users to manually create, manage, validate, and use their own AI provider cards alongside curated and ecosystem-discovered providers.
 
@@ -60,6 +134,8 @@ Key principles:
 - Custom providers start as Metadata Only / Unverified — honest defaults.
 - No fabricated verification, model lists, or pricing.
 - Credentials are never stored in custom provider records.
+
+</details>
 
 ---
 

@@ -197,13 +197,52 @@ export async function detectRuntimes() {
 //      used when the Local Server is ALREADY running (see `allowCli`).
 //   2. A pure filesystem scan of ~/.lmstudio/models — non-invasive, never
 //      launches the app; used for passive detection and as the CLI fallback.
+// Resolve an executable on PATH without a shell. Windows honours PATHEXT (so
+// `ollama` finds ollama.exe) and prefers real executables over .cmd shims;
+// POSIX scans each PATH directory for the bare name. Returns the first match
+// or null.
+function findOnPath(name) {
+  const pathVar = process.env.PATH || '';
+  const isWin = os.platform() === 'win32';
+  const dirs = pathVar.split(isWin ? ';' : ':').filter(Boolean);
+  if (isWin) {
+    const exts = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+    for (const d of dirs) for (const ext of exts) {
+      const p = join(d, `${name}${ext.toLowerCase()}`);
+      if (existsSync(p)) return p;
+    }
+    // Bare-name probe (some tools register as `name.exe` in a PATH directory
+    // without the PATHEXT suffix matching).
+    for (const d of dirs) {
+      const p = join(d, name);
+      if (existsSync(p) && /\.(exe|cmd|bat|com)$/i.test(p.split(/[\\/]/).pop() || '')) return p;
+    }
+  } else {
+    for (const d of dirs) if (existsSync(join(d, name))) return join(d, name);
+  }
+  return null;
+}
+
 function getLmStudioCli() {
-  const cands = [
-    join(os.homedir(), '.lmstudio', 'bin', 'lms'),
-    '/usr/local/bin/lms',
-    '/opt/homebrew/bin/lms',
-  ];
-  for (const c of cands) if (existsSync(c)) return c;
+  // Windows ships `lms.exe` (LM Studio bundles it next to the app); macOS puts
+  // `lms` in a few standard CLI locations. `allowCli` gates booting Bionic, so
+  // this list is only consulted when the Local Server is already running.
+  const cands = [];
+  if (process.platform === 'win32') {
+    const loc = process.env.LOCALAPPDATA;
+    if (loc) {
+      cands.push(join(loc, 'Programs', 'LM Studio', 'lms.exe'));
+      cands.push(join(loc, 'LM Studio', 'lms.exe'));
+    }
+    cands.push(join(os.homedir(), '.lmstudio', 'bin', 'lms.exe'));
+    const onPath = findOnPath('lms');
+    if (onPath) cands.push(onPath);
+  } else {
+    cands.push(join(os.homedir(), '.lmstudio', 'bin', 'lms'));
+    cands.push('/usr/local/bin/lms');
+    cands.push('/opt/homebrew/bin/lms');
+  }
+  for (const c of cands) if (c && existsSync(c)) return c;
   return null;
 }
 
@@ -218,7 +257,10 @@ export function getLmStudioModelList({ allowCli = false } = {}) {
   const cli = allowCli ? getLmStudioCli() : null;
   if (cli) {
     try {
-      const r = spawnSync(cli, ['ls', '--json'], { timeout: 8000, maxBuffer: 32 * 1024 * 1024 });
+      // `lms` on Windows may be a `.cmd`/`.bat` shim on PATH — pairing them
+      // without a shell throws EINVAL on Windows (CVE-2024-27980 hardening), so
+      // only shims need a shell (plain lms.exe launches directly).
+      const r = spawnSync(cli, ['ls', '--json'], { timeout: 8000, maxBuffer: 32 * 1024 * 1024, shell: /\.(cmd|bat)$/i.test(cli) });
       if (r.status === 0 && r.stdout) {
         const parsed = JSON.parse(r.stdout.toString());
         if (Array.isArray(parsed)) {
@@ -259,7 +301,7 @@ export function getLmStudioModelList({ allowCli = false } = {}) {
           let st; try { st = statSync(pubPath); } catch { continue; }
           if (!st.isDirectory()) {
             if (pub.toLowerCase().endsWith('.gguf')) {
-              list.push({ id: pub.replace(/\.gguf$/i, ''), label: pub, sizeBytes: st.size, params: null, quant: null, contextLength: null, vision: false, path: pub });
+              list.push({ id: pub.replace(/\.gguf$/i, ''), label: pub, sizeBytes: st.size, params: null, quant: null, contextLength: null, vision: false, path: pubPath });
             }
             continue;
           }
@@ -269,9 +311,9 @@ export function getLmStudioModelList({ allowCli = false } = {}) {
             if (ms.isDirectory()) {
               let size = 0;
               try { for (const f of readdirSync(mPath)) { const fp = join(mPath, f); const fs2 = statSync(fp); if (fs2.isFile()) size += fs2.size; } } catch { /* ignore */ }
-              list.push({ id: `${pub}/${m}`, label: m, sizeBytes: size, params: null, quant: null, contextLength: null, vision: false, path: `${pub}/${m}` });
+              list.push({ id: `${pub}/${m}`, label: m, sizeBytes: size, params: null, quant: null, contextLength: null, vision: false, path: mPath });
             } else if (m.toLowerCase().endsWith('.gguf')) {
-              list.push({ id: `${pub}/${m.replace(/\.gguf$/i, '')}`, label: m, sizeBytes: ms.size, params: null, quant: null, contextLength: null, vision: false, path: `${pub}/${m}` });
+              list.push({ id: `${pub}/${m.replace(/\.gguf$/i, '')}`, label: m, sizeBytes: ms.size, params: null, quant: null, contextLength: null, vision: false, path: mPath });
             }
           }
         }
@@ -351,7 +393,7 @@ const DARWIN_APP_CANDIDATES = {
 function findDarwinApp(id) {
   const cands = DARWIN_APP_CANDIDATES[id];
   if (!cands) return null;
-  const bases = ['/Applications', join(process.env.HOME || '', 'Applications')].filter(Boolean);
+  const bases = ['/Applications', join(os.homedir(), 'Applications')].filter(Boolean);
   for (const name of cands) {
     for (const base of bases) {
       if (existsSync(join(base, `${name}.app`))) return name;
@@ -360,13 +402,46 @@ function findDarwinApp(id) {
   return null;
 }
 
-// Whether the runtime's desktop app is installed on this device (macOS only).
-// Returns true/false on darwin, or null when not applicable (e.g. Linux).
+// Whether the runtime's desktop app / executable is installed on this device.
+// Windows installers drop real executables in LocalAppData (Ollama → ollama.exe,
+// LM Studio → LM Studio.exe + lms.exe); both are also commonly on PATH.
+function windowsRuntimeInstall(id) {
+  const loc = process.env.LOCALAPPDATA || join(os.homedir(), 'AppData', 'Local');
+  const candidates = [];
+  if (id === 'ollama') {
+    candidates.push(
+      join(loc, 'Programs', 'Ollama', 'ollama.exe'),
+      join(loc, 'Ollama', 'ollama.exe'),
+      join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Ollama', 'ollama.exe'),
+      findOnPath('ollama'),
+    );
+  } else if (id === 'lmstudio') {
+    candidates.push(
+      join(loc, 'Programs', 'LM Studio', 'LM Studio.exe'),
+      join(loc, 'Programs', 'LM Studio', 'LM Studio', 'LM Studio.exe'),
+      join(loc, 'LM Studio', 'LM Studio.exe'),
+      getLmStudioCli(),
+      findOnPath('lms'),
+    );
+  } else {
+    return null;
+  }
+  return candidates.filter(Boolean).some((c) => existsSync(c));
+}
+
+// Whether the runtime's desktop app is installed on this device. true/false on
+// macOS and Windows (so the UI can withhold the Start button until installed),
+// plus the ollama CLI on POSIX/Linux; null when detection is not applicable.
 export function isAppInstalled(id) {
-  if (os.platform() !== 'darwin') return null;
-  const cands = DARWIN_APP_CANDIDATES[id];
-  if (!cands) return null;
-  return findDarwinApp(id) != null;
+  const platform = os.platform();
+  if (platform === 'darwin') {
+    const cands = DARWIN_APP_CANDIDATES[id];
+    if (!cands) return null;
+    return findDarwinApp(id) != null;
+  }
+  if (platform === 'win32') return windowsRuntimeInstall(id);
+  if (platform === 'linux' && id === 'ollama') return findOnPath('ollama') != null;
+  return null;
 }
 
 export function startRuntime(id) {
@@ -379,7 +454,20 @@ export function startRuntime(id) {
   try {
     if (id === 'ollama') {
       if (platform === 'darwin') { spawn('open', ['-a', 'Ollama'], { detached: true, stdio: 'ignore' }).unref(); return { supported: true, ok: true, message: 'Starting Ollama…', platform }; }
-      if (platform === 'linux') { spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' }).unref(); return { supported: true, ok: true, message: 'Starting Ollama server…', platform }; }
+      if (platform === 'linux') {
+        const p = spawn('ollama', ['serve'], { detached: true, stdio: 'ignore' });
+        p.on('error', () => {}); p.unref();
+        return { supported: true, ok: true, message: 'Starting Ollama server…', platform };
+      }
+      if (platform === 'win32') {
+        if (!isAppInstalled('ollama')) {
+          return { supported: true, ok: false, message: 'Ollama is not installed — download it from https://ollama.com/download to enable auto-start.', platform };
+        }
+        // Ollama ships ollama.exe on PATH (installer adds %LOCALAPPDATA%\Programs\Ollama).
+        const p = spawn('ollama', ['serve'], { detached: true, stdio: 'ignore', shell: true, windowsHide: true });
+        p.on('error', () => {}); p.unref();
+        return { supported: true, ok: true, message: 'Starting Ollama server…', platform };
+      }
       return { supported: true, ok: false, message: `Auto-start for Ollama is not available on this platform (${platform}).` };
     }
     if (id === 'lmstudio') {
@@ -388,7 +476,10 @@ export function startRuntime(id) {
       const lms = getLmStudioCli();
       if (lms) {
         try {
-          spawn(lms, ['server', 'start'], { detached: true, stdio: 'ignore' }).unref();
+          // On Windows LM Studio's `lms` may be a `.cmd` shim — only those need
+          // a shell (plain lms.exe launches directly).
+          const opts = { detached: true, stdio: 'ignore', windowsHide: true, shell: platform === 'win32' && /\.(cmd|bat)$/i.test(lms) };
+          spawn(lms, ['server', 'start'], opts).unref();
           return { supported: true, ok: true, message: 'Starting LM Studio Local Server (lms)…', platform, app: 'lms' };
         } catch { /* fall through to opening the app */ }
       }
@@ -397,6 +488,13 @@ export function startRuntime(id) {
         if (!app) return { supported: true, ok: false, message: 'LM Studio (Bionic) is not installed in /Applications. Install it to enable auto-start.' };
         spawn('open', ['-a', app], { detached: true, stdio: 'ignore' }).unref();
         return { supported: true, ok: true, message: `Starting ${app}…`, platform, app };
+      }
+      if (platform === 'win32') {
+        const installed = windowsRuntimeInstall('lmstudio');
+        const message = installed
+          ? 'LM Studio is installed but its lms CLI was not found — launch the app and enable its Local Server to start models.'
+          : 'LM Studio is not installed — install it from https://lmstudio.ai to enable auto-start.';
+        return { supported: true, ok: false, message, platform };
       }
       return { supported: true, ok: false, message: `Auto-start for ${rt.name} is not available on this platform (${platform}).` };
     }

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { atomicRenameSync } from '../utils/fs.js';
 
 // ═══════════════════════════════════════════════════
 //  Profile store — persistent, portable configuration profiles. A profile is a
@@ -32,7 +33,9 @@ function load() {
 function persist(map) {
   try {
     if (!existsSync(STORE_DIR)) mkdirSync(STORE_DIR, { recursive: true });
-    writeFileSync(STORE_PATH, JSON.stringify(map, null, 2), 'utf-8');
+    const tmp = `${STORE_PATH}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf-8');
+    atomicRenameSync(tmp, STORE_PATH);
   } catch { /* non-fatal */ }
 }
 

@@ -1,7 +1,8 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
+import { atomicRenameSync } from '../utils/fs.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Settings store — the server-side storage layer for ~/.claude/settings.json.
@@ -105,10 +106,11 @@ export function writeSettings(config) {
   }
 
   // Atomic write: write to a sibling temp file, then rename (rename is atomic on
-  // POSIX and effectively atomic on the same volume on Windows).
+  // POSIX and effectively atomic on the same volume on Windows — with retry +
+  // copy fallback for locked destinations on Windows).
   const tmp = `${SETTINGS_PATH}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, SETTINGS_PATH);
+  atomicRenameSync(tmp, SETTINGS_PATH);
 
   // Verify: re-read and structurally compare. If anything is off, we have the
   // backup (backupPath) to restore from.

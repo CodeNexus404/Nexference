@@ -12,9 +12,10 @@
 //  references — NEVER the actual API key.
 // ═══════════════════════════════════════════════════════════════
 
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { atomicRenameSync } from '../utils/fs.js';
 
 export const OPENCODE_CONFIG_PATH = join(homedir(), '.config', 'opencode', 'opencode.json');
 export const OPENCODE_BACKUP_DIR = join(homedir(), '.nexference', 'backups', 'opencode');
@@ -95,10 +96,10 @@ export function writeOpenCodeConfig(config) {
     backupPath = backupExisting();
   }
 
-  // Atomic write: temp file + rename.
+  // Atomic write: temp file + rename (Windows-safe retry/copy fallback).
   const tmp = `${OPENCODE_CONFIG_PATH}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, OPENCODE_CONFIG_PATH);
+  atomicRenameSync(tmp, OPENCODE_CONFIG_PATH);
 
   // Verified re-read: structural comparison.
   const reread = readOpenCodeConfig();
@@ -151,6 +152,6 @@ export function restoreOpenCodeBackup(backupId) {
   ensureDir(dirname(OPENCODE_CONFIG_PATH));
   const tmp = `${OPENCODE_CONFIG_PATH}.tmp-restore-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(parsed, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, OPENCODE_CONFIG_PATH);
+  atomicRenameSync(tmp, OPENCODE_CONFIG_PATH);
   return { restored: true, config: parsed };
 }

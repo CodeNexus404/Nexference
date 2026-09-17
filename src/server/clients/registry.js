@@ -84,14 +84,27 @@ const DETECT = {
   'gemini-cli': ['gemini'],
 };
 
+// Platform-aware PATH check: `command -v` is a POSIX shell builtin that does not
+// exist in cmd.exe (the default execSync shell on Windows), so detection used to
+// always report "not found" there. Windows uses `where` instead.
+function commandExists(name) {
+  try {
+    if (process.platform === 'win32') {
+      execSync(`where ${name}`, { stdio: 'ignore' });
+    } else {
+      execSync(`command -v ${name} >/dev/null 2>&1`, { stdio: 'ignore' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function detectClient(id) {
   const names = DETECT[id];
   if (!names) return { id, detected: null, note: 'Detection not implemented for this client' };
   for (const n of names) {
-    try {
-      execSync(`command -v ${n} >/dev/null 2>&1`);
-      return { id, detected: true, note: `Detected on PATH: ${n}` };
-    } catch { /* not found */ }
+    if (commandExists(n)) return { id, detected: true, note: `Detected on PATH: ${n}` };
   }
   return { id, detected: false, note: 'Not found on PATH' };
 }

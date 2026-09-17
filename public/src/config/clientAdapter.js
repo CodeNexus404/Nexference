@@ -17,9 +17,15 @@ export class ClientAdapter {
 // trailing `/v1/` from the gateway base (present for OpenAI-style calls).
 //
 // Two auth shapes exist, matching how each gateway actually authenticates:
-//  • default — apiKeyHelper echo: Claude Code resolves the helper and sends
-//    the result as `x-api-key` (Anthropic's native header). Correct for
-//    anthropic, agentrouter, aerolink, freemodel, custom.
+// •  default — apiKeyHelper echo: Claude Code resolves the helper and sends
+  //    the result as `x-api-key` (Anthropic's native header). Correct for
+  //    anthropic, agentrouter, aerolink, freemodel, custom.
+  //
+  // The apiKeyHelper is executed through the OS shell — /bin/sh on macOS/Linux
+  // (strips the single quotes) but cmd.exe on Windows, where single quotes are
+  // literal characters that would ship inside the actual key and break auth.
+  // So the quoted form is emitted only on POSIX; on Windows the key is echoed
+  // bare (API keys are alphanumeric, so no cmd metacharacter risk).
 //  • bearerAuth — TokenRouter-style gateways reject `x-api-key` and demand
 //    `Authorization: Bearer <key>` (their own error message says so). For
 //    these we emit ANTHROPIC_AUTH_TOKEN only (no apiKeyHelper): Claude Code
@@ -45,7 +51,7 @@ export class ClaudeCodeAdapter extends ClientAdapter {
         ANTHROPIC_MODEL: model,
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
       },
-      apiKeyHelper: `echo '${apiKey}'`,
+      apiKeyHelper: isWindowsPlatform() ? `echo ${apiKey}` : `echo '${apiKey}'`,
       ...(model && { model }),
     };
   }
@@ -95,3 +101,14 @@ export {
   normalizeClientId,
   clientsForConnectionType,
 } from '../clients/registry.js';
+
+// True when the dashboard is running on Windows. Claude Code executes
+// `apiKeyHelper` through the system shell: /bin/sh (macOS/Linux) strips the
+// single quotes around the key, but cmd.exe (Windows) treats them as literal
+// characters — so we only emit the quoted form on POSIX and keep it
+// un-quoted on Windows. Probing the browser keeps the Mac output byte-identical.
+export function isWindowsPlatform() {
+  const ua = navigator.userAgent || '';
+  const pl = navigator.platform || '';
+  return /win/i.test(pl) || /Windows|Win64|Win32/i.test(ua);
+}

@@ -8,9 +8,10 @@
 //  name only) — Nexference never stores or touches the secret.
 // ═══════════════════════════════════════════════════════════════
 
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
+import { atomicRenameSync } from '../utils/fs.js';
 
 export const CODEX_CONFIG_PATH = join(homedir(), '.codex', 'config.json');
 export const CODEX_BACKUP_DIR = join(homedir(), '.nexference', 'backups', 'codex');
@@ -71,7 +72,7 @@ export function writeCodexConfig(config) {
   if (existsSync(CODEX_CONFIG_PATH)) backupPath = backupExisting();
   const tmp = `${CODEX_CONFIG_PATH}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, CODEX_CONFIG_PATH);
+  atomicRenameSync(tmp, CODEX_CONFIG_PATH);
   // Verified re-read.
   const reread = readCodexConfig();
   if (!reread) throw new Error('verification failed: written file is not valid JSON');
@@ -109,6 +110,6 @@ export function restoreCodexBackup(backupId) {
   ensureDir(dirname(CODEX_CONFIG_PATH));
   const tmp = `${CODEX_CONFIG_PATH}.tmp-restore-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(parsed, null, 2) + '\n', 'utf-8');
-  renameSync(tmp, CODEX_CONFIG_PATH);
+  atomicRenameSync(tmp, CODEX_CONFIG_PATH);
   return { restored: true, config: parsed };
 }

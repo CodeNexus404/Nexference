@@ -12,6 +12,7 @@
 
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import {
   loadDiscovered, saveDiscovered, loadHistory, appendHistory, loadSourceState, saveSourceState,
 } from './ecosystemStore.js';
@@ -32,8 +33,10 @@ import { providerDiscoveryService } from '../providerDiscoveryService.js';
 import { createDynamicFromEcosystem, syncEcosystemModels } from '../dynamic/dynamicProviderService.js';
 import { assessProviderIntegration } from '../integrations/providerIntegrationService.js';
 
-const BASE_DIR = process.cwd();
-const SOURCES_FILE = join(BASE_DIR, 'data', 'discovery-sources.json');
+// Resolve the shipped discovery-source registry relative to this module (not
+// process.cwd()), so the app works regardless of the launching directory.
+const BASE_DIR = fileURLToPath(new URL('../../../../data', import.meta.url));
+const SOURCES_FILE = join(BASE_DIR, 'discovery-sources.json');
 const FRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGO_VERIFY_MS = 6000;
 

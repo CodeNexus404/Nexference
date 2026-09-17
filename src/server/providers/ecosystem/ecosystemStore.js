@@ -12,9 +12,10 @@
 //   • No secrets: callers must never pass keys/tokens; we assert non-secret shape.
 //   • Discovery data is OPTIONAL — if absent or unreadable the app boots normally.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { atomicRenameSync } from '../../utils/fs.js';
 
 const DATA_DIR = join(homedir(), '.nexference');
 const DISCOVERED_FILE = join(DATA_DIR, 'discovered-providers.json');
@@ -40,7 +41,7 @@ export function atomicWrite(file, data) {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
     const tmp = `${file}.tmp.${process.pid}.${Date.now()}`;
     writeFileSync(tmp, JSON.stringify(data, null, 2));
-    renameSync(tmp, file);
+    atomicRenameSync(tmp, file);
     return true;
   } catch {
     return false;

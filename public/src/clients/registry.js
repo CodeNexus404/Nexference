@@ -19,7 +19,7 @@ export const CLIENTS = [
   },
   {
     id: 'opencode-cli', name: 'OpenCode', monogram: 'OC', color: '#7c3aed', logo: '/clients/opencode-cli.png',
-    configPath: '~/.config/opencode/config.json',
+    configPath: '~/.config/opencode/opencode.json',
     support: 'manual',
     capabilities: { detect: true, generateConfig: false, applyConfig: false, backup: false, launch: true, openFolder: true },
     connectionTypes: ['cloud', 'local'],
