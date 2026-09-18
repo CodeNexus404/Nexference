@@ -6,6 +6,9 @@
 //   POST /api/dynamic-providers/:id/test          (key from client; never stored)
 //   POST /api/dynamic-providers/:id/deactivate
 //   POST /api/dynamic-providers/:id/reactivate
+//   GET  /api/dynamic-providers/:id/stored-models (normalized from modelSupport)
+//   GET  /api/dynamic-providers/:id/fetch-models   (re-import discovery list)
+//   PATCH /api/dynamic-providers/:id               (edit name/website/baseUrl/format)
 //   DELETE /api/dynamic-providers/:id
 //
 // The unified catalogue lives at GET /api/providers (see routes/providers.js).
@@ -16,8 +19,25 @@ import {
 import {
   deactivateDynamicProvider, reactivateDynamicProvider, removeDynamicProviderRecord,
   refreshDynamicMetadata, discoverDynamicModels, testDynamicConnection,
+  updateDynamicProvider,
 } from '../providers/dynamic/dynamicProviderService.js';
 import { recordTest } from '../config/credentialsStore.js';
+
+// Normalize a stored modelSupport entry into the {id,name,…} shape the custom
+// provider modal / model picker expects. Pricing is preserved when discovery
+// reported it (e.g. OpenRouter/HF/LiteLLM), so the free/paid toggle and the
+// per-model "free" badge can classify models instead of asserting nothing.
+function toModelList(rec) {
+  return (rec?.modelSupport?.models || []).map((m) => ({
+    id: m.modelId || m.id || m.name,
+    name: m.name || m.modelId || 'unknown',
+    source: m.source || 'ecosystem',
+    accessType: m.accessType || 'unknown',
+    availability: m.availability || 'unknown',
+    pricing: m.pricing || null,
+    contextLength: m.contextLength || null,
+  }));
+}
 
 export function registerDynamicProviderRoutes(app) {
   const router = Router();
@@ -59,6 +79,43 @@ export function registerDynamicProviderRoutes(app) {
       if (result.error) return res.status(400).json({ ok: false, error: result.error, message: result.message, result });
       res.json({ ok: true, tested: result.tested, status: result.status, provider: getDynamicProvider(p.id) });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  // Stored model list — the authoritative modelSupport persisted on the record
+  // (probing + fetched by discovery imports). Mirrors custom-provider stored-models.
+  router.get('/dynamic-providers/:id/stored-models', (req, res) => {
+    const p = getDynamicProvider(req.params.id);
+    if (!p || p.status === 'removed') return res.status(404).json({ error: 'Unknown dynamic provider' });
+    const models = toModelList(p);
+    res.json({ ok: true, models, count: models.length, source: 'ecosystem' });
+  });
+
+  // Refresh models — re-import the ecosystem discovery list, then return the
+  // normalized result. The transient `key` is accepted for API parity with the
+  // custom-provider endpoint but is never read or stored (discovery imports only).
+  router.get('/dynamic-providers/:id/fetch-models', async (req, res) => {
+    const p = getDynamicProvider(req.params.id);
+    if (!p || p.status === 'removed') return res.status(404).json({ error: 'Unknown dynamic provider' });
+    try {
+      const imported = await discoverDynamicModels(p.id);
+      const models = toModelList(getDynamicProvider(p.id));
+      res.json({ ok: true, count: models.length, models, source: 'ecosystem', imported: imported.imported || 0 });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  // Edit an adopted provider (name/website/description/baseUrl/format) — the
+  // dynamic counterpart of PATCH /api/custom-providers/:id.
+  router.patch('/dynamic-providers/:id', async (req, res) => {
+    const p = getDynamicProvider(req.params.id);
+    if (!p || p.status === 'removed') return res.status(404).json({ error: 'Unknown dynamic provider' });
+    try {
+      const rec = updateDynamicProvider(p.id, req.body || {});
+      res.json({ ok: true, provider: rec });
+    } catch (e) {
+      const msg = String(e?.message || e);
+      const status = msg.includes('baseUrl must be') ? 400 : 500;
+      res.status(status).json({ error: msg });
+    }
   });
 
   router.delete('/dynamic-providers/:id', (req, res) => {

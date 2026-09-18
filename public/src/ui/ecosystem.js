@@ -101,7 +101,7 @@ function providerCard(p) {
       <button class="btn btn-sm" onclick="event.stopPropagation();window.openEcosystemProvider('${esc(p.id)}')">Details</button>
       <button class="btn btn-sm" onclick="event.stopPropagation();window.ecosystemAction('validate','${esc(p.id)}')">Validate</button>
       ${p.registryState !== 'adopted' ? `<button class="btn btn-sm btn-go" onclick="event.stopPropagation();window.ecosystemAction('adopt','${esc(p.id)}')">Adopt</button>` : ''}
-      ${p.registryState === 'adopted' ? `<button class="btn btn-sm" onclick="event.stopPropagation();window.openDynamicProvider('${esc(p.dynamicId)}')">Open</button>` : ''}
+      ${p.registryState === 'adopted' ? `<button class="btn btn-sm" onclick="event.stopPropagation();window.openAdoptedProvider('${esc(p.dynamicId)}')">Open</button>` : ''}
       ${p.registryState === 'ignored' ? `<button class="btn btn-sm" onclick="event.stopPropagation();window.ecosystemAction('restore','${esc(p.id)}')">Restore</button>` : `<button class="btn btn-sm" onclick="event.stopPropagation();window.ecosystemAction('ignore','${esc(p.id)}')">Ignore</button>`}
     </div>
   </div>`;
@@ -144,7 +144,7 @@ async function openEcosystemProvider(id) {
     size: 'wide',
     bodyHTML: `
       <div class="eco-detail">
-        ${p.dynamicId ? `<div class="eco-reg-added">Added to Provider Registry · <a href="#" onclick="event.preventDefault();window.openDynamicProvider('${esc(p.dynamicId)}')">Open in Cloud Providers →</a></div>` : ''}
+        ${p.dynamicId ? `<div class="eco-reg-added">Added to Provider Registry · <a href="#" onclick="event.preventDefault();window.openAdoptedProvider('${esc(p.dynamicId)}')">Open in Cloud Providers →</a></div>` : ''}
         <div class="eco-detail-head">
           <div class="eco-logo-wrap lg">${ecoLogoHtml(p)}</div>
           <div>
@@ -329,9 +329,35 @@ window.ecosystemAction = async (token, id) => {
     }
     await openEcosystemProvider(id);
     const root = document.getElementById('page-ecosystem'); if (root) await renderEcoBody(root);
-    if (token === 'adopt' && d.adoption?.success && window.refreshCloudProviders) {
-      window.refreshCloudProviders();
+    if (token === 'adopt' && d.adoption?.success) {
+      // Mirror the freshly adopted provider into the Cloud Providers index so its
+      // card is present the moment the user opens it (no stale workspace cache).
+      try {
+        const dynRes = await fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => null);
+        if (dynRes && Array.isArray(dynRes.providers)) workspace.dynamicProviders = dynRes.providers;
+      } catch { /* non-fatal */ }
+      if (window.refreshCloudProviders) window.refreshCloudProviders();
     }
   } catch (e) { notify.toast('Action failed: ' + (e.message || e), 'error'); }
 };
 window.openEcosystemProvider = (id) => openEcosystemProvider(id);
+
+// Open an adopted provider straight from the Ecosystem page. Jump to the Cloud
+// Providers page, switch to the Adopted filter, refresh the provider index so the
+// adopted card is present, and open its FULL configuration dialog — the same
+// modal custom provider cards use (editable base URL, API key, model picker with
+// paid toggle/search, test connection, apply to Claude Code / copyable config,
+// provider integration, edit, delete).
+window.openAdoptedProvider = async (dynamicId) => {
+  if (!dynamicId) { notify.toast('No adopted record for this provider', 'warning'); return; }
+  router.navigate('cloud-providers');
+  try {
+    const res = await fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => ({ providers: null }));
+    if (Array.isArray(res.providers)) {
+      workspace.dynamicProviders = res.providers;
+      if (window.renderCloudProviders) window.renderCloudProviders({ registryFilter: 'adopted' });
+    }
+  } catch { /* best-effort: the dialog still opens below */ }
+  if (window.openCustomProvider) window.openCustomProvider(dynamicId);
+  else notify.toast('Provider dialog unavailable', 'error');
+};

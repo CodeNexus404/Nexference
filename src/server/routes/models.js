@@ -3,6 +3,7 @@ import { PROVIDERS } from '../providers/registry.js';
 import { modelCache } from '../providers/modelCache.js';
 import { fetchModelsForProvider } from '../providers/modelService.js';
 import { listCustomProviders } from '../providers/custom/customProviderStore.js';
+import { loadDynamicProviders } from '../providers/dynamic/dynamicProviderStore.js';
 import {
   getUnifiedModels, getModelDetails, getRecommendedModels, getModelStats,
   refreshProviderModels, refreshAllModels, isFreeModel,
@@ -18,6 +19,16 @@ import {
 // Logic (including the free-model filter) preserved from the original server.js.
 
 export function registerModelRoutes(app) {
+  // Free/paid classification for stored model lists. Handles numeric or string
+  // pricing (discovery APIs return strings like "0") and falls back to
+  // accessType === 'free' when a provider exposes access info instead of prices.
+  function modelIsFree(m) {
+    const p = m?.pricing;
+    const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
+    if (isZero(p?.input) || isZero(p?.output)) return true;
+    return m?.accessType === 'free';
+  }
+
   // ─── GET cached models (server pre-fetched on startup) — legacy ───
   app.get('/api/cached-models', (req, res) => {
     const summary = {};
@@ -44,13 +55,40 @@ export function registerModelRoutes(app) {
     for (const rec of listCustomProviders()) {
       const models = rec.modelSupport?.models || [];
       if (!models.length) continue;
-      const freeModels = models.filter(m => m?.pricing?.input === 0 || m?.pricing?.output === 0);
+      const freeModels = models.filter(modelIsFree);
       summary[rec.id] = {
         models,
         freeModels,
         total: models.length,
         freeCount: freeModels.length,
         fetchedAt: rec.modelSupport?.fetchedAt || rec.updatedAt || null,
+        source: 'stored',
+      };
+    }
+    // Adopted (dyn:) providers — seed from the modelSupport imported at
+    // adoption/discovery so their cards render the model count on refresh (no
+    // "0 free" flash) and the detail modal's picker opens populated. Pricing is
+    // preserved when discovery knew it (OpenRouter/HF/LiteLLM), so free/paid is
+    // classified like custom providers; unknown pricing simply stays uncounted.
+    for (const rec of loadDynamicProviders().providers) {
+      const source = rec.modelSupport?.models || [];
+      if (!source.length) continue;
+      const models = source.map(m => ({
+        id: m.modelId || m.id || m.name,
+        name: m.name || m.modelId || 'unknown',
+        source: m.source || 'ecosystem',
+        accessType: m.accessType || 'unknown',
+        availability: m.availability || 'unknown',
+        pricing: m.pricing || null,
+        contextLength: m.contextLength || null,
+      }));
+      const freeModels = models.filter(modelIsFree);
+      summary[rec.id] = {
+        models,
+        freeModels,
+        total: models.length,
+        freeCount: freeModels.length,
+        fetchedAt: rec.modelSupport?.lastUpdated || rec.updatedAt || null,
         source: 'stored',
       };
     }

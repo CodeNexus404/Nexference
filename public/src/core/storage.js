@@ -7,6 +7,7 @@
 // (the architecture's existing, explicit choice). Profiles store provider/model
 // references only — never secrets.
 const KEY = (id) => `gw_key_${id}`;
+const BASEURL = (id) => `gw_baseurl_${id}`;
 const MODEL = (id) => `gw_model_${id}`;
 const PAID = (id) => `gw_paid_${id}`;
 const CUSTOM_FORMAT = 'gw_custom_format';
@@ -27,6 +28,15 @@ export const Storage = {
   },
   removeKey(id) {
     localStorage.removeItem(KEY(id));
+  },
+  getBaseUrl(id) {
+    return localStorage.getItem(BASEURL(id)) || '';
+  },
+  setBaseUrl(id, val) {
+    localStorage.setItem(BASEURL(id), val);
+  },
+  removeBaseUrl(id) {
+    localStorage.removeItem(BASEURL(id));
   },
   getModel(id) {
     return localStorage.getItem(MODEL(id)) || '';

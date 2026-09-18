@@ -1,8 +1,18 @@
 // Custom Provider API client (v2.1.0) — thin wrappers over the
 // /api/custom-providers endpoints. No secrets are ever sent or stored.
+//
+// Since v2.3.0 adopted (dyn:) providers behave EXACTLY like custom (cst:)
+// providers in the Cloud Providers UI. The same service calls therefore dispatch
+// to /api/dynamic-providers/:id for dyn ids (edit/delete/stored/fetch-models)
+// and normalize the response back into the custom-provider shape the UI expects.
 import { notify } from '../core/notifications.js';
+import { adoptedToCustomShape } from './adoptedProvider.js';
 
 const BASE = '/api/custom-providers';
+const DYNBASE = '/api/dynamic-providers';
+
+function isDynamic(id) { return typeof id === 'string' && id.startsWith('dyn:'); }
+function dynUrl(id) { return `${DYNBASE}/${encodeURIComponent(id)}`; }
 
 async function jget(url) {
   const r = await fetch(url);
@@ -16,6 +26,13 @@ export async function listCustomProviders({ lifecycle } = {}) {
 }
 
 export async function getCustomProvider(id) {
+  if (isDynamic(id)) {
+    try {
+      const d = await jget(dynUrl(id));
+      if (!d?.provider) return null;
+      return { provider: adoptedToCustomShape(d.provider) };
+    } catch { return null; }
+  }
   try { return jget(`${BASE}/${encodeURIComponent(id)}`); } catch { return null; }
 }
 
@@ -30,7 +47,8 @@ export async function createCustomProvider(data) {
 }
 
 export async function updateCustomProvider(id, data) {
-  const r = await fetch(`${BASE}/${encodeURIComponent(id)}`, {
+  const url = isDynamic(id) ? dynUrl(id) : `${BASE}/${encodeURIComponent(id)}`;
+  const r = await fetch(url, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
@@ -61,7 +79,8 @@ export async function reactivateCustomProvider(id) {
 }
 
 export async function deleteCustomProvider(id) {
-  const r = await fetch(`${BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  const url = isDynamic(id) ? dynUrl(id) : `${BASE}/${encodeURIComponent(id)}`;
+  const r = await fetch(url, { method: 'DELETE' });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { notify.toast(d.error || 'Delete failed', 'error'); return null; }
   return d;
@@ -84,6 +103,16 @@ export async function validateCustomProvider(data) {
 }
 
 export async function fetchCustomProviderModels(id, key = '') {
+  if (isDynamic(id)) {
+    // Adopted provider: "refresh models" re-imports the ecosystem discovery list
+    // (the truthful source for dyn records). The key is accepted for parity with
+    // the custom endpoint but never sent — dynamic models come from discovery.
+    try {
+      const qs = key ? `?key=${encodeURIComponent(key)}` : '';
+      const r = await fetch(dynUrl(id) + `/fetch-models${qs}`);
+      return r.json().catch(() => ({ ok: false, models: [] }));
+    } catch { return { ok: false, models: [] }; }
+  }
   try {
     // Key is transient — sent for this request only, never stored server-side.
     const qs = key ? `?key=${encodeURIComponent(key)}` : '';
@@ -93,6 +122,10 @@ export async function fetchCustomProviderModels(id, key = '') {
 }
 
 export async function getStoredModels(id) {
+  if (isDynamic(id)) {
+    try { return await jget(dynUrl(id) + '/stored-models'); }
+    catch { return { ok: false, models: [] }; }
+  }
   try {
     const r = await fetch(`${BASE}/${encodeURIComponent(id)}/stored-models`);
     return r.json().catch(() => ({ ok: false, models: [] }));

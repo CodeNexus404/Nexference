@@ -11,6 +11,16 @@ import * as cpService from '../providers/customProviderService.js';
 
 const ORIGIN_BADGE = '<span class="badge browse">Custom</span>';
 
+// Re-pull the adopted (dyn:) provider index so the Cloud Providers grid reflects
+// edits/deletes immediately instead of holding a stale workspace.dynamicProviders.
+export async function refreshDynamicIndex() {
+  try {
+    const res = await fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => ({ providers: null }));
+    if (Array.isArray(res.providers)) workspace.dynamicProviders = res.providers;
+    return true;
+  } catch { return false; }
+}
+
 function relTime(iso) {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return `${s}s ago`;
@@ -44,15 +54,23 @@ const STATUS_META = {
 // Compact card matching curated card format. Opens detail modal on click.
 
 // Single source of truth for free/paid classification. A model is free when
-// either its input or output price is zero (gateways sometimes only set one).
+// either its input or output price is zero (gateways sometimes only set one),
+// or when discovery tagged it accessType "free". Pricing values may be numeric
+// or numeric strings ("0") depending on the source API (OpenRouter/HF/LiteLLM),
+// so compare numerically rather than with a strict === 0.
 function isFreeModel(m) {
-  return m?.pricing?.input === 0 || m?.pricing?.output === 0;
+  const p = m?.pricing;
+  const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
+  if (isZero(p?.input) || isZero(p?.output)) return true;
+  return m?.accessType === 'free';
 }
 
 export function customProviderCard(p) {
   const id = esc(p.id);
   const name = esc(p.name);
   const fmt = FORMAT_LABELS[p.format] || esc(p.format || 'unknown');
+  const adopted = p.origin === 'ecosystem';
+  const compat = `${adopted ? 'Adopted' : 'Custom'} · ${fmt}`;
   const key = Storage.getKey(p.id);
   const models = workspace.liveModels[p.id]?.models || [];
   const freeModels = models.filter(isFreeModel);
@@ -84,12 +102,12 @@ export function customProviderCard(p) {
   return `<div class="panel provider-card cp-card${active ? ' applied' : ''}" data-id="${id}" data-origin="custom" role="button" tabindex="0">
     <div class="pc-head">
       <div class="pc-logo-sm">${favSrc}</div>
-      <div class="provider-meta"><b>${name}</b><span class="provider-compat">Custom · ${fmt}</span></div>
+      <div class="provider-meta"><b>${name}</b><span class="provider-compat">${compat}</span></div>
       ${dot}
     </div>
     <div class="pc-card-foot">
       <span class="badge cnt">${totalModels ? (freeModelsN + ' free · ' + totalModels + ' total') : 'models…'}</span>
-      ${active ? '<span class="applied-badge">active</span>' : ''}${key ? '<span class="badge cc">configured</span>' : ''}
+      ${active ? '<span class="applied-badge">active</span>' : ''}${key ? '<span class="badge cc">configured</span>' : ''}${adopted ? '<span class="badge pi-src">ecosystem</span>' : ''}
     </div>
     <div class="pc-intel-row">
       <span class="pi-status">${esc(p.identity?.description || 'Custom provider')}</span>
@@ -552,10 +570,13 @@ export async function openCustomProviderDetail(id) {
   function renderModelPicker(host) {
     const { models, freeModels, modelCount, freeCount } = getModelData();
     const showPaid = Storage.getPaid(id);
-    // Defensive: "Include paid" toggled off but nothing classified free and
-    // models exist → show the full list rather than blanking out the picker.
+    // Adopted (dyn:) providers get authoritative free/paid classification from
+    // discovery pricing, so the toggle is respected strictly: "Include paid" off
+    // shows ONLY free models (0 free → empty list, never a silent paid spillover).
+    // Custom (cst:) providers keep the legacy fallback so an unclassified or
+    // manually-entered list never renders as a blank picker.
     let listModels = showPaid ? models : freeModels;
-    if (!showPaid && !listModels.length && models.length) listModels = models;
+    if (!showPaid && !listModels.length && models.length && !id.startsWith('dyn:')) listModels = models;
     const freeIds = new Set(freeModels.map(m => m.id));
     const hasLiveModels = models.length > 0;
     const currentModel = Storage.getModel(id);
@@ -572,7 +593,7 @@ export async function openCustomProviderDetail(id) {
                 ${freeIds.has(m.id) ? '<span class="mp-free">free</span>' : ''}
                 <span class="mp-id">${esc(m.id)}</span>
               </button>`).join('') + (listModels.length > 50 ? `<div class="mp-empty">…and ${listModels.length - 50} more</div>` : '')
-              : '<div class="mp-empty">No models match.</div>')
+              : (freeCount === 0 ? '<div class="mp-empty">No free models for this provider.</div>' : '<div class="mp-empty">No models match.</div>'))
             : ''}
         </div>
         ${!hasLiveModels ? `<input class="inp" data-cp="model-input" type="text" value="${esc(currentModel)}" placeholder="Enter model ID (e.g. gpt-4o)" style="margin-top:8px" />` : ''}
@@ -643,9 +664,12 @@ export async function openCustomProviderDetail(id) {
       </div>
       <p class="pc-desc">${esc(p.identity?.description || fmt)}</p>
 
-      ${p.api?.baseUrl ? `
-        <label class="lbl">Base URL</label>
-        <input class="inp" id="cpDetailBaseUrl" type="text" value="${esc(p.api.baseUrl)}" placeholder="https://your-gateway.com/v1/" />` : ''}
+      ${(id.startsWith('dyn:') || p.api?.baseUrl || Storage.getBaseUrl(id)) ? `
+        <div class="lbl-row" style="display:flex;align-items:center;gap:6px">
+          <label class="lbl" style="margin-bottom:0">Base URL</label>
+          <span class="cp-baseurl-saved" style="display:none">Saved</span>
+        </div>
+        <input class="inp" id="cpDetailBaseUrl" type="text" value="${esc(Storage.getBaseUrl(id) || p.api?.baseUrl || '')}" placeholder="https://your-gateway.com/v1/" />` : ''}
 
       <label class="lbl">API Key</label>
       <div class="key-row">
@@ -693,9 +717,12 @@ export async function openCustomProviderDetail(id) {
       // Delete button
       const deleteBtn = body.querySelector('#cpDetailDeleteBtn');
       deleteBtn?.addEventListener('click', async () => {
+        const isAdopted = id.startsWith('dyn:');
         const ok = await confirmModal({
-          title: 'Delete custom provider?',
-          message: `This permanently removes "${p.identity?.name || id}" and its stored models. This cannot be undone.`,
+          title: isAdopted ? 'Delete adopted provider?' : 'Delete custom provider?',
+          message: isAdopted
+            ? `This removes "${p.identity?.name || id}" from the adopted providers registry. The original ecosystem discovery record is kept. This cannot be undone.`
+            : `This permanently removes "${p.identity?.name || id}" and its stored models. This cannot be undone.`,
           confirmLabel: 'Delete', danger: true,
         });
         if (!ok) return;
@@ -704,9 +731,11 @@ export async function openCustomProviderDetail(id) {
         try {
           const r = await cpService.deleteCustomProvider(id);
           if (r?.ok) {
+            if (id.startsWith('dyn:')) await refreshDynamicIndex();
             notify.toast('Deleted', 'warning');
             delete workspace.liveModels[id];
             Storage.removeKey(id);
+            Storage.removeBaseUrl(id);
             ctrl.close();
             if (window.renderCloudProviders) window.renderCloudProviders();
             if (window.renderGateways) window.renderGateways();
@@ -733,6 +762,41 @@ export async function openCustomProviderDetail(id) {
       const keyInput = body.querySelector('#cpDetailApiKey');
       keyInput?.addEventListener('input', () => Storage.setKey(id, keyInput.value));
 
+      // Base URL — persisted exactly like the API key: the typed value is stored
+      // locally on every keystroke (survives reloads) and, once the user pauses
+      // and the URL is valid, it is also written back to the provider record so
+      // the integration section / edit dialog / config path all stay in sync.
+      const baseUrlInput = body.querySelector('#cpDetailBaseUrl');
+      if (baseUrlInput) {
+        let baseUrlTimer = null;
+        let savedBaseUrl = p.api?.baseUrl || '';
+        baseUrlInput.addEventListener('input', () => {
+          const val = baseUrlInput.value.trim();
+          Storage.setBaseUrl(id, val);
+          if (val === savedBaseUrl) return;
+          clearTimeout(baseUrlTimer);
+          baseUrlTimer = setTimeout(async () => {
+            if (val === savedBaseUrl) return;
+            if (val && !/^https?:\/\/\S+$/i.test(val)) return;
+            try {
+              const r = await cpService.updateCustomProvider(id, { baseUrl: val });
+              if (r?.ok) {
+                savedBaseUrl = val;
+                const rec = r.provider;
+                p.api = p.api || {};
+                p.api.baseUrl = rec?.api?.baseUrl || rec?.integration?.baseUrl || savedBaseUrl;
+                const savedLabel = body.querySelector('.cp-baseurl-saved');
+                if (savedLabel) {
+                  savedLabel.style.display = 'inline-flex';
+                  clearTimeout(savedLabel._t);
+                  savedLabel._t = setTimeout(() => { savedLabel.style.display = 'none'; }, 2500);
+                }
+              }
+            } catch { /* network offline / server restart pending — Storage has the value */ }
+          }, 700);
+        });
+      }
+
       const eye = body.querySelector('[data-act="toggle"]');
       eye?.addEventListener('click', () => {
         const showing = keyInput.type === 'text';
@@ -756,7 +820,7 @@ export async function openCustomProviderDetail(id) {
         const btn = e.currentTarget;
         const apiKey = keyInput.value;
         if (!apiKey) { notify.toast('Enter an API key first', 'warning'); return; }
-        const baseUrl = p.api?.baseUrl || '';
+        const baseUrl = (body.querySelector('#cpDetailBaseUrl')?.value?.trim()) || p.api?.baseUrl || '';
         const fmt = p.api?.format || 'openai';
         const hostEl = body.querySelector('#cpDetailModelHost');
         const selected = hostEl?.querySelector('.mp-item.sel')?.dataset?.id || '';
@@ -794,14 +858,16 @@ export async function openCustomProviderDetail(id) {
         const modelVal = Storage.getModel(id) || '';
         if (!apiKey) { notify.toast('Enter an API key first', 'warning'); return; }
         if (!modelVal) { notify.toast('Select or enter a model', 'warning'); return; }
+        const baseUrl = (body.querySelector('#cpDetailBaseUrl')?.value?.trim()) || p.api?.baseUrl || '';
         Storage.setKey(id, apiKey);
+        Storage.setBaseUrl(id, baseUrl);
         Storage.setModel(id, modelVal);
 
         const provider = {
           id: p.id, name: p.identity?.name || id, format: p.api?.format || 'openai',
-          baseUrl: p.api?.baseUrl || '', publicModels: false,
+          baseUrl, publicModels: false,
         };
-        const cfg = configEngine.buildClaudeSettings(provider, p.api?.baseUrl || '', modelVal, apiKey);
+        const cfg = configEngine.buildClaudeSettings(provider, baseUrl, modelVal, apiKey);
 
         if (anthropicSupported) {
           const ok = await LocalSettingsRuntime.write(cfg);
@@ -852,9 +918,11 @@ export function initCustomProviderActions() {
     if (!ok) return;
     const r = await cpService.deleteCustomProvider(id);
     if (r?.ok) {
+      if (id.startsWith('dyn:')) await refreshDynamicIndex();
       notify.toast('Deleted', 'warning');
       delete workspace.liveModels[id];
       Storage.removeKey(id);
+      Storage.removeBaseUrl(id);
       if (window.renderCloudProviders) window.renderCloudProviders();
       if (window.renderGateways) window.renderGateways();
     }
@@ -903,6 +971,7 @@ async function editCustomProviderFlow(id) {
           });
           if (r?.ok) {
             ctrl.close();
+            if (id.startsWith('dyn:')) await refreshDynamicIndex();
             notify.toast('Updated', 'success');
             if (window.renderCloudProviders) window.renderCloudProviders();
             if (window.renderGateways) window.renderGateways();

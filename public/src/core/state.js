@@ -13,20 +13,38 @@ import { Storage } from './storage.js';
 // This replaces the scattered module-scope variables from app.js. Behaviour of
 // the Gateway Switcher itself is unchanged; the shape just makes the new pages
 // (Workspace / Providers / Configuration / Local AI / Clients / Settings) clean.
+// The last applied configuration record (persisted in localStorage). Restored at
+// boot so the "applied" badge/glow, workspace card and top-bar status all survive
+// a refresh or server restart on every platform (macOS, Windows, Linux) — the
+// settings.json re-match in loadConfig() is then used only as the authoritative
+// override, not the sole source of truth.
+const _storedApplied = Storage.getApplied();
+const _storedAppliedId =
+  _storedApplied && (_storedApplied.status === 'configured' || _storedApplied.status === 'fallback')
+    ? (_storedApplied.provider || null)
+    : null;
+
 export const workspace = {
   // Page / navigation
   currentPage: Storage.getPage() || 'workspace',
 
-  // Active selections (the "what is configured right now" answer)
-  activeProvider: null,        // provider id
-  activeModel: null,           // model id
-  activeClient: 'claude-code', // client id
-  activeRuntime: null,         // local runtime id
+  // Active selections (the "what is configured right now" answer). Seeded from
+  // the persisted applied record so they're valid before /api/config resolves.
+  activeProvider: _storedAppliedId,
+  activeModel: (_storedApplied && _storedApplied.model) || null,
+  activeClient: (_storedApplied && _storedApplied.client) || 'claude-code',
+  activeRuntime: (_storedApplied && _storedApplied.runtime) || null,
+
+  // The provider id whose card currently owns settings.json. Starts as the
+  // persisted applied provider (keeps a card glowing across refresh/restart
+  // without depending on the base-URL re-match), then loadConfig() may override
+  // it with a verified match against the live file.
+  appliedProviderId: _storedAppliedId,
 
   // Applied configuration metadata (non-secret). Persisted separately so the
   // Workspace card + top-bar status can reflect the last applied config even
   // before re-reading settings.json.
-  applied: Storage.getApplied(),
+  applied: _storedApplied,
 
   // Whether a generated config exists that hasn't been applied yet.
   unsaved: false,

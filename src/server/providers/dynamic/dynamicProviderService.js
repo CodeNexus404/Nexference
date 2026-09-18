@@ -82,7 +82,15 @@ function buildAccess(eco) {
 
 function buildModelSupport(eco) {
   const models = Array.isArray(eco.models) ? eco.models.map((m) => ({
-    modelId: m.id || m.name, name: m.name || m.id, source: eco.discoveryOrigin, accessType: m.accessType || 'unknown', availability: m.availability || 'unknown',
+    modelId: m.modelId || m.id || m.name,
+    name: m.name || m.modelId || m.id,
+    source: m.source || eco.discoveryOrigin,
+    accessType: m.accessType || 'unknown',
+    availability: m.availability || 'unknown',
+    // Preserve pricing from discovery (OpenRouter/HF/LiteLLM) so the Cloud
+    // Providers free/paid toggle and card counts can classify models correctly.
+    pricing: m.pricing || null,
+    contextLength: m.contextLength || null,
   })) : [];
   return {
     status: models.length ? 'discovered' : 'unknown',
@@ -200,6 +208,68 @@ export function createDynamicFromEcosystem(ecoId) {
   };
 }
 
+const isValidHttpUrl = (s) => {
+  if (!s || typeof s !== 'string') return false;
+  try { const u = new URL(s); return u.protocol === 'https:' || u.protocol === 'http:'; } catch { return false; }
+};
+
+// User edit of an adopted provider's configuration. Persists ONLY non-secret
+// fields from the client (name/website/description/baseUrl/format) into the
+// store record so the Cloud Providers detail modal works exactly like custom
+// providers. Format/baseUrl are trusted signals — a real endpoint and a known
+// adapter dialect raise the integration from metadata-only to adapter-ready.
+export function updateDynamicProvider(id, patch = {}) {
+  const rec = getDynamicProvider(id);
+  if (!rec) return null;
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const ADAPTER_FORMATS = ['openai', 'anthropic', 'gemini'];
+
+  const name = str(patch.name);
+  if (name) rec.name = name.slice(0, 100);
+  if (typeof patch.website === 'string') rec.website = str(patch.website) || null;
+
+  const desc = str(patch.description);
+  if (desc) rec.compatibilityNote = desc.slice(0, 200);
+
+  const format = str(patch.format);
+  if (ADAPTER_FORMATS.includes(format)) {
+    rec.integration = rec.integration || {};
+    rec.integration.adapterType = format;
+    rec.integration.format = format;
+    if (![INTEGRATION.TESTED, INTEGRATION.ADAPTER_READY].includes(rec.integration.level)) {
+      rec.integration.level = INTEGRATION.ADAPTER_READY;
+    }
+    rec.capabilities = rec.capabilities || {};
+    rec.capabilities.openaiCompatible = format === 'openai';
+    rec.capabilities.anthropicCompatible = format === 'anthropic';
+    rec.capabilities.customBaseUrl = rec.capabilities.customBaseUrl !== false;
+    rec.compatibilityNote = format === 'openai'
+      ? 'OpenAI-compatible API (generic OpenAI adapter applies).'
+      : format === 'anthropic'
+        ? 'Anthropic-compatible API (generic Anthropic adapter applies).'
+        : 'Gemini-compatible API (generic Gemini adapter applies).';
+  }
+
+  const baseUrl = str(patch.baseUrl);
+  if (baseUrl) {
+    if (!isValidHttpUrl(baseUrl)) throw new Error('baseUrl must be a valid http(s) URL');
+    rec.integration = rec.integration || {};
+    rec.integration.baseUrl = baseUrl;
+    rec.capabilities = rec.capabilities || {};
+    rec.capabilities.customBaseUrl = true;
+    if (!rec.integration.adapterType && rec.integration.level === INTEGRATION.UNKNOWN) {
+      rec.integration.level = INTEGRATION.CONFIGURABLE;
+    }
+  }
+
+  rec.updatedAt = new Date().toISOString();
+  upsertDynamicProvider(rec);
+  try {
+    recordActivity('provider', 'dynamic-update', 'info', `${rec.name} configuration updated`, { id });
+  } catch { /* non-fatal */ }
+  return rec;
+}
+
 export function deactivateDynamicProvider(id) {
   const rec = getDynamicProvider(id);
   if (!rec) return null;
@@ -271,10 +341,14 @@ export function discoverDynamicModels(id) {
   const eco = loadDiscovered()[rec.ecosystemId];
   if (!eco || !Array.isArray(eco.models) || !eco.models.length) {
     rec.modelSupport = { status: 'unknown', count: 0, lastUpdated: null, models: [] };
+    rec.updatedAt = new Date().toISOString();
     upsertDynamicProvider(rec);
     return { status: 'no-source', imported: 0 };
   }
   rec.modelSupport = buildModelSupport(eco);
+  // Touch updatedAt so the card's "· Ns/m/h ago" timestamp moves fresh after a
+  // model refresh — same behaviour as custom-provider fetch-models.
+  rec.updatedAt = new Date().toISOString();
   upsertDynamicProvider(rec);
   return { status: 'imported', imported: rec.modelSupport.count };
 }
