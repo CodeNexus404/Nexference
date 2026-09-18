@@ -34,12 +34,18 @@ import { miniMarkdown } from '../playground/markdown.js';
 
 // Robust free/paid classification for model lists. Pricing may be numeric or a
 // numeric string ("0") depending on the discovery source (OpenRouter/HF/LiteLLM),
-// and some providers expose accessType instead of prices.
+// and some providers expose accessType instead of prices. A free-tier marker in
+// the id/name (free/claude-opus-4.6, free:gpt-4o, free-gpt4, gpt-4o:free, "Free
+// GPT-4") also counts — gateways like APInex / Inference Dahl flag free models
+// by name, with no pricing.
+const FREE_NAME_RE = /(^|[:._\-\s/])free(?=$|[:._\-\s/])/i;
 function isFreeModelEntry(m) {
   const p = m?.pricing;
   const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
   if (isZero(p?.input) || isZero(p?.output)) return true;
-  return m?.accessType === 'free';
+  if (m?.accessType === 'free') return true;
+  if (typeof m?.id === 'string' && FREE_NAME_RE.test(m.id)) return true;
+  return typeof m?.name === 'string' && FREE_NAME_RE.test(m.name);
 }
 
 
@@ -2504,8 +2510,16 @@ function patchCloudCard(providerId) {
   const intel = workspace.providerIntel[providerId];
   const ds = intel?.status?.discoveryStatus;
   const avail = intel?.status?.availability;
-  const totalModels = intel?.models?.total ?? getModels(providerId).length;
-  const freeModelsN = intel?.models?.free ?? getFreeModels(providerId).length;
+  // Custom (cst:) / adopted (dyn:) cards classify free models locally from the
+  // loaded model list, so prefer those live counts over the intel feed (which a
+  // stale legacy snapshot could freeze at 0 for name-marked free models). Curated
+  // cards keep trusting server intel — their pricing shape differs (prompt/
+  // completion vs input/output), so the local fallback only fills intel gaps.
+  const isCustomLike = providerId.startsWith('cst:') || providerId.startsWith('dyn:');
+  const localFree = getFreeModels(providerId).length;
+  const localTotal = getModels(providerId).length;
+  const totalModels = (isCustomLike && localTotal > 0) ? localTotal : (intel?.models?.total ?? localTotal);
+  const freeModelsN = (isCustomLike && localTotal > 0) ? localFree : (intel?.models?.free ?? localFree);
   const srcBadge = intel
     ? `<span class="badge pi-src">${intel.source.type === 'official-api' ? 'verified' : 'curated'}</span>`
     : (resolved ? '<span class="badge pi-src">ecosystem</span>' : '');

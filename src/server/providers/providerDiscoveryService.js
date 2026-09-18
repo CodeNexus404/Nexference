@@ -24,6 +24,7 @@ import { PROVIDERS, getProvider } from './registry.js';
 import { listCustomProviders, getCustomProvider } from './custom/customProviderStore.js';
 import { modelCache } from './modelCache.js';
 import { isFreeModel } from '../models/modelIntelligenceService.js';
+import { modelIsFree as classifierIsFree } from './modelClassifier.js';
 import { curatedSource } from './sources/curatedSource.js';
 import { officialApiSource } from './sources/officialApiSource.js';
 import { recordChange, listChanges, CHANGE_TYPES } from './providerChangeStore.js';
@@ -146,7 +147,7 @@ function buildBaseline(provider) {
 function buildCustomIntel(rec) {
   if (!rec || !rec.id) return null;
   const models = rec.modelSupport?.models || [];
-  const free = models.filter((m) => m?.pricing?.input === 0 || m?.pricing?.output === 0).length;
+  const free = models.filter(classifierIsFree).length;
   const total = models.length;
   const paid = total - free;
   const verified = rec.modelSupport?.status === 'verified';

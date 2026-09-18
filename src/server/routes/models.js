@@ -8,6 +8,7 @@ import {
   getUnifiedModels, getModelDetails, getRecommendedModels, getModelStats,
   refreshProviderModels, refreshAllModels, isFreeModel,
 } from '../models/modelIntelligenceService.js';
+import { modelIsFree } from '../providers/modelClassifier.js';
 
 // Model routes — three responsibilities, all read-through to the server-side
 // model cache / discovery:
@@ -19,15 +20,13 @@ import {
 // Logic (including the free-model filter) preserved from the original server.js.
 
 export function registerModelRoutes(app) {
-  // Free/paid classification for stored model lists. Handles numeric or string
-  // pricing (discovery APIs return strings like "0") and falls back to
-  // accessType === 'free' when a provider exposes access info instead of prices.
-  function modelIsFree(m) {
-    const p = m?.pricing;
-    const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
-    if (isZero(p?.input) || isZero(p?.output)) return true;
-    return m?.accessType === 'free';
-  }
+  // Free/paid classification for stored model lists — shared server-side
+  // classifier (see ../providers/modelClassifier.js): zero pricing (numeric or
+  // string), accessType === 'free', or a free-tier name marker
+  // (free/claude-opus-4.6, free:gpt-4o, free-gpt4, gpt-4o:free, "Free GPT-4")
+  // for gateways like APInex / Inference Dahl that flag free models purely by
+  // name convention. The curated per-provider heuristic stays with
+  // isFreeModel() from modelIntelligenceService.
 
   // ─── GET cached models (server pre-fetched on startup) — legacy ───
   app.get('/api/cached-models', (req, res) => {

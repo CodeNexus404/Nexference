@@ -17,7 +17,15 @@
 //  No secrets are persisted anywhere — keys are request-scoped.
 // ═══════════════════════════════════════════════════════════════
 
+import { FREE_NAME_RE } from '../modelClassifier.js';
+
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+// Free-tier id/name marker (shared with the Model Classifier): matches "free" as
+// a whole token at a delimiter — free/claude-opus-4.6, free:gpt-4o, free-gpt4,
+// gpt-4o:free, "Free GPT-4". Gateways like APInex / Inference Dahl flag free
+// models purely by this convention with no pricing to classify from.
+const FREE_ID = FREE_NAME_RE;
 
 function timeoutFetch(url, { headers = {}, ms = 10000 } = {}) {
   const controller = new AbortController();
@@ -153,8 +161,9 @@ async function tryWebsiteScrape(rec) {
       id,
       name: id.split(/[-._]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
       // Honest default: scraped catalogues carry no pricing signal, so a
-      // non-free-suffixed id is treated as paid (never claim free without a signal).
-      pricing: /(-free|:free)$/i.test(id) ? { input: 0, output: 0 } : { input: 1, output: 1 },
+      // free-marked id is treated as free; anything else is paid (never claim
+      // free without a signal).
+      pricing: FREE_ID.test(id) ? { input: 0, output: 0 } : { input: 1, output: 1 },
       context_length: null,
     }));
     return list.length ? { models: list, source: 'website' } : null;
@@ -179,7 +188,7 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
 
   const pricing = await tryPricingApi(rec); // may be null — that's fine
   const pricingById = new Map((pricing?.models || []).map(m => [m.id, m]));
-  const freeConvention = (id) => /(:free|-free)$/i.test(id);
+  const freeConvention = (id) => FREE_ID.test(id);
 
   // Tier 1 — official /models with the user's transient key. UNION with the
   // pricing catalogue: some gateways return only the user's plan-allotted

@@ -155,7 +155,7 @@ async function openDynamicProvider(id) {
 
         <details class="intg-details" open>
           <summary>Provider Integration (v1.9.0)</summary>
-          <div data-intg-host>Loading integration…</div>
+          <div data-intg-host class="intg-section">Loading integration…</div>
         </details>
       </div>`,
     onMount: (b) => {

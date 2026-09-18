@@ -54,12 +54,27 @@ const EXEC_STATUS_META = {
   unsupported: { label: 'Unsupported', badge: 'badge-danger', dot: 'dot-red' },
 };
 
-function kv(label, value, opts = {}) {
-  const v = value === true ? '<span class="yes">✓</span>'
-    : value === false ? '<span class="no">✗</span>'
-      : value === null || value === undefined ? '<span class="muted">unknown</span>'
-        : esc(String(value));
-  return `<div class="eco-kv"><span>${esc(label)}</span><span>${v}</span></div>`;
+const STATUS_ICON = {
+  integrated: { ch: '✓', cls: 'intg-ok' },
+  supported: { ch: '✓', cls: 'intg-ok' },
+  partial: { ch: '◐', cls: 'intg-warn' },
+  assessing: { ch: '…', cls: 'intg-info' },
+  'metadata-only': { ch: '◦', cls: 'intg-unk' },
+  unsupported: { ch: '✗', cls: 'intg-bad' },
+  blocked: { ch: '✗', cls: 'intg-bad' },
+  unknown: { ch: '?', cls: 'intg-unk' },
+};
+
+function statusIcon(status) {
+  return STATUS_ICON[status] || STATUS_ICON.unknown;
+}
+
+// Single-line capability row: fixed-size glyph + label, one line per capability.
+function capRow(label, value) {
+  const ico = value === true ? '<span class="intg-ico intg-ok">✓</span>'
+    : value === false ? '<span class="intg-ico intg-bad">✗</span>'
+      : '<span class="intg-ico intg-unk">◦</span>';
+  return `<div class="intg-cap-row">${ico}<span class="intg-cap-lbl">${esc(label)}</span></div>`;
 }
 
 // Build the Integration section HTML for a provider. Returns a Promise<string>.
@@ -69,10 +84,11 @@ export async function integrationSectionHTML(providerId) {
     intg.getExecutionStatus(providerId).catch(() => null),
   ]);
   if (!rec && !execStatus) {
-    return `<div class="eco-kv-grid"><div class="eco-kv"><span>Status</span><span>Unknown</span></div></div>
+    return `<div class="intg-stats"><div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico intg-unk">?</span>Unknown</span></div></div>
       <div class="eco-detail-actions"><button class="btn btn-sm" data-intg-action="assess" data-id="${esc(providerId)}">Assess Integration</button></div>`;
   }
   const m = rec ? statusMeta(rec.integrationStatus) : STATUS_META.unknown;
+  const st = statusIcon(rec?.integrationStatus);
   const adapter = rec ? (ADAPTER_LABEL[rec.adapterType] || rec.adapterType || 'Unknown') : 'Unknown';
   const cap = rec?.configuration || {};
   const exec = rec?.execution || {};
@@ -85,32 +101,33 @@ export async function integrationSectionHTML(providerId) {
 
   // Execution routing (v2.0.0)
   const execMeta = execStatus ? (EXEC_STATUS_META[execStatus.status] || EXEC_STATUS_META.unsupported) : null;
+  const execIcon = execStatus ? statusIcon(execStatus.status) : STATUS_ICON.unknown;
   const routeLabel = execStatus?.route ? (ROUTE_LABEL[execStatus.route] || execStatus.route) : null;
 
   return `
-    <div class="eco-kv-grid">
-      <div class="eco-kv"><span>Status</span><span><span class="status-dot ${m.dot}"></span> ${esc(m.label)}</span></div>
-      <div class="eco-kv"><span>Adapter</span><span>${esc(adapter)}</span></div>
-      <div class="eco-kv"><span>Confidence</span><span>${esc(rec?.confidence || 'unknown')}</span></div>
-      <div class="eco-kv"><span>Last assessed</span><span>${esc((rec?.lastAssessedAt || '').slice(0, 19).replace('T', ' ') || 'never')}</span></div>
+    <div class="intg-stats">
+      <div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico ${st.cls}">${st.ch}</span>${esc(m.label)}</span></div>
+      <div class="intg-stat"><span class="intg-stat-label">Adapter</span><span class="intg-stat-val">${esc(adapter)}</span></div>
+      <div class="intg-stat"><span class="intg-stat-label">Confidence</span><span class="intg-stat-val">${esc(rec?.confidence || 'unknown')}</span></div>
+      <div class="intg-stat"><span class="intg-stat-label">Last assessed</span><span class="intg-stat-val">${esc((rec?.lastAssessedAt || '').slice(0, 19).replace('T', ' ') || 'never')}</span></div>
     </div>
-    <div class="intg-caps">
-      <div><b>Configuration</b>${kv('API key', cap.supportsApiKey)}${kv('Base URL', cap.supportsBaseUrl)}${kv('Model selection', cap.supportsModelSelection)}${kv('Custom headers', cap.supportsCustomHeaders)}${kv('Env variables', cap.supportsEnvironmentVariables)}</div>
-      <div><b>Execution</b>${kv('Chat', exec.supportsChat)}${kv('Streaming', exec.supportsStreaming)}${kv('Model listing', exec.supportsModelListing)}${kv('Connection test', exec.supportsConnectionTest)}</div>
+    <div class="intg-cols">
+      <div class="intg-col"><span class="intg-col-title">Configuration</span>${capRow('API key', cap.supportsApiKey)}${capRow('Base URL', cap.supportsBaseUrl)}${capRow('Model selection', cap.supportsModelSelection)}${capRow('Custom headers', cap.supportsCustomHeaders)}${capRow('Env variables', cap.supportsEnvironmentVariables)}</div>
+      <div class="intg-col"><span class="intg-col-title">Execution</span>${capRow('Chat', exec.supportsChat)}${capRow('Streaming', exec.supportsStreaming)}${capRow('Model listing', exec.supportsModelListing)}${capRow('Connection test', exec.supportsConnectionTest)}</div>
     </div>
     ${execMeta ? `<div class="intg-exec-routing">
-      <b>Execution</b>
-      <div class="eco-kv-grid">
-        <div class="eco-kv"><span>Status</span><span><span class="status-dot ${execMeta.dot}"></span> ${esc(execMeta.label)}</span></div>
-        ${routeLabel ? `<div class="eco-kv"><span>Route</span><span>${esc(routeLabel)}</span></div>` : ''}
-        ${execStatus?.adapterType ? `<div class="eco-kv"><span>Adapter</span><span>${esc(execStatus.adapterType)}</span></div>` : ''}
-        ${execStatus?.statusReason ? `<div class="eco-kv"><span>Reason</span><span class="muted">${esc(execStatus.statusReason)}</span></div>` : ''}
+      <span class="intg-col-title">Execution routing</span>
+      <div class="intg-stats intg-stats-3">
+        <div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico ${execIcon.cls}">${execIcon.ch}</span>${esc(execMeta.label)}</span></div>
+        ${routeLabel ? `<div class="intg-stat"><span class="intg-stat-label">Route</span><span class="intg-stat-val">${esc(routeLabel)}</span></div>` : ''}
+        ${execStatus?.adapterType ? `<div class="intg-stat"><span class="intg-stat-label">Adapter</span><span class="intg-stat-val">${esc(execStatus.adapterType)}</span></div>` : ''}
+        ${execStatus?.statusReason ? `<div class="intg-stat"><span class="intg-stat-label">Reason</span><span class="intg-stat-val" title="${esc(execStatus.statusReason)}">${esc(execStatus.statusReason)}</span></div>` : ''}
       </div>
     </div>` : ''}
-    ${rec?.warnings && rec.warnings.length ? `<div class="intg-warn">${rec.warnings.map((w) => `<div class="muted">• ${esc(w)}</div>`).join('')}</div>` : ''}
+    ${rec?.warnings && rec.warnings.length ? `<div class="intg-alerts">${rec.warnings.map((w) => `<div>• ${esc(w)}</div>`).join('')}</div>` : ''}
     <div id="intgEvidence-${esc(providerId)}" class="intg-evidence">
-      <b>Evidence</b>
-      <ul class="ic-insights">${evidenceRows}</ul>
+      <span class="intg-col-title">Evidence</span>
+      <ul>${evidenceRows}</ul>
     </div>
     <div id="intgModels-${esc(providerId)}" class="intg-models"></div>
     <div class="eco-detail-actions">${actions}</div>`;

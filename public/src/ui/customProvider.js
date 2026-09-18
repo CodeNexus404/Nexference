@@ -58,11 +58,21 @@ const STATUS_META = {
 // or when discovery tagged it accessType "free". Pricing values may be numeric
 // or numeric strings ("0") depending on the source API (OpenRouter/HF/LiteLLM),
 // so compare numerically rather than with a strict === 0.
+// Finally, a free-tier marker in the id/name (free/claude-opus-4.6 free:gpt-4o,
+// free-gpt4, gpt-4o:free, "Free GPT-4") classifies as free — gateways like
+// APInex / Inference Dahl flag free models purely by name convention, with no
+// pricing (the "/" delimiter covers id-slugs like "free/deepseek-v4-flash").
+const FREE_NAME_RE = /(^|[:._\-\s/])free(?=$|[:._\-\s/])/i;
+function freeNameMarker(m) {
+  return (typeof m?.id === 'string' && FREE_NAME_RE.test(m.id)) ||
+    (typeof m?.name === 'string' && FREE_NAME_RE.test(m.name));
+}
 function isFreeModel(m) {
   const p = m?.pricing;
   const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
   if (isZero(p?.input) || isZero(p?.output)) return true;
-  return m?.accessType === 'free';
+  if (m?.accessType === 'free') return true;
+  return freeNameMarker(m);
 }
 
 export function customProviderCard(p) {
@@ -79,8 +89,13 @@ export function customProviderCard(p) {
   const intel = workspace.providerIntel[p.id];
   const ds = intel?.status?.discoveryStatus;
   const dot = ds ? `<span class="pi-dot ds-${ds || 'unknown'}" title="${esc(ds || 'unknown')}"></span>` : '';
-  const totalModels = intel?.models?.total ?? modelCount;
-  const freeModelsN = intel?.models?.free ?? freeCount;
+  // Prefer the live, locally classified model list whenever it's loaded — the
+  // intel feed is only a fallback for before the first fetch, so a stale
+  // snapshot can never freeze the badge at "0 free" for name-marked free
+  // models (APInex free/claude-…, Inference Dahl).
+  const hasLive = models.length > 0;
+  const totalModels = hasLive ? modelCount : (intel?.models?.total ?? modelCount);
+  const freeModelsN = hasLive ? freeCount : (intel?.models?.free ?? freeCount);
   const lastChecked = intel?.source?.lastCheckedAt
     ? relTime(intel.source.lastCheckedAt)
     : ((p.updatedAt || p.createdAt) ? relTime(p.updatedAt || p.createdAt) : 'not checked');
