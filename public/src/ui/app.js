@@ -647,6 +647,9 @@ export async function loadConfig() {
     // platform (macOS and Windows alike). If settings.json has no base URL at
     // all there is no active configuration — clear the glow.
     workspace.appliedProviderId = match ? match.id : (base ? (workspace.appliedProviderId || null) : null);
+    // Remember the live gateway (if any) so the shell status can stay honest
+    // even when the persisted "applied" record is missing or stale.
+    workspace.liveConfigBase = base || null;
     const liveText = document.getElementById('liveText');
     if (liveText) {
       if (match) {
@@ -2451,6 +2454,12 @@ export function updateShellStatus() {
     else { state = 'ok'; label = 'Configured'; }
   } else if (applied && applied.status === 'copyable') {
     state = 'copy'; label = 'Copyable config';
+  } else if (workspace.liveConfigBase) {
+    // settings.json already points at a gateway even though the persisted
+    // applied record is missing/stale (fresh profile, cleared storage). That's
+    // a real applied config — don't tell the user to set one up again.
+    if (workspace.unsaved) { state = 'unsaved'; label = 'Unsaved changes'; }
+    else { state = 'ok'; label = 'Configured'; }
   }
   el.className = `cfg-status ${state}`;
   el.innerHTML = `<span class="dot"></span><span class="cfg-status-label">${esc(label)}</span>`;

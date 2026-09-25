@@ -559,15 +559,15 @@ export async function openCustomProviderDetail(id) {
   // svgLogo() needs the curated-card presentation shape (name + accent).
   const logoP = { name: p.identity?.name || id, accent: '#6366f1' };
 
-  // Auto-fetch models if not loaded, OR if the live cache is stale/partial.
-  // The authoritative source is the server's stored modelSupport (persisted at
-  // startup / refresh). A racing silent background refresh may have dropped
-  // models, so re-sync whenever the live cache has fewer than the store.
+  // Auto-fetch models only when none are loaded yet. The live cache is
+  // authoritative once populated (it comes from a live gateway fetch), so never
+  // overwrite a fresh list with a stored snapshot — otherwise the picker count
+  // can diverge from the card badge after a refresh.
   try {
     const stored = await cpService.getStoredModels(id);
     const cachedCount = workspace.liveModels[id]?.models?.length || 0;
     const storedCount = stored?.models?.length || 0;
-    if (stored?.ok && storedCount && storedCount > cachedCount) {
+    if (stored?.ok && storedCount && cachedCount === 0) {
       workspace.liveModels[id] = {
         models: stored.models.map(m => ({ ...m, source: m.source || 'fetched' })),
         freeModels: stored.models.filter(isFreeModel).map(m => ({ ...m, source: m.source || 'fetched' })),
@@ -596,20 +596,45 @@ export async function openCustomProviderDetail(id) {
     const hasLiveModels = models.length > 0;
     const currentModel = Storage.getModel(id);
 
+    // Render up to this many rows at once; search always queries the full
+    // dataset below, so deeper models stay reachable even when capped.
+    const ALL_CAP = 400;
+
+    // Building buttons from the full model data (never the pre-rendered DOM)
+    // is what keeps the search box able to find every model — a previous
+    // version only rendered the first 50 rows and filtered those, silently
+    // hiding everything past them.
+    function itemHtml(m) {
+      return `<button type="button" class="mp-item ${currentModel === m.id ? 'sel' : ''}" data-id="${esc(m.id)}" role="option">
+                <span class="mp-name">${esc(m.name || m.id)}</span>
+                ${freeIds.has(m.id) ? '<span class="mp-free">free</span>' : ''}
+                <span class="mp-id">${esc(m.id)}</span>
+              </button>`;
+    }
+
+    function listHtml(items) {
+      const capped = items.slice(0, ALL_CAP);
+      const rows = items.length
+        ? capped.map(itemHtml).join('')
+        : (freeCount === 0 ? '<div class="mp-empty">No free models for this provider.</div>' : '<div class="mp-empty">No models match.</div>');
+      return rows + (items.length > ALL_CAP ? `<div class="mp-empty">…and ${items.length - ALL_CAP} more</div>` : '');
+    }
+
+    function bindItems(container) {
+      container.querySelectorAll('.mp-item').forEach(b => b.addEventListener('click', () => {
+        container.querySelectorAll('.mp-item').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
+        Storage.setModel(id, b.dataset.id);
+        resetTestButton();
+      }));
+    }
+
     host.innerHTML = `
       <div class="model-picker">
         <label class="paid-toggle mp-paid"><input type="checkbox" ${showPaid ? 'checked' : ''}><span class="paid-track"></span><span class="paid-text">Include paid</span></label>
         <input class="inp mp-input" type="text" placeholder="Search models…" aria-label="Search models" />
         <div class="mp-list" role="listbox">
-          ${hasLiveModels
-            ? (listModels.length ? listModels.slice(0, 50).map(m => `
-              <button type="button" class="mp-item ${currentModel === m.id ? 'sel' : ''}" data-id="${esc(m.id)}" role="option">
-                <span class="mp-name">${esc(m.name || m.id)}</span>
-                ${freeIds.has(m.id) ? '<span class="mp-free">free</span>' : ''}
-                <span class="mp-id">${esc(m.id)}</span>
-              </button>`).join('') + (listModels.length > 50 ? `<div class="mp-empty">…and ${listModels.length - 50} more</div>` : '')
-              : (freeCount === 0 ? '<div class="mp-empty">No free models for this provider.</div>' : '<div class="mp-empty">No models match.</div>'))
-            : ''}
+          ${hasLiveModels ? listHtml(listModels) : ''}
         </div>
         ${!hasLiveModels ? `<input class="inp" data-cp="model-input" type="text" value="${esc(currentModel)}" placeholder="Enter model ID (e.g. gpt-4o)" style="margin-top:8px" />` : ''}
       </div>
@@ -618,12 +643,7 @@ export async function openCustomProviderDetail(id) {
       </div>`;
 
     // Wire model select from mp-list
-    host.querySelectorAll('.mp-item').forEach(b => b.addEventListener('click', () => {
-      host.querySelectorAll('.mp-item').forEach(x => x.classList.remove('sel'));
-      b.classList.add('sel');
-      Storage.setModel(id, b.dataset.id);
-      resetTestButton();
-    }));
+    bindItems(host);
 
     // Wire model input fallback
     const modelInput = host.querySelector('[data-cp="model-input"]');
@@ -645,15 +665,20 @@ export async function openCustomProviderDetail(id) {
     const paidCb = host.querySelector('.mp-paid input');
     if (paidCb) paidCb.addEventListener('change', (e) => { Storage.setPaid(id, e.target.checked); renderModelPicker(host); });
 
-    // Wire search
+    // Wire search — filter the FULL model dataset and re-render the list, so
+    // every model (beyond the first screenful) is reachable.
     const mpInput = host.querySelector('.mp-input');
     if (mpInput) mpInput.addEventListener('input', () => {
-      const q = mpInput.value.toLowerCase();
-      host.querySelectorAll('.mp-item').forEach(b => {
-        const name = (b.querySelector('.mp-name')?.textContent || '').toLowerCase();
-        const mid = (b.dataset.id || '').toLowerCase();
-        b.style.display = (!q || name.includes(q) || mid.includes(q)) ? '' : 'none';
-      });
+      const q = mpInput.value.trim().toLowerCase();
+      const listEl = host.querySelector('.mp-list');
+      if (!q) {
+        listEl.innerHTML = listHtml(listModels);
+        bindItems(listEl);
+        return;
+      }
+      const matches = listModels.filter(m => ((m.name || '') + ' ' + m.id).toLowerCase().includes(q));
+      listEl.innerHTML = listHtml(matches);
+      bindItems(listEl);
     });
   }
 

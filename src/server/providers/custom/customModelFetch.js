@@ -1,15 +1,21 @@
 // ═══════════════════════════════════════════════════════════════
 //  Custom Provider Model Fetch (v2.1.0)
 //
-//  Shared three-tier model-list resolution for user-created custom
+//  Shared model-list resolution for user-created custom
 //  providers, used by BOTH the /fetch-models route and the startup
 //  background fetch:
 //
 //    1. Official /v1/models endpoint — with the user's transient
 //       key when supplied (never persisted).
 //    2. Keyless /api/pricing — new-one-api gateway convention
-//       (NARA, Agent Router, Orca Router…) exposing every served
-//       model with real quota/pricing ratios.
+//       (NARA, Agent Router, Orca Router…) exposing every SERVED
+//       model with real quota/pricing ratios (live truth — matches
+//       the storefront's own live free count).
+//    2.5. Storefront sitemap enumeration — a last-resort signal ONLY:
+//       storefronts keep offline/deprecated model pages published,
+//       so it over-counts live models. When a live catalogue exists
+//       (tiers 1-2) it wins; the sitemap fills in when nothing else
+//       does (bot-challenged storefronts with no pricing endpoint).
 //    3. Strict website scraping — only tokens that start with a
 //       known model-family prefix; never asset hashes or version
 //       fragments.
@@ -93,16 +99,40 @@ async function tryPricingApi(rec) {
         const id = m.alias || m.model_name || m.id;
         const inputRatio = Number(m.input_credit_per_1k ?? m.model_ratio ?? NaN);
         const outputRatio = Number(m.output_credit_per_1k ?? m.completion_ratio ?? NaN);
+        // model_money (per-1k money price) is the charge for quota_type-1
+        // "credit by money" models, which carry no meaningful quota ratio;
+        // some gateways report that rate under model_price instead.
+        const money = Number(m.model_money ?? m.model_price ?? NaN);
+        // The gateway's explicit free flag is authoritative (some gateways
+        // mark is_free on free-tier models that still carry a non-zero quota
+        // weight and no `:free`/`-free` suffix — e.g. UNO Router's free
+        // reps). Honor it exactly like tryOfficialApi does.
+        const flaggedFree = m.is_free === true || m.is_free === 1 || m.free === true || m.free === 1 || m.isFree === true;
         // Ratios here are token-quota weights, not money. A model is free when
         // it costs zero credits, OR the gateway marks it explicitly free via
         // the `-free`/`:free` id convention (free-tier models that carry a
         // non-zero quota weight but consume no balance on the free plan).
-        const zeroCredit = (Number.isFinite(inputRatio) && inputRatio === 0) || /(:free|-free)$/i.test(id);
-        const isPaid = !zeroCredit && ((Number.isFinite(inputRatio) && inputRatio > 0) || (Number.isFinite(outputRatio) && outputRatio > 0) || Number(m.model_price) > 0);
+        // A zero ratio only means free when the model is quota-priced — a
+        // money-priced model (model_money > 0, quota_type 1) is paid regardless
+        // of its quota ratio (e.g. UNO Router's image models: ratio 0, $0.02).
+        const zeroCredit = flaggedFree ||
+          (Number.isFinite(inputRatio) && inputRatio === 0 && money === 0) ||
+          FREE_ID.test(id);
+        const paidSignal =
+          (Number.isFinite(inputRatio) && inputRatio !== 0) ||
+          (Number.isFinite(outputRatio) && outputRatio !== 0) ||
+          (Number.isFinite(money) && money > 0) ||
+          Number(m.model_price) > 0;
+        const isPaid = !zeroCredit && paidSignal;
+        // Money-priced models report their money rate when they carry no quota
+        // weight — keeps them visibly paid instead of a confusing zero.
+        const inP = isPaid && Number.isFinite(inputRatio) && inputRatio > 0 ? inputRatio
+          : (isPaid && Number.isFinite(money) && money > 0 ? money : 0);
+        const outP = isPaid && Number.isFinite(outputRatio) && outputRatio > 0 ? outputRatio : inP;
         return {
           id,
           name: m.display_name || id,
-          pricing: isPaid ? { input: inputRatio, output: outputRatio } : { input: 0, output: 0 },
+          pricing: isPaid ? { input: inP, output: outP } : { input: 0, output: 0 },
           context_length: m.max_context_tokens || null,
           capabilities: {
             streaming: m.supports_streaming ?? null,
@@ -115,6 +145,88 @@ async function tryPricingApi(rec) {
       });
     return models.length ? { models, source: 'pricing-api' } : null;
   } catch { return null; }
+}
+
+// ── 2.5 Sitemap catalog enumeration (Cloudflare / JS storefronts) ──
+// Some gateways wrap their model catalog in a marketing storefront whose
+// models page is locked behind auth or a bot challenge, while the SEO sitemap
+// stays fully public and enumerates every model as /models/<vendor>/<id>.
+// UNO Router lists 480+ ids there, but most are offline/deprecated pages the
+// storefront keeps published — its LIVE catalogue is the ~240 /api/pricing
+// rows (137 free). So the sitemap is only a LAST-RESORT source used when no
+// live catalogue (official /models or /api/pricing) is available. Free/paid
+// is decided by the `:free` convention, since sitemaps carry no pricing.
+async function trySitemapCatalog(rec) {
+  // The sitemap is a storefront artifact — prefer the WEBSITE origin (the API
+  // origin often 404s it, e.g. unorouter.com vs api.unorouter.com), and fall
+  // back to the API origin for gateways that host their own storefront there.
+  const websiteOrigin = rec.identity?.website ? new URL(rec.identity.website).origin : null;
+  const apiOrigin = rec.api?.baseUrl ? new URL(rec.api.baseUrl).origin : null;
+  const origins = [...new Set([websiteOrigin, apiOrigin].filter(Boolean))];
+  if (!origins.length) return null;
+  for (const origin of origins) {
+    try {
+      const resp = await timeoutFetch(`${origin}/sitemap.xml`, { headers: { 'user-agent': UA }, ms: 12000 });
+      if (!resp.ok) continue;
+      const xml = await resp.text();
+      if (!xml || xml.length > 12_000_000) continue;
+
+      const locs = new Set([...xml.matchAll(/<url>\s*<loc>([^<]+)<\/loc>/g)].map((m) => m[1]));
+      // Sitemap indexes: follow the sub-sitemaps one level deep.
+      const subsitemaps = [...xml.matchAll(/<sitemap>\s*<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+      if (subsitemaps.length) {
+        for (const sub of subsitemaps.slice(0, 25)) {
+          try {
+            const res = await timeoutFetch(sub, { headers: { 'user-agent': UA }, ms: 10000 });
+            if (!res.ok) continue;
+            const subXml = await res.text();
+            if (subXml && subXml.length <= 12_000_000) {
+              [...subXml.matchAll(/<url>\s*<loc>([^<]+)<\/loc>/g)].forEach((m) => locs.add(m[1]));
+            }
+          } catch { /* skip a broken sub-sitemap */ }
+        }
+      }
+      if (!locs.size) continue;
+
+      // Model ids hang off /models/<vendor>/<id> routes. Anchor on the URL shape
+      // itself (never trust a free-text token here): the segment right after
+      // /models/<vendor>/ is a model id; a lone /models/<id> segment must at
+      // least carry a version digit or a free marker so vendor/category pages
+      // (single bare words) are never mistaken for models.
+      const JUNK = /(^|[-_.])(css|js|mjs|png|svg|ico|woff2?|ttf|eot|map|chunk|\d{6,}|[0-9a-f]{8,})/i;
+      const FILE_EXT = /\.(png|jpg|jpeg|gif|webp|svg|ico|css|js|mjs|woff2?|ttf|eot|map|json|xml|txt|pdf|zip|html?)$/i;
+      const MODELISH = /^[A-Za-z0-9][A-Za-z0-9._:/'-]{2,72}$/;
+      const ids = new Map();
+      for (const url of locs) {
+        const segs = url.replace(/\/+$/, '').split('?')[0].split('/').filter(Boolean);
+        const mIdx = segs.findIndex((s) => s.toLowerCase() === 'models');
+        if (mIdx === -1) continue;
+        const after = segs.slice(mIdx + 1);
+        if (!after.length || after.length > 2) continue;
+        let id;
+        if (after.length === 2) {
+          id = after[1]; // /models/<vendor>/<id>
+        } else {
+          id = after[0]; // /models/<id> — needs a digit or free marker to qualify
+          if (!/(\d|free)/i.test(id)) continue;
+        }
+        try { id = decodeURIComponent(id); } catch { continue; }
+        if (!id || id.length < 3 || !/[a-zA-Z]/.test(id) || !MODELISH.test(id) || JUNK.test(id) || FILE_EXT.test(id)) continue;
+        if (!ids.has(id)) {
+          ids.set(id, {
+            id,
+            name: id,
+            // Honest default (same rule as the website scrape below): a free-marked
+            // id is free; anything else is paid — never claim free without a signal.
+            pricing: FREE_ID.test(id) ? { input: 0, output: 0 } : { input: 1, output: 1 },
+            context_length: null,
+          });
+        }
+      }
+      const models = [...ids.values()].slice(0, 2000);
+      return models.length ? { models, source: 'sitemap' } : null;
+    } catch { /* try the next origin / bail silently */ }
+  }
 }
 
 // ── 3. Strict website scraping (never produce junk tokens) ──
@@ -189,6 +301,13 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
   const pricing = await tryPricingApi(rec); // may be null — that's fine
   const pricingById = new Map((pricing?.models || []).map(m => [m.id, m]));
   const freeConvention = (id) => FREE_ID.test(id);
+  // Storefront sitemap enumeration is a LAST-RESORT signal only: it includes
+  // offline/deprecated model pages the storefront keeps published (UNO Router
+  // lists 480+ ids, but only its live catalogue — the ~240 /api/pricing rows —
+  // is actually servable right now). When a live catalog (pricing or /models)
+  // exists it is the source of truth; the sitemap only fills in when there is
+  // nothing else.
+  const sitemap = await trySitemapCatalog(rec);
 
   // Tier 1 — official /models with the user's transient key. UNION with the
   // pricing catalogue: some gateways return only the user's plan-allotted
@@ -225,7 +344,6 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
     for (const pm of pricing?.models || []) {
       if (!seen.has(pm.id)) { merged.push(pm); seen.add(pm.id); }
     }
-    const usedCatalogue = pricing ? merged.length - tier1.models.length : 0;
     return {
       ok: true,
       models: merged.map(m => ({ ...m, source: 'fetched' })),
@@ -233,10 +351,14 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
     };
   }
 
-  // Tier 2 — the pricing catalogue alone is a complete, authoritative list.
+  // Tier 2 — the pricing catalogue is a complete, authoritative list of what
+  // the gateway is serving RIGHT NOW (the site's own live free count).
   if (pricing) return { ok: true, models: pricing.models.map(m => ({ ...m, source: 'fetched' })), source: 'pricing-api' };
 
-  // Tier 3 — strict website scrape (last resort, honest defaults).
+  // Tier 3 — storefront sitemap enumeration, then strict website scrape.
+  // Both are honest-default fallbacks: no live pricing signal, so `:free` ids
+  // are free and everything else defaults to paid.
+  if (sitemap) return { ok: true, models: sitemap.models.map(m => ({ ...m, source: 'fetched' })), source: 'sitemap' };
   const tier3 = await tryWebsiteScrape(rec);
   if (tier3) return { ok: true, models: tier3.models.map(m => ({ ...m, source: 'fetched' })), source: tier3.source };
 

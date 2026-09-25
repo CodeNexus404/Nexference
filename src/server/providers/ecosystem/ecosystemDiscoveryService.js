@@ -35,8 +35,12 @@ import { assessProviderIntegration } from '../integrations/providerIntegrationSe
 
 // Resolve the shipped discovery-source registry relative to this module (not
 // process.cwd()), so the app works regardless of the launching directory.
-const BASE_DIR = fileURLToPath(new URL('../../../../data', import.meta.url));
-const SOURCES_FILE = join(BASE_DIR, 'discovery-sources.json');
+// The source registry itself lives in data/, but structured-source `paths`
+// entries are repo-root-relative (e.g. "data/ecosystem-registry.json"), so the
+// adapters resolve them against the repo root, not the data dir.
+const DATA_DIR = fileURLToPath(new URL('../../../../data', import.meta.url));
+const REPO_ROOT = join(DATA_DIR, '..');
+const SOURCES_FILE = join(DATA_DIR, 'discovery-sources.json');
 const FRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGO_VERIFY_MS = 6000;
 
@@ -86,7 +90,7 @@ function buildAdapters() {
   const { sources } = loadSourcesConfig();
   const adapters = sources
     .filter((s) => s.enabled !== false)
-    .map((cfg) => createStructuredRegistrySource(cfg, { baseDir: BASE_DIR }));
+    .map((cfg) => createStructuredRegistrySource(cfg, { baseDir: REPO_ROOT }));
 
   // Add programmatic source adapters (always enabled, no config file needed)
   try {

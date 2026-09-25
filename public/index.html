@@ -6,7 +6,7 @@
   <title>Nexference — Universal AI Provider & Runtime Workspace</title>
   <meta name="description" content="Manage cloud AI providers, local runtimes, models, and client configuration for Claude Code and other AI coding clients.">
   <meta name="theme-color" content="#0a0b0d">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%235b8def'/><path d='M30 72V28l40 44V28' stroke='%230a0b0d' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2374a1ff'/><stop offset='1' stop-color='%233d63d8'/></linearGradient></defs><rect width='100' height='100' rx='24' fill='url(%23g)'/><path d='M31 73V27l38 45V27' stroke='%23ffffff' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -27,9 +27,7 @@
 <body data-page="workspace">
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">N</div>
-        <div class="brand-txt"><b>Nex<em>ference</em></b><span>Universal AI Workspace</span></div>
+      <div class="sidebar-head">
         <button class="nav-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
         </button>
@@ -99,6 +97,10 @@
     <main class="content">
       <header class="topbar">
         <div class="topbar-left">
+          <div class="brand" role="link" onclick="navigate('workspace')" title="Nexference — Universal AI Provider &amp; Runtime Workspace">
+            <div class="brand-mark">N</div>
+            <div class="brand-txt"><b class="wordmark">Nexference</b><span>Universal AI Workspace</span></div>
+          </div>
           <button class="cmd-trigger" id="cmdTrigger" onclick="toggleCommandPalette()" title="Search or run a command (⌘K)" aria-label="Open command palette">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <span class="cmd-k">⌘K</span>

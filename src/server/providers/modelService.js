@@ -84,7 +84,7 @@ async function fetchModelsForProvider(provider, key = '') {
         if (typeof entry !== 'string' && entry.paid) staticPaid.add(mid);
       }
       for (const m of models) {
-        if (staticPaid.has(m.id)) {
+        if (staticPaid.has(m.id) && !isFreeSuffixedModel(m.id)) {
           m.paid = true;
           if (!m.pricing) m.pricing = { prompt: '1', completion: '1' };
         }
@@ -127,7 +127,7 @@ async function fetchModelsForProvider(provider, key = '') {
         if (typeof entry !== 'string' && entry.paid) staticPaid.add(mid);
       }
       for (const m of models) {
-        if (staticPaid.has(m.id)) {
+        if (staticPaid.has(m.id) && !isFreeSuffixedModel(m.id)) {
           m.paid = true;
           if (!m.pricing) m.pricing = { prompt: '1', completion: '1' };
         }
@@ -217,8 +217,9 @@ async function fetchFromPublicListApi(provider) {
           id: m.id,
           name: m.name || m.id,
           // These models come from an authenticated/paid catalogue, so a price
-          // (or any listed model) counts as paid unless it is explicitly $0.
-          paid: prompt !== 0 || completion !== 0 || (m.pricing != null),
+          // (or any listed model) counts as paid unless it is explicitly $0 or
+          // carries a free-tier `:free`/`-free` id marker.
+          paid: !isFreeSuffixedModel(m.id) && (prompt !== 0 || completion !== 0 || (m.pricing != null)),
           pricing: prompt != null || completion != null ? { prompt, completion } : null,
           context_length: (m.limits && m.limits.max_context_length) || m.context_length || null,
           capabilities: m.capabilities || null,
@@ -254,15 +255,37 @@ async function fetchFromPricingApi(provider) {
     if (!r.ok) return null;
     const data = await r.json();
     const list = Array.isArray(data?.data) ? data.data : [];
+    // Same classification rules as customModelFetch.tryPricingApi so every
+    // gateway is counted identically: the gateway's is_free flag and the
+    // `:free`/`-free` id convention are free regardless of the quota weight;
+    // a money-priced model (model_money/model_price > 0, quota_type 1) is paid
+    // even when its quota ratio is 0; everything else with a zero quota is free.
+    const markerFree = /(^|[:._\-\s/])free(?=$|[:._\-\s/])/i;
     const models = list
-      .filter((m) => m && m.model_name)
-      .map((m) => ({
-        id: m.model_name,
-        name: m.model_name,
-        pricing: m.model_ratio != null ? { model_ratio: m.model_ratio, completion_ratio: m.completion_ratio ?? null } : null,
-        supported_endpoint_types: Array.isArray(m.supported_endpoint_types) ? m.supported_endpoint_types : null,
-        paid: (m.model_ratio || 0) > 0 || (m.model_price || 0) > 0,
-      }));
+      .filter((m) => m && (m.alias || m.model_name || m.id))
+      .map((m) => {
+        const id = m.alias || m.model_name || m.id;
+        const ratio = Number(m.model_ratio ?? NaN);
+        const compRatio = Number(m.completion_ratio ?? NaN);
+        const money = Number(m.model_money ?? m.model_price ?? NaN);
+        const flaggedFree = m.is_free === true || m.is_free === 1 || m.free === true || m.free === 1 || m.isFree === true;
+        const zeroCredit = flaggedFree || markerFree.test(id) ||
+          (Number.isFinite(ratio) && ratio === 0 && money === 0);
+        const paid = !zeroCredit &&
+          ((Number.isFinite(ratio) && ratio !== 0) || (Number.isFinite(money) && money > 0) || Number(m.model_price) > 0);
+        const inP = paid && Number.isFinite(ratio) && ratio > 0 ? ratio : (paid && Number.isFinite(money) && money > 0 ? money : 0);
+        const outP = paid && Number.isFinite(compRatio) && compRatio > 0 ? compRatio : inP;
+        return {
+          id,
+          name: id,
+          // Both price conventions are emitted so every classifier agrees:
+          // server isFreeModel reads prompt/completion, the client reads input/output.
+          pricing: { prompt: inP, completion: outP, input: inP, output: outP },
+          supported_endpoint_types: Array.isArray(m.supported_endpoint_types) ? m.supported_endpoint_types : null,
+          free: !paid,
+          paid,
+        };
+      });
     if (!models.length) return null;
     return { models, fetchedAt: Date.now(), total: models.length, source: 'pricing' };
   } catch {

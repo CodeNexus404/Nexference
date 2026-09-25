@@ -46,6 +46,11 @@ export const workspace = {
   // before re-reading settings.json.
   applied: _storedApplied,
 
+  // Whether the live settings.json currently points at a gateway (base URL set).
+  // Mirrors what the persisted applied record claims, so the top-bar status stays
+  // honest even when that record is absent/stale after a refresh or restart.
+  liveConfigBase: null,
+
   // Whether a generated config exists that hasn't been applied yet.
   unsaved: false,
 

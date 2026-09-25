@@ -99,7 +99,7 @@ export function registerDynamicProviderRoutes(app) {
     try {
       const imported = await discoverDynamicModels(p.id);
       const models = toModelList(getDynamicProvider(p.id));
-      res.json({ ok: true, count: models.length, models, source: 'ecosystem', imported: imported.imported || 0 });
+      res.json({ ok: true, count: models.length, models, source: imported.source || 'ecosystem', imported: imported.imported || 0 });
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
 

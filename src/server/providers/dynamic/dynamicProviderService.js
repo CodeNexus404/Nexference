@@ -15,6 +15,7 @@ import { PROVIDERS, getProvider } from '../registry.js';
 import { recordChange, CHANGE_TYPES } from '../providerChangeStore.js';
 import { recordActivity } from '../../activity/activityService.js';
 import { getProviderAdapter } from '../providerAdapter.js';
+import { fetchCustomProviderModelsList } from '../custom/customModelFetch.js';
 import {
   loadDynamicProviders, getDynamicProvider, findByEcosystemId, upsertDynamicProvider,
   setDynamicProviderStatus, removeDynamicProvider,
@@ -179,8 +180,10 @@ export function createDynamicFromEcosystem(ecoId) {
   rec.status = 'active';
   rec.updatedAt = new Date().toISOString();
   rec.website = rec.website || eco.website || null;
-  // Always reflect the latest discovery state — models + logo refresh on re-adoption too.
-  rec.modelSupport = buildModelSupport(eco);
+  // Always reflect the latest discovery state — models + logo refresh on
+  // re-adoption too. A verified (live-probed) model list stays put: it is
+  // gateway truth, newer than any discovery snapshot.
+  if (rec.modelSupport?.status !== 'verified') rec.modelSupport = buildModelSupport(eco);
   if (eco.logo) rec.logo = { url: eco.logo, source: eco.logoSource || 'fallback', status: eco.logo ? 'resolved' : 'none' };
   upsertDynamicProvider(rec);
 
@@ -194,6 +197,11 @@ export function createDynamicFromEcosystem(ecoId) {
   try {
     recordActivity('provider', 'dynamic-adopt', 'success', `${rec.name} added to the dynamic provider registry`, { id: rec.id, origin: 'ecosystem' });
   } catch { /* non-fatal */ }
+
+  // Kick an async live probe so the just-adopted card is upgraded from the
+  // discovery snapshot to gateway truth (is_free / `:free` / zero-cost) as soon
+  // as the storefront answers — without delaying the adoption response itself.
+  try { discoverDynamicModels(rec.id); } catch { /* non-fatal */ }
 
   const warnings = [];
   if (rec.integration.level === INTEGRATION.METADATA_ONLY) warnings.push('Metadata-only: Nexference cannot configure this provider without a verified compatibility path.');
@@ -307,7 +315,10 @@ export function syncEcosystemModels(ecoId) {
   if (!rec) return null;
   const eco = loadDiscovered()[ecoId];
   if (!eco) return rec;
-  rec.modelSupport = buildModelSupport(eco);
+  // A live-probed (verified) modelSupport is gateway truth — never let a later
+  // discovery snapshot clobber it. Only import the snapshot while the record's
+  // model list still comes from discovery.
+  if (rec.modelSupport?.status !== 'verified') rec.modelSupport = buildModelSupport(eco);
   if (eco.logo) rec.logo = { url: eco.logo, source: eco.logoSource || 'fallback', status: eco.logo ? 'resolved' : 'none' };
   rec.website = rec.website || eco.website || null;
   rec.updatedAt = new Date().toISOString();
@@ -324,7 +335,7 @@ export function refreshDynamicMetadata(id) {
   rec.integration = detectIntegration(eco);
   rec.capabilities = buildCapabilities(eco);
   rec.access = buildAccess(eco);
-  rec.modelSupport = buildModelSupport(eco);
+  if (rec.modelSupport?.status !== 'verified') rec.modelSupport = buildModelSupport(eco);
   rec.compatibilityNote = buildCompatibilityNote(eco, rec.integration);
   rec.website = rec.website || eco.website || null;
   rec.documentationUrl = eco.documentationUrl || null;
@@ -335,9 +346,60 @@ export function refreshDynamicMetadata(id) {
 }
 
 // Import model metadata ONLY when a real source list exists. Never invent models.
-export function discoverDynamicModels(id) {
+export async function discoverDynamicModels(id) {
   const rec = getDynamicProvider(id);
   if (!rec) return { status: 'not-found' };
+
+  // Live probe FIRST — the same honest pipeline custom (cst:) providers use
+  // (official /models → keyless /api/pricing → storefront sitemap → scrape).
+  // Adopted records know the storefront website, and once the user supplies a
+  // base URL + format the gateway itself is probed. This keeps adopted provider
+  // cards on gateway truth (free count = is_free flag / `:free` marker / zero
+  // cost), exactly like UNO Router — not just the discovery snapshot.
+  const probe = {
+    identity: { name: rec.name, website: rec.website || null },
+    api: rec.integration?.baseUrl
+      ? { baseUrl: rec.integration.baseUrl, format: rec.integration.adapterType || 'openai' }
+      : null,
+  };
+  if (probe.identity.website || probe.api) {
+    try {
+      const live = await fetchCustomProviderModelsList(probe, '');
+      // Only upgrade from the discovery snapshot when the probe reached a REAL
+      // gateway signal (official /models, keyless pricing, or the storefront
+      // sitemap). A bare website scrape can return a single site-title token and
+      // is never a better inventory than the discovery snapshot.
+      const weakLive = !live.ok || !live.models.length ||
+        live.source === 'website' || /scrape/i.test(live.source);
+      if (!weakLive) {
+        const now = new Date().toISOString();
+        rec.modelSupport = {
+          status: 'verified',
+          count: live.models.length,
+          lastUpdated: now,
+          fetchedAt: now,
+          source: live.source,
+          models: live.models.map((m) => {
+            const zero = (m.pricing?.input === 0 && m.pricing?.output === 0) || (m.pricing?.input === 0 && m.pricing?.output == null);
+            return {
+              modelId: m.id,
+              id: m.id,
+              name: m.name || m.id,
+              source: live.source,
+              accessType: zero ? 'free' : 'paid',
+              availability: 'live',
+              pricing: m.pricing || null,
+              contextLength: m.context_length || null,
+            };
+          }),
+        };
+        rec.updatedAt = now;
+        upsertDynamicProvider(rec);
+        return { status: 'imported', imported: rec.modelSupport.count, source: live.source };
+      }
+    } catch { /* fall through to discovery snapshot */ }
+  }
+
   const eco = loadDiscovered()[rec.ecosystemId];
   if (!eco || !Array.isArray(eco.models) || !eco.models.length) {
     rec.modelSupport = { status: 'unknown', count: 0, lastUpdated: null, models: [] };

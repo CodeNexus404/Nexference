@@ -243,6 +243,7 @@ async function listModelsFlow(providerId) {
         if (r && r.supported && Array.isArray(r.models)) {
           out.innerHTML = r.models.length
             ? r.models.slice(0, 30).map((m) => `<span class="chip chip-sm">${esc(m.id || m.name || 'model')}</span>`).join(' ')
+              + (r.models.length > 30 ? `<span class="chip chip-sm">+${r.models.length - 30} more</span>` : '')
             : '<span class="muted">No models returned.</span>';
           notify.toast(`Listed ${r.models.length} model(s)`, 'success');
         } else {

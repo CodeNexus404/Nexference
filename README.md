@@ -1,5 +1,7 @@
 <div align="center">
 
+<img width="76" height="76" alt="Nexference" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9J2cnIHgxPScwJyB5MT0nMCcgeDI9JzEnIHkyPScxJz48c3RvcCBvZmZzZXQ9JzAnIHN0b3AtY29sb3I9JyM3NGExZmYnLz48c3RvcCBvZmZzZXQ9JzEnIHN0b3AtY29sb3I9JyMzZDYzZDgnLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzI0JyBmaWxsPSd1cmwoI2cpJy8+PHBhdGggZD0nTTMxIDczVjI3bDM4IDQ1VjI3JyBzdHJva2U9JyNmZmZmZmYnIHN0cm9rZS13aWR0aD0nOScgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBzdHJva2UtbGluZWpvaW49J3JvdW5kJy8+PC9zdmc+" />
+
 # ⚡ Nexference
 
 ### Local-First AI Workspace
@@ -60,7 +62,7 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 ---
 
 <details>
-<summary><h2>What's new in v2.2.1</h2></summary>
+<summary>v2.2.1 — Stabilize provider ecosystem and client configuration</summary>
 
 > Release commit: [`7e5e2f4`](https://github.com/CodeNexus404/Nexference/commit/7e5e2f4) — stabilize provider ecosystem and client configuration
 
@@ -78,13 +80,10 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **Version** — bumped to `2.2.1` across `package.json`, the UI, and this document.
 
 The architecture, provider adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the safety-critical Claude Code configuration flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v2.2.0</h2></summary>
+<summary>v2.2.0 — Multi-Source Provider Discovery & Discovered Models</summary>
 
 > Release commit: [`8b8bdb9`](https://github.com/CodeNexus404/Nexference/commit/8b8bdb9) — Multi-Source Provider Discovery & Discovered Models
 
@@ -103,13 +102,10 @@ The architecture, provider adapters, Model Intelligence, Playground execution, W
 - **Version** — bumped to `2.2.0` across `package.json`, the UI, and this document.
 
 The architecture, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the safe Claude Code configuration flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v2.1.0</h2></summary>
+<summary>v2.1.0 — Custom Provider Registry & Provider Onboarding</summary>
 
 **Custom Provider Registry & Provider Onboarding** — Nexference now allows users to manually create, manage, validate, and use their own AI provider cards alongside curated and ecosystem-discovered providers.
 
@@ -134,13 +130,10 @@ Key principles:
 - Custom providers start as Metadata Only / Unverified — honest defaults.
 - No fabricated verification, model lists, or pricing.
 - Credentials are never stored in custom provider records.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v2.0.0</h2></summary>
+<summary>v2.0.0 — Unified Execution Gateway</summary>
 
 **Unified Execution Gateway** — Nexference now routes ALL execution through a single central orchestration layer. The gateway resolves the correct execution bridge (legacy provider, integration adapter, or runtime), normalizes results, and returns honest errors — regardless of source.
 
@@ -169,13 +162,10 @@ Key principles preserved:
 - No secrets in execution history, diagnostics, or API responses.
 - No fabricated execution success, streaming support, or model availability.
 - Legacy bridge support remains as fallback.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.9.0</h2></summary>
+<summary>v1.9.0 — Provider Integration & Adapter Framework</summary>
 
 **Provider Integration & Adapter Framework** — Nexference now keeps integration (configurable / executable) strictly separate from discovery and adoption. A provider can be discovered and even adopted without Nexference ever assuming it can be configured or run; an explicit, evidence-based **adapter** is resolved only when supported by real signals.
 
@@ -193,59 +183,10 @@ Key principles preserved:
 - **Version** — bumped to `1.9.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.6.0</h2></summary>
-
-**Intelligence Center, Trends & Smart Recommendations** — Nexference now aggregates its existing intelligence (provider monitoring, model changes, benchmarks, environment) into one honest, scannable view, with explainable trends and recommendations. No new persistent store was created and no fake data is introduced.
-
-- **Intelligence Center page** — a new `Intelligence` navigation entry (`/intelligence`) that aggregates Overview, Attention Required, Provider Trends, Model Trends, Smart Recommendations, Benchmark Insights, Recent Changes, Activity, and a Data Quality & Confidence panel.
-- **Attention Required engine** — surfaces only real, actionable items: stale intelligence, an unavailable provider, recent breaking model changes, a benchmark regression, or a configuration-impact gap (escalated to **Important** only when it touches your own configured provider). De-duplicated, never fabricated.
-- **Provider & Model trends** — provider trends (availability, model count, free-model count, measured latency, reliability) are computed from real history snapshots and labelled `IMPROVING` / `DECLINING` / `STABLE` only when the first-vs-last change exceeds a small, documented minimum delta. Rendered as small, honest SVG sparklines. Model trends summarise discovered/removed/access-changed counts.
-- **Smart Recommendations** — configuration, provider (free models), model (capability match), local-AI, benchmark, and discovery suggestions. Every recommendation carries an explicit **basis** and a **confidence** (`MEASURED` / `OBSERVED` / `CURATED` / `INSUFFICIENT_DATA` / `UNKNOWN`); none use a black-box scoring, and none claim "best/fastest/most reliable" without comparable measured data.
-- **Data Quality & Confidence** — every panel shows how much real data backs it (snapshot counts, real connection samples, benchmark samples, stale/curated-only/unknown provider counts) so you can judge trustworthiness at a glance.
-- **Confidence vocabulary** — the backend normalises insight confidence into `MEASURED / OBSERVED / CURATED / INSUFFICIENT_DATA / UNKNOWN` (explanatory labels, not percentages) and documents them here.
-- **Manual refresh preserved** — a `POST /api/intelligence/refresh` reuses the existing provider-monitor refresh (no background polling); it is guarded against concurrent runs and records activity.
-- **Honesty guardrails preserved** — the Intelligence Center only reads existing stores; no secrets, headers, keys, or raw pricing reach any intelligence/recommendation/trend/activity record, API response, or the UI; insufficient history yields explicit empty states, never invented trends.
-- **APIs** — `GET /api/intelligence?period=24h|7d|30d|all` (defaults to `7d`; invalid periods fall back to `7d`) and `POST /api/intelligence/refresh`.
-- **Version** — bumped to `1.6.0` across `package.json`, the UI, and this document.
-
-The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
-</details>
-
----
-
-<details>
-<summary><h2>What's new in v1.7.0</h2></summary>
-
-**Ecosystem Discovery & Provider Registry** — Nexference now discovers AI providers, gateways, aggregators, and catalogues from trustworthy external/open-source sources and keeps an extensible, evidence-based registry — without ever silently merging discovered providers into the curated baseline or the configuration flow.
-
-- **Ecosystem Discovery page** — a new `Ecosystem` navigation entry (`/ecosystem`) that shows a curated-vs-discovered registry overview, discovery-source health (status, candidates found, last refresh, failures isolated per source), and a grid of discovered providers with honest status, category, and duplicate badges.
-- **Controlled source registry** — `data/discovery-sources.json` lists trusted sources; each source is validated, supports manual refresh only (no background crawling), and fails in isolation. Seed examples live in `data/ecosystem-registry.json` and are clearly marked community-curated, not authoritative.
-- **Evidence-based records** — every discovered provider carries a `sourceType` (curated / official-api / community / structured-registry / unknown), `trustLevel`, and an `evidence` array. Provenance is shown per field so users can verify claims. No "verified" is ever auto-assigned to an external claim.
-- **Safe logo resolution** — logos resolve via a server-side proxy (`GET /api/ecosystem/logo?url=`) that enforces HTTPS, rejects `javascript:`/`data:`/`file:`/private hosts, validates content-type (`image/*`) and size (≤600 KB), and falls back to deterministic initials. The GitHub avatar is used only when the project itself is the discovered entity.
-- **Validation pipeline** — `POST /api/ecosystem/providers/:id/validate` performs reachability and documentation/endpoint checks (no keyed API probing) and stores a `validation` record with explicit `configurable` (set true only when documentation + public endpoint + identity support it).
-- **Duplicate detection** — normalised candidate fingerprints (host/owner or name) group near-duplicates; `likely-duplicate` is flagged and can be resolved manually. A foreign app's stale data in `~/.nexference/discovered-providers.json` is ignored via a version marker.
-- **Explicit adoption workflow** — `adopt` / `ignore` / `restore` / `review` change only the provider's `registryState`; adoption creates a local override that preserves provenance and never overwrites curated source files or claims verification. Adopted, configurable providers can be chosen in the Cloud Providers flow; discovery-only providers are clearly labelled.
-- **Activity & changes** — discovery actions reuse the existing secret-free change store (`PROVIDER_SEEN_AGAIN`, `PROVIDER_MISSING`, `PROVIDER_ADOPTED`, `PROVIDER_IGNORED`, `PROVIDER_REVIEW`, `LOGO_CHANGED`, `WEBSITE_CHANGED`, `DOCUMENTATION_CHANGED`, `MODELS_DISCOVERED`, `MODELS_REMOVED`).
-- **Intelligence Center + Cloud Providers integration** — the Intelligence Center shows an Ecosystem summary and recommendations; Cloud Providers gains a `Registry` filter (Curated / Adopted / Discovered / All, defaulting to Curated so the config UI is never flooded).
-- **Honesty guardrails preserved** — no secrets, keys, headers, or raw pricing reach any discovery record, change, activity, API response, or UI; discoveries are local-only and optional (the app still boots cleanly if the store is missing or corrupt).
-- **APIs** — `GET /api/ecosystem/sources`, `GET /api/ecosystem/providers`, `GET /api/ecosystem/providers/:id`, `POST /api/ecosystem/discover`, `POST /api/ecosystem/sources/:id/refresh`, `POST /api/ecosystem/providers/:id/validate`, `POST /api/ecosystem/providers/:id/adopt|ignore|restore|review`, `GET /api/ecosystem/summary`, `GET /api/ecosystem/logo?url=`.
-- **Version** — bumped to `1.7.0` across `package.json`, the UI, and this document.
-
-The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
-</details>
-
----
-
-<details>
-<summary><h2>What's new in v1.8.0</h2></summary>
+<summary>v1.8.0 — Dynamic Provider Registry & Integration Pipeline</summary>
 
 **Dynamic Provider Registry & Integration Pipeline** — Nexference becomes genuinely dynamic: a discovered provider can now move through Discovery → Review → Adopt → Active Provider and appear in the unified provider catalogue without any source-code or static-registry edits.
 
@@ -265,13 +206,50 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **Version** — bumped to `1.8.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
+<details>
+<summary>v1.7.0 — Ecosystem Discovery & Provider Registry</summary>
+
+**Ecosystem Discovery & Provider Registry** — Nexference now discovers AI providers, gateways, aggregators, and catalogues from trustworthy external/open-source sources and keeps an extensible, evidence-based registry — without ever silently merging discovered providers into the curated baseline or the configuration flow.
+
+- **Ecosystem Discovery page** — a new `Ecosystem` navigation entry (`/ecosystem`) that shows a curated-vs-discovered registry overview, discovery-source health (status, candidates found, last refresh, failures isolated per source), and a grid of discovered providers with honest status, category, and duplicate badges.
+- **Controlled source registry** — `data/discovery-sources.json` lists trusted sources; each source is validated, supports manual refresh only (no background crawling), and fails in isolation. Seed examples live in `data/ecosystem-registry.json` and are clearly marked community-curated, not authoritative.
+- **Evidence-based records** — every discovered provider carries a `sourceType` (curated / official-api / community / structured-registry / unknown), `trustLevel`, and an `evidence` array. Provenance is shown per field so users can verify claims. No "verified" is ever auto-assigned to an external claim.
+- **Safe logo resolution** — logos resolve via a server-side proxy (`GET /api/ecosystem/logo?url=`) that enforces HTTPS, rejects `javascript:`/`data:`/`file:`/private hosts, validates content-type (`image/*`) and size (≤600 KB), and falls back to deterministic initials. The GitHub avatar is used only when the project itself is the discovered entity.
+- **Validation pipeline** — `POST /api/ecosystem/providers/:id/validate` performs reachability and documentation/endpoint checks (no keyed API probing) and stores a `validation` record with explicit `configurable` (set true only when documentation + public endpoint + identity support it).
+- **Duplicate detection** — normalised candidate fingerprints (host/owner or name) group near-duplicates; `likely-duplicate` is flagged and can be resolved manually. A foreign app's stale data in `~/.nexference/discovered-providers.json` is ignored via a version marker.
+- **Explicit adoption workflow** — `adopt` / `ignore` / `restore` / `review` change only the provider's `registryState`; adoption creates a local override that preserves provenance and never overwrites curated source files or claims verification. Adopted, configurable providers can be chosen in the Cloud Providers flow; discovery-only providers are clearly labelled.
+- **Activity & changes** — discovery actions reuse the existing secret-free change store (`PROVIDER_SEEN_AGAIN`, `PROVIDER_MISSING`, `PROVIDER_ADOPTED`, `PROVIDER_IGNORED`, `PROVIDER_REVIEW`, `LOGO_CHANGED`, `WEBSITE_CHANGED`, `DOCUMENTATION_CHANGED`, `MODELS_DISCOVERED`, `MODELS_REMOVED`).
+- **Intelligence Center + Cloud Providers integration** — the Intelligence Center shows an Ecosystem summary and recommendations; Cloud Providers gains a `Registry` filter (Curated / Adopted / Discovered / All, defaulting to Curated so the config UI is never flooded).
+- **Honesty guardrails preserved** — no secrets, keys, headers, or raw pricing reach any discovery record, change, activity, API response, or UI; discoveries are local-only and optional (the app still boots cleanly if the store is missing or corrupt).
+- **APIs** — `GET /api/ecosystem/sources`, `GET /api/ecosystem/providers`, `GET /api/ecosystem/providers/:id`, `POST /api/ecosystem/discover`, `POST /api/ecosystem/sources/:id/refresh`, `POST /api/ecosystem/providers/:id/validate`, `POST /api/ecosystem/providers/:id/adopt|ignore|restore|review`, `GET /api/ecosystem/summary`, `GET /api/ecosystem/logo?url=`.
+- **Version** — bumped to `1.7.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
+</details>
 
 <details>
-<summary><h2>What's new in v1.5.0</h2></summary>
+<summary>v1.6.0 — Intelligence Center, Trends & Smart Recommendations</summary>
+
+**Intelligence Center, Trends & Smart Recommendations** — Nexference now aggregates its existing intelligence (provider monitoring, model changes, benchmarks, environment) into one honest, scannable view, with explainable trends and recommendations. No new persistent store was created and no fake data is introduced.
+
+- **Intelligence Center page** — a new `Intelligence` navigation entry (`/intelligence`) that aggregates Overview, Attention Required, Provider Trends, Model Trends, Smart Recommendations, Benchmark Insights, Recent Changes, Activity, and a Data Quality & Confidence panel.
+- **Attention Required engine** — surfaces only real, actionable items: stale intelligence, an unavailable provider, recent breaking model changes, a benchmark regression, or a configuration-impact gap (escalated to **Important** only when it touches your own configured provider). De-duplicated, never fabricated.
+- **Provider & Model trends** — provider trends (availability, model count, free-model count, measured latency, reliability) are computed from real history snapshots and labelled `IMPROVING` / `DECLINING` / `STABLE` only when the first-vs-last change exceeds a small, documented minimum delta. Rendered as small, honest SVG sparklines. Model trends summarise discovered/removed/access-changed counts.
+- **Smart Recommendations** — configuration, provider (free models), model (capability match), local-AI, benchmark, and discovery suggestions. Every recommendation carries an explicit **basis** and a **confidence** (`MEASURED` / `OBSERVED` / `CURATED` / `INSUFFICIENT_DATA` / `UNKNOWN`); none use a black-box scoring, and none claim "best/fastest/most reliable" without comparable measured data.
+- **Data Quality & Confidence** — every panel shows how much real data backs it (snapshot counts, real connection samples, benchmark samples, stale/curated-only/unknown provider counts) so you can judge trustworthiness at a glance.
+- **Confidence vocabulary** — the backend normalises insight confidence into `MEASURED / OBSERVED / CURATED / INSUFFICIENT_DATA / UNKNOWN` (explanatory labels, not percentages) and documents them here.
+- **Manual refresh preserved** — a `POST /api/intelligence/refresh` reuses the existing provider-monitor refresh (no background polling); it is guarded against concurrent runs and records activity.
+- **Honesty guardrails preserved** — the Intelligence Center only reads existing stores; no secrets, headers, keys, or raw pricing reach any intelligence/recommendation/trend/activity record, API response, or the UI; insufficient history yields explicit empty states, never invented trends.
+- **APIs** — `GET /api/intelligence?period=24h|7d|30d|all` (defaults to `7d`; invalid periods fall back to `7d`) and `POST /api/intelligence/refresh`.
+- **Version** — bumped to `1.6.0` across `package.json`, the UI, and this document.
+
+The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
+</details>
+
+<details>
+<summary>v1.5.0 — Provider Monitoring, Model Changes & Benchmark Intelligence</summary>
 
 **Provider Monitoring, Model Changes & Benchmark Intelligence** — Nexference now watches providers over time and surfaces model-level change, connection reliability, and benchmarks — entirely from recorded, honest signals.
 
@@ -286,13 +264,10 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **Version** — bumped to `1.5.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.4.0</h2></summary>
+<summary>v1.4.0 — Provider Discovery & Intelligence Foundation</summary>
 
 The **Provider Discovery & Intelligence Foundation** — Nexference learns about providers from trusted sources and keeps that knowledge honest, observable, and under your control.
 
@@ -306,13 +281,10 @@ The **Provider Discovery & Intelligence Foundation** — Nexference learns about
 - **Version** — bumped to `1.4.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.3.0</h2></summary>
+<summary>v1.3.0 — Product-level UI/UX refinement</summary>
 
 A product-level UI/UX refinement pass that makes Nexference feel like an application rather than a set of static dashboards — without changing architecture, behavior, or the safety-critical configuration pipeline.
 
@@ -324,13 +296,10 @@ A product-level UI/UX refinement pass that makes Nexference feel like an applica
 - **Version** — bumped to `1.3.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.2.0</h2></summary>
+<summary>v1.2.0 — UI/UX refinement milestone</summary>
 
 A UI/UX refinement milestone focused on making Nexference feel like a complete modern developer workspace — without changing architecture, behavior, or the safety-critical configuration pipeline.
 
@@ -343,24 +312,18 @@ A UI/UX refinement milestone focused on making Nexference feel like a complete m
 - **Version** — bumped to `1.2.0` across `package.json`, the UI, and this document.
 
 The architecture, backend APIs, provider/runtime/client adapters, Model Intelligence, Playground execution, Workspace Health, Activity feed, and the Claude Code configuration safety flow are all unchanged.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.1.0</h2></summary>
+<summary>v1.1.0 — Grouped sidebar & workspace status indicator</summary>
 
 - **Information architecture** — the sidebar is now grouped into Workspace / Configure / Explore / Test / Manage, so the eight surfaces read as one coherent product instead of a flat list.
 - **Workspace status indicator** — the top bar shows a live configuration-state chip (Needs setup / Copyable config / Configured / Unsaved changes), derived from the real applied state on every navigation.
 - **Versioned release** — bumped to `1.1.0` across `package.json`, the UI, and this document.
-
 </details>
 
----
-
 <details>
-<summary><h2>What's new in v1.0.0</h2></summary>
+<summary>v1.0.0 — Workspace Health, Activity feed & execution reliability</summary>
 
 - **Workspace Health** — a single honest report across configuration, clients, runtimes, providers, and execution (`GET /api/health`), with explicit states (`healthy`, `attention`, `config-required`, `partial`, `offline`, `unknown`) and a 0–100 score. Partial failures are never hidden behind a green status.
 - **Unified Activity feed** — persistent, secret-free event log for configuration, backups, runtimes, and executions (`GET /api/activity`).
@@ -368,9 +331,7 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **State restoration** — route, playground draft, and selections survive a page refresh; an interrupted execution is honestly reported instead of pretending the stream is still connected.
 - **Consistent status vocabulary** — providers, runtimes, and clients share normalized, non-misleading status badges across the UI.
 - **Notification discipline** — duplicate toasts are suppressed and long operations use inline progress rather than stacked notifications.
-
 </details>
-
 ---
 
 ## Architecture
