@@ -10,7 +10,7 @@
 //   • Duplicate detection is conservative — similar names are flagged, not merged.
 //   • Manual refresh only. One failing source never fails the whole discovery.
 
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import {
@@ -39,10 +39,87 @@ import { assessProviderIntegration } from '../integrations/providerIntegrationSe
 // entries are repo-root-relative (e.g. "data/ecosystem-registry.json"), so the
 // adapters resolve them against the repo root, not the data dir.
 const DATA_DIR = fileURLToPath(new URL('../../../../data', import.meta.url));
-const REPO_ROOT = join(DATA_DIR, '..');
+const REPO_ROOT = dirname(DATA_DIR);
 const SOURCES_FILE = join(DATA_DIR, 'discovery-sources.json');
 const FRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGO_VERIFY_MS = 6000;
+
+// Re-validation is expensive (one reachability probe per provider), so records
+// validated recently are reused instead of re-probed on every manual refresh.
+// The per-provider Validate button still forces a fresh check.
+const VALIDATION_TTL_MS = 12 * 60 * 60 * 1000;
+const LOGO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOGO_MISS_TTL_MS = 24 * 60 * 60 * 1000;
+const VALIDATE_CONCURRENCY = 12;
+const LOGO_CONCURRENCY = 8;
+
+function stripBom(text) {
+  return text && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+// Run `fn` over `items` with at most `limit` promises in flight. Keeps discovery
+// fast on every platform without opening hundreds of sockets at once.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+// ── Background job state ──
+// Discovery takes tens of seconds against live remote sources. Exposing it as a
+// job lets the API answer immediately and the UI show a true "Refreshing…"
+// state (including when the run outlives the page request).
+const job = {
+  running: false,
+  startedAt: null,
+  startedAtMs: 0,
+  finishedAt: null,
+  phase: null,
+  progress: {
+    sourcesDone: 0, sourcesTotal: 0, candidates: 0,
+    validated: 0, validateTotal: 0,
+    logosDone: 0, logosTotal: 0,
+  },
+  lastResult: null,
+  lastError: null,
+};
+
+export function getDiscoveryStatus() {
+  const elapsedMs = job.running
+    ? Math.max(0, Date.now() - job.startedAtMs)
+    : (job.startedAt && job.finishedAt
+      ? Math.max(0, new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime())
+      : 0);
+  return {
+    running: job.running,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    elapsedMs,
+    phase: job.phase,
+    progress: { ...job.progress },
+    lastResult: job.lastResult,
+    error: job.lastError,
+  };
+}
+
+// Start a run without awaiting it. Returns immediately; callers poll
+// getDiscoveryStatus() for progress/completion. Duplicate runs are refused.
+export function startDiscovery({ force = false } = {}) {
+  if (job.running) {
+    return { ok: false, started: false, error: 'already_running', status: getDiscoveryStatus() };
+  }
+  const promise = discoverEcosystem({ force }).catch((e) => {
+    job.lastError = String(e && e.message || e);
+  });
+  return { ok: true, started: true, status: getDiscoveryStatus(), promise };
+}
 
 function confidenceForTrust(trust) {
   if (trust === 'official') return CONFIDENCE_LEVELS.HIGH;
@@ -79,7 +156,7 @@ async function resolveLogoLive(entry) {
 export function loadSourcesConfig() {
   try {
     if (!existsSync(SOURCES_FILE)) return { sources: [] };
-    const obj = JSON.parse(readFileSync(SOURCES_FILE, 'utf8'));
+    const obj = JSON.parse(stripBom(readFileSync(SOURCES_FILE, 'utf8')));
     return obj && Array.isArray(obj.sources) ? obj : { sources: [] };
   } catch {
     return { sources: [] };
@@ -288,9 +365,20 @@ function mergeCandidate(record, candidate, sourceMeta, observedAt, fp) {
 let discovering = false;
 
 export async function discoverEcosystem({ force = false } = {}) {
-  if (discovering) return { ok: false, error: 'already_running' };
+  if (discovering) return { ok: false, error: 'already_running', status: getDiscoveryStatus() };
   discovering = true;
   const t0 = Date.now();
+  job.running = true;
+  job.startedAt = new Date().toISOString();
+  job.startedAtMs = t0;
+  job.finishedAt = null;
+  job.phase = 'sources';
+  job.lastError = null;
+  job.progress = {
+    sourcesDone: 0, sourcesTotal: 0, candidates: 0,
+    validated: 0, validateTotal: 0,
+    logosDone: 0, logosTotal: 0,
+  };
   const sourceState = loadSourceState();
   const existing = loadDiscovered();
   const observedAt = new Date().toISOString();
@@ -300,11 +388,24 @@ export async function discoverEcosystem({ force = false } = {}) {
     const foundBySource = {}; // sourceId -> Set(id)
     const sourceSummaries = [];
 
-    for (const adapter of adapters) {
+    // Query every source concurrently. Remotes are the slow part (up to 15s
+    // each) and they are independent, so serial execution only made refreshes
+    // slower without adding honesty. Results are still merged in registry order
+    // so fingerprints stay deterministic.
+    job.progress.sourcesTotal = adapters.length;
+    const adapterResults = await Promise.all(adapters.map(async (adapter) => {
       const meta = adapter.getSourceMetadata();
+      try {
+        return { meta, res: await adapter.discover(), error: null };
+      } catch (e) {
+        return { meta, res: null, error: String(e && e.message || e) };
+      }
+    }));
+
+    for (const { meta, res, error } of adapterResults) {
       foundBySource[meta.id] = new Set();
       try {
-        const res = await adapter.discover();
+        if (error) throw new Error(error);
         if (!res.supported) {
           sourceState[meta.id] = { lastRefresh: observedAt, status: 'skipped', failureReason: res.reason || null, candidatesFound: 0 };
           sourceSummaries.push({ id: meta.id, status: 'skipped', reason: res.reason });
@@ -328,11 +429,15 @@ export async function discoverEcosystem({ force = false } = {}) {
         }
         sourceState[meta.id] = { lastRefresh: observedAt, status: 'ok', failureReason: res.errors && res.errors.length ? res.errors.join('; ') : null, candidatesFound: res.candidates.length };
         sourceSummaries.push({ id: meta.id, status: 'ok', candidates: res.candidates.length, errors: res.errors || [] });
+        job.progress.candidates += res.candidates.length;
       } catch (e) {
         sourceState[meta.id] = { lastRefresh: observedAt, status: 'failed', failureReason: String(e.message || e), candidatesFound: 0 };
         sourceSummaries.push({ id: meta.id, status: 'failed', reason: String(e.message || e) });
+      } finally {
+        job.progress.sourcesDone++;
       }
     }
+    job.phase = 'merge';
 
     // Conservative cross-fingerprint duplicate detection (do not merge uncertain).
     const ids = Object.keys(working);
@@ -370,6 +475,17 @@ export async function discoverEcosystem({ force = false } = {}) {
         rec.duplicateOf = prev.duplicateOf || rec.duplicateOf;
         rec.missingFromSource = false;
         rec.lastMissingAt = null;
+        // Keep a previously verified logo (and its check timestamp) so refreshes
+        // do not re-probe the whole catalogue. A fresh explicit/source-supplied
+        // logo still wins, and a changed website/repository invalidates the cache.
+        const strongIncoming = ['official', 'source-provided', 'curated'].includes(rec.logoSource);
+        const sameSite = siteKey(prev.website) === siteKey(rec.website)
+          && (prev.repository || '') === (rec.repository || '');
+        if (prev.logo && !strongIncoming && prev.logoSource && sameSite) {
+          rec.logo = prev.logo;
+          rec.logoSource = prev.logoSource;
+        }
+        rec.logoCheckedAt = sameSite ? (prev.logoCheckedAt || null) : null;
         if (prev.missingFromSource && !prev.discoveredAt) { /* not applicable */ }
         if (prev.missingFromSource) seenAgain.push(rec);
       } else {
@@ -396,50 +512,67 @@ export async function discoverEcosystem({ force = false } = {}) {
       }
     }
 
-    // Live-verify provider logos: upgrade the statically-chosen candidate
-    // (favicon.ico / explicit) to the first one that actually serves an image,
-    // trying explicit → favicon.ico → Google favicon → GitHub avatar.
-    // Degrades gracefully: failures keep the existing logo or fall back to the
-    // UI initials avatar. Bounded concurrency so discovery stays fast & polite.
-    const logoRecords = Object.values(next).filter((r) => r.registryState !== REGISTRY_STATES.IGNORED && r.registryState !== 'removed');
-    let logoIdx = 0;
-    const LOGO_CONCURRENCY = 8;
-    await Promise.all(
-      Array.from({ length: Math.min(LOGO_CONCURRENCY, logoRecords.length) }, async () => {
-        while (logoIdx < logoRecords.length) {
-          const rec = logoRecords[logoIdx++];
-          try {
-            const strongLogo = rec.logo && ['official', 'source-provided', 'curated'].includes(rec.logoSource) ? rec.logo : null;
-            const resolved = await resolveLogoLive({
-              website: rec.website,
-              documentationUrl: rec.documentationUrl,
-              repository: rec.repository,
-              logo: strongLogo,
-              logoSource: strongLogo ? rec.logoSource : null,
-            });
-            if (resolved && resolved.url !== rec.logo) {
-              rec.logo = resolved.url;
-              rec.logoSource = resolved.source;
-            }
-          } catch { /* non-fatal */ }
-        }
-      })
+    // Validation + logo verification run with bounded concurrency and short-lived
+    // caches. A manual refresh therefore finishes quickly (instead of serially
+    // probing ~140 websites) while still re-checking anything genuinely stale.
+    const activeRecords = Object.values(next).filter((r) =>
+      r.registryState !== REGISTRY_STATES.IGNORED && r.registryState !== 'removed'
     );
 
-    // Run validation for newly discovered and updated providers to populate validation fields
-    for (const rec of Object.values(next)) {
-      if (rec.registryState !== REGISTRY_STATES.IGNORED && rec.registryState !== 'removed') {
-        try {
-          const validated = await validateProviderRecord(rec);
-          if (validated) {
-            next[rec.id] = validated;
-          }
-        } catch { /* validation is best-effort */ }
-      }
-    }
+    job.phase = 'validate';
+    const validationTargets = activeRecords.filter((rec) => {
+      if (force) return true;
+      const last = rec.validation && rec.validation.lastValidatedAt
+        ? new Date(rec.validation.lastValidatedAt).getTime() : 0;
+      return !last || Date.now() - last > VALIDATION_TTL_MS;
+    });
+    job.progress.validateTotal = validationTargets.length;
+    await mapLimit(validationTargets, VALIDATE_CONCURRENCY, async (rec) => {
+      try {
+        const validated = await validateProviderRecord(rec);
+        if (validated) next[rec.id] = validated;
+      } catch { /* validation is best-effort */ }
+      job.progress.validated++;
+    });
 
-    saveDiscovered(next);
-    saveSourceState(sourceState);
+    job.phase = 'logos';
+    const logoRecords = activeRecords.filter((rec) => {
+      if (force) return true;
+      const checked = rec.logoCheckedAt ? new Date(rec.logoCheckedAt).getTime() : 0;
+      const age = checked ? Date.now() - checked : Infinity;
+      // A resolved logo is trusted for a week; a miss is retried after a day so
+      // transient favicon failures eventually recover.
+      return rec.logo ? age > LOGO_TTL_MS : age > LOGO_MISS_TTL_MS;
+    });
+    job.progress.logosTotal = logoRecords.length;
+    await mapLimit(logoRecords, LOGO_CONCURRENCY, async (rec) => {
+      try {
+        const strongLogo = rec.logo && ['official', 'source-provided', 'curated'].includes(rec.logoSource) ? rec.logo : null;
+        const resolved = await resolveLogoLive({
+          website: rec.website,
+          documentationUrl: rec.documentationUrl,
+          repository: rec.repository,
+          logo: strongLogo,
+          logoSource: strongLogo ? rec.logoSource : null,
+        });
+        if (resolved && resolved.url !== rec.logo) {
+          rec.logo = resolved.url;
+          rec.logoSource = resolved.source;
+        }
+        rec.logoCheckedAt = observedAt;
+      } catch { /* non-fatal: keep the existing logo */ }
+      job.progress.logosDone++;
+    });
+
+    job.phase = 'save';
+    const savedProviders = saveDiscovered(next);
+    const savedSourceState = saveSourceState(sourceState);
+
+    // Persistence is best-effort by design (discovery must not crash a run if the
+    // store is locked, e.g. by antivirus/indexing on Windows), but the result is
+    // reported so the UI can say the refresh was not saved instead of implying it
+    // was. History is written after the summary so the flag is included in it.
+    const persisted = savedProviders && savedSourceState;
 
     // Keep adopted dynamic providers in sync with the discovery store: discovery
     // rebuilds records (and may replace model lists), so mirror the latest
@@ -472,7 +605,10 @@ export async function discoverEcosystem({ force = false } = {}) {
       discovered: Object.keys(next).length,
       newlyDiscovered: newlyDiscovered.length,
       withErrors: sourceSummaries.filter((s) => s.status === 'failed' || s.status === 'skipped').length,
+      persisted,
+      persistenceWarning: persisted ? null : 'Discovery results could not be written to disk.',
     };
+    job.lastResult = summary;
     appendHistory({ at: observedAt, ...summary });
     try {
       recordActivity('discovery', 'ecosystem-discover', 'success',
@@ -480,8 +616,14 @@ export async function discoverEcosystem({ force = false } = {}) {
         { sources: sourceSummaries.length, newlyDiscovered: summary.newlyDiscovered });
     } catch { /* non-fatal */ }
     return summary;
+  } catch (e) {
+    job.lastError = String(e && e.message || e);
+    throw e;
   } finally {
     discovering = false;
+    job.running = false;
+    job.phase = null;
+    job.finishedAt = new Date().toISOString();
   }
 }
 
@@ -509,7 +651,15 @@ export async function validateProvider(id) {
   const store = loadDiscovered();
   const rec = store[id];
   if (!rec) return null;
-  return validateProviderRecord(rec);
+  const validated = await validateProviderRecord(rec);
+  if (!validated) return null;
+  // Persist the fresh validation. Re-read first and merge only the fields this
+  // operation owns so a concurrent discovery write is not clobbered.
+  const latest = loadDiscovered();
+  if (!latest[id]) return validated;
+  latest[id] = { ...latest[id], validation: validated.validation, discoveryStatus: validated.discoveryStatus };
+  saveDiscovered(latest);
+  return latest[id];
 }
 
 export async function validateProviderRecord(rec) {

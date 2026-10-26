@@ -28,6 +28,7 @@ import { registerEcosystemRoutes } from './routes/ecosystem.js';
 import { registerDynamicProviderRoutes } from './routes/dynamicProviders.js';
 import { registerProviderIntegrationRoutes } from './routes/providerIntegrations.js';
 import { registerCustomProviderRoutes } from './routes/customProviders.js';
+import { proxyRouter } from './proxy/proxyRouter.js';
 import { startWatcher } from './config/configWatcher.js';
 import { SETTINGS_PATH } from './config/settingsStore.js';
 
@@ -78,6 +79,10 @@ export function createApp() {
   registerDynamicProviderRoutes(app);
   registerProviderIntegrationRoutes(app);
   registerCustomProviderRoutes(app);
+
+  // Claude Code local proxy: POST /v1/messages + management API. Loopback-only,
+  // token-authenticated, backed by the in-memory proxy store.
+  app.use(proxyRouter);
 
   // Periodic background refresh of every provider's model list.
   setInterval(() => fetchAllModels('periodic'), FETCH_INTERVAL);

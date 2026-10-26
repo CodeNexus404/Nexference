@@ -10,18 +10,36 @@
 // keyed /v1/models endpoint rejects us, this yields the live model list.
 // `publicModels: true` marks endpoints verifiably callable without an API key.
 export const PROVIDERS = [
-  { id: 'agentrouter', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: true, pricingApi: 'https://agentrouter.org/api/pricing?all=true' },
-  { id: 'aerolink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: true },
-  { id: 'freemodel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: true },
-  { id: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1/', format: 'openai', publicModels: true },
-  { id: 'nvidia', baseUrl: 'https://integrate.api.nvidia.com/v1/', format: 'openai', publicModels: false },
-  { id: 'groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false },
-  { id: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false },
-  { id: 'cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://api.cerebras.ai/public/v1/models' },
-  { id: 'orcarouter', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: true, pricingApi: 'https://api.orcarouter.ai/api/pricing?all=true' },
-  { id: 'mistral', baseUrl: 'https://api.mistral.ai/v1/', format: 'openai', publicModels: false },
-  { id: 'huggingface', baseUrl: 'https://router.huggingface.co/v1/', format: 'openai', publicModels: false },
-  { id: 'chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://llm.chutes.ai/v1/models' },
+  { id: 'agentrouter', name: 'Agent Router', baseUrl: 'https://agentrouter.org/v1/', format: 'anthropic', publicModels: true, pricingApi: 'https://agentrouter.org/api/pricing?all=true' },
+  { id: 'aerolink', name: 'AeroLink', baseUrl: 'https://capi.aerolink.lat/v1/', format: 'anthropic', publicModels: true },
+  { id: 'freemodel', name: 'FreeModel', baseUrl: 'https://cc.freemodel.dev/v1/', format: 'anthropic', publicModels: true },
+  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1/', format: 'openai', publicModels: true },
+  { id: 'nvidia', name: 'NVIDIA NIM', baseUrl: 'https://integrate.api.nvidia.com/v1/', format: 'openai', publicModels: false },
+  // Groq's catalogue mixes chat models with non-chat ones. Its /v1/models (when
+  // a key is present) and its public docs page both list speech-to-text
+  // (whisper-*), reranker and content-moderation models (llama-prompt-guard-*,
+  // gpt-oss-safeguard-*). Those are not chat completions: selecting one and
+  // pointing Claude Code at it fails with
+  //   400 `max_tokens` must be less than or equal to `4096` … context_window
+  // because the model has no usable chat endpoint / context window.
+  // `excludeModels` is applied to BOTH the keyed /models response and the
+  // keyless docs scrape, so the picker only ever offers servable chat models.
+  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1/', format: 'openai', publicModels: false, scrapeDefaultPaid: true, excludeModels: /whisper|prompt-?guard|safeguard|guard|rerank|embed|moderation|(^|\/)(tts|audio|vision)\b/i },
+  { id: 'gemini', name: 'Gemini', baseUrl: 'https://generativalanguage.googleapis.com/v1beta/', format: 'gemini', publicModels: false,
+    openaiCompat: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/', format: 'openai' } },
+  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://api.cerebras.ai/public/v1/models' },
+  { id: 'orcarouter', name: 'Orca Router', baseUrl: 'https://api.orcarouter.ai/v1/', format: 'openai', publicModels: true, pricingApi: 'https://api.orcarouter.ai/api/pricing?all=true' },
+  // Mistral serves /v1/models only to authenticated callers (401 "Invalid API
+  // Key"), so the catalogue comes from the docs page via scrapeModelsForProvider,
+  // which returns bare `{id, name}` records with NO pricing. A model with no
+  // pricing signal falls through to isFreeModel's final `return true`, which
+  // marked all 157 scraped models free — wrong, because La Plateforme is a
+  // metered API with no broad free tier. `scrapeDefaultPaid` makes the scrape
+  // emit the honest paid default (matching the sitemap path and TokenRouter), so
+  // free is only ever claimed for an explicitly `:free`/`-free` id.
+  { id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1/', format: 'openai', publicModels: false, scrapeDefaultPaid: true },
+  { id: 'huggingface', name: 'Hugging Face', baseUrl: 'https://router.huggingface.co/v1/', format: 'openai', publicModels: false },
+  { id: 'chutes', name: 'Chutes', baseUrl: 'https://llm.chutes.ai/v1/', format: 'openai', publicModels: false, publicListApi: 'https://llm.chutes.ai/v1/models' },
   // TokenRouter accepts the Anthropic-format /v1/messages protocol but its auth
   // is Bearer-only — it rejects `x-api-key` outright ("Pass 'Authorization:
   // Bearer tr_...'"). `bearerAuth` records this fact so integrations/tests send
@@ -30,7 +48,16 @@ export const PROVIDERS = [
   // `scrapeDefaultPaid` records that TokenRouter's catalogue is paid: only
   // explicitly `:free` / `-free` models (a temporary promo) are free, so
   // anything scraped from the site defaults to paid, never free.
-  { id: 'tokenrouter', baseUrl: 'https://api.tokenrouter.io/v1/', format: 'openai', publicModels: false, scrapeDefaultPaid: true },
+  // TokenRouter's API lives on api.tokenrouter.COM (the .io host answers with a
+  // different gateway's error schema and is not this provider).
+  //
+  // `pricingApi` is the important part: /v1/models and /api/models are both
+  // key-gated (401 "Token not provided"), but the new-one-api /api/pricing
+  // endpoint is public and returns the full live catalogue — 144 models with
+  // real model_ratio/model_price, using OpenRouter-style `org/model` ids and a
+  // `:free` suffix. That is a genuine live source, so no curated fallback list
+  // is needed or wanted here.
+  { id: 'tokenrouter', name: 'TokenRouter', baseUrl: 'https://api.tokenrouter.com/v1/', format: 'openai', publicModels: false, scrapeDefaultPaid: true, bearerAuth: true, pricingApi: 'https://api.tokenrouter.com/api/pricing' },
 ];
 
 // Curated fallback model lists for providers whose list endpoint is unavailable
@@ -55,26 +82,14 @@ export const STATIC_MODELS = {
     'gpt-4o', 'gpt-4o-mini',
     'deepseek-chat', 'deepseek-reasoner', 'llama-3.3-70b-instruct',
   ],
-  tokenrouter: [
-    { id: 'claude-sonnet-4', paid: true }, { id: 'claude-sonnet-4.5', paid: true },
-    { id: 'claude-sonnet-4.6', paid: true }, { id: 'claude-sonnet-5', paid: true },
-    { id: 'claude-opus-4', paid: true }, { id: 'claude-opus-4.5', paid: true },
-    { id: 'claude-opus-4.6', paid: true }, { id: 'claude-opus-4.7', paid: true },
-    { id: 'claude-opus-4.7-fast', paid: true }, { id: 'claude-opus-4.8', paid: true },
-    { id: 'claude-opus-4.8-fast', paid: true }, { id: 'claude-opus-5', paid: true },
-    { id: 'claude-opus-5-fast', paid: true }, { id: 'claude-haiku-4.5', paid: true },
-    { id: 'claude-fable-5', paid: true },
-    { id: 'gpt-4o-mini', paid: true }, { id: 'gpt-5', paid: true },
-    { id: 'gpt-5-mini', paid: true }, { id: 'gpt-5.2', paid: true },
-    { id: 'gpt-5.3-codex', paid: true }, { id: 'gpt-5.4', paid: true },
-    { id: 'gpt-5.4-mini', paid: true }, { id: 'gpt-5.4-nano', paid: true },
-    { id: 'gpt-5.4-pro', paid: true }, { id: 'gpt-5.5', paid: true },
-    { id: 'gpt-5.5-pro', paid: true },
-    { id: 'deepseek-v3.2', paid: true }, { id: 'deepseek-v4-pro', paid: true },
-    { id: 'gemini-3.5-flash', paid: true }, { id: 'gemini-3.5-flash-lite', paid: true },
-    { id: 'gemini-3.6-flash', paid: true }, { id: 'gemini-3.7-flash', paid: true },
-    { id: 'qwen3.8-max-free' },
-  ],
+  // TokenRouter's catalogue comes from its live, keyless /api/pricing endpoint
+  // (see its PROVIDERS entry). There is deliberately NO curated fallback list:
+  // the previous one used bare ids (claude-sonnet-4) and a `-free` marker,
+  // while TokenRouter actually serves OpenRouter-style `org/model` slugs with a
+  // `:free` suffix, so it advertised ids the API would reject and missed the one
+  // genuinely free model. Never reintroduce a hand-written list here — if the
+  // pricing endpoint ever stops responding, report zero models instead.
+  tokenrouter: [],
   mistral: [
     'mistral-small-latest', 'ministral-8b-latest',
     { id: 'mistral-large-latest', paid: true }, { id: 'codestral-latest', paid: true },
@@ -151,15 +166,38 @@ function parseGemini(html) {
 
 function parseMistral(html) {
   const out = new Set();
-  const re = /((?:mistral|codestral|ministral|magistral|pixtral)(?:-[\w.\-]+)?|open-(?:mistral|mixtral|codestral)-[\w.\-]+)/gi;
+  // Broad sweep first, then filtered down to servable chat models. The docs page
+  // is prose wrapped around the catalogue, so the raw pattern also matches
+  // tutorial scaffolding ("…-readme", "mistral-agents-…-readme",
+  // "mistral-connectors-02-build-a-quickstart-generator") and, more importantly,
+  // real-but-NON-chat products that the API rejects on /v1/chat/completions
+  // (mistral-color-*, mistral-embed*, mistral-moderation-*, mistral-ocr-*,
+  // mistral-saba-*, mistral-rag-*, …). Those used to reach the model picker, and
+  // because the picker defaults to the first entry the Test Connection button
+  // failed with "Invalid model: mistral-color-3".
+  const re = /((?:open-)?(?:mistral|mixtral|codestral|ministral|magistral|devstral|pixtral|meltemi)[a-z0-9]*(?:-[a-z0-9.]+)+)/gi;
+  // Endpoints/products that are not chat completions, plus documentation noise.
+  const DENY = /embed|moderation|ocr|color|image|audio|saba|agent|rag|classif|function|evaluat|compute|data|mlflow|plan|safety|plugin|mamba|code-interpreter|enterprise|transcri|guard|detox|judge|citation|benchmark|readme|example|quickstart|connectors?|sdk|install|cookbook|guide|prompting/;
+  // A servable id ends in a real version shape: compact date (2508), dotted date
+  // (3-1-25-08), open release (0-1), size parameter (7b, 8x7b) or -latest. This
+  // rejects bare version fragments such as "mistral-large" or "mistral-medium-3"
+  // that appear in headings but are not API ids.
+  const VERSION = /(?:-[0-9]{4}|-[0-9]{2}-[0-9]{2}(?:-[0-9]{2})?|-[0-9]+-[0-9]+|-[0-9]+b(?:-latest)?|-[0-9]+x[0-9]+b(?:-latest)?|-latest)$/;
   let m;
   while ((m = re.exec(html))) {
-    const t = m[1].toLowerCase().replace(/\\$/, '');
-    if (!t.includes('-')) continue;
-    if (/(^-ai|models|weight|opener|-models|-ai$)/.test(t)) continue;
+    const t = m[1].toLowerCase();
+    if (t.length > 40) continue;
+    if (/[_/\\]/.test(t)) continue;
+    if (DENY.test(t)) continue;
+    if (!VERSION.test(t)) continue;
     out.add(t);
   }
-  return [...out];
+  // Order flagship families first so the default selection (the first row, which
+  // is what an unconfigured Test Connection uses) is a sensible chat model
+  // instead of whatever the docs happened to mention first.
+  const RANK = ['mistral-large', 'mistral-medium', 'mistral-small', 'mistral-mini', 'magistral', 'devstral', 'codestral', 'ministral', 'pixtral', 'mixtral', 'open-mistral', 'open-mixtral', 'open-codestral'];
+  const rank = (id) => { const i = RANK.findIndex((f) => id.startsWith(f)); return i === -1 ? RANK.length : i; };
+  return [...out].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 // ─── Parsers for the previously static-only gateways ───

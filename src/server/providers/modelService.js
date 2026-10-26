@@ -1,6 +1,7 @@
 import { norm } from '../utils/index.js';
 import { PROVIDERS, STATIC_MODELS, PROVIDER_SITES, SCRAPE_PARSERS } from './registry.js';
 import { modelCache, FETCH_TIMEOUT } from './modelCache.js';
+import { normalizePricing } from './modelClassifier.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  Model fetch service — resolves a provider's model list through a
@@ -65,11 +66,25 @@ async function fetchModelsForProvider(provider, key = '') {
       models = list.map((m) => ({
         id: m.id,
         name: m.display_name || m.name || m.id,
-        pricing: m.pricing || null,
+        pricing: normalizePricing(m.pricing),
         capabilities: m.capabilities || null,
         architecture: m.architecture || null,
         context_length: m.context_length || m.contextLength || null,
       }));
+    }
+    // Drop models the provider declares as non-chat (Groq lists whisper STT,
+    // reranker and moderation models alongside chat ones; selecting those makes
+    // Claude Code fail with a max_tokens/context_window 400). Applied after
+    // mapping so it covers every id shape the endpoint returns.
+    if (provider.excludeModels && models.length) {
+      const before = models.length;
+      models = models.filter((m) => m && m.id && !provider.excludeModels.test(m.id));
+      if (models.length !== before) {
+        // A provider that declares exclusions but returns ONLY excluded models
+        // would otherwise silently look empty; fall through to the other
+        // sources by clearing the list.
+        if (!models.length) models = [];
+      }
     }
   }
 
@@ -137,10 +152,17 @@ async function fetchModelsForProvider(provider, key = '') {
     return { ok: true, count: models.length, provider: id, source: 'website' };
   }
 
-  // No models could be reliably fetched. Per the honesty rules we never show
-  // hard-coded/curated model names as if they were live — the list must come
-  // from a real source (live API, public pricing API, or website scrape). If
-  // all of those fail we report zero models rather than fabricating names.
+  // No live source produced models. Per the honesty rules we never present a
+  // curated list AS IF it were live — the list must come from a real source (live
+  // API, public pricing API, or website scrape). If all of those fail we report
+  // zero models rather than fabricating names.
+  //
+  // There is deliberately no curated-list fallback here. A previous attempt
+  // added a `staticFallback` opt-in, but it surfaced a hand-written list whose
+  // ids did not match the gateway's real conventions — strictly worse than an
+  // empty list, because the user cannot tell invented ids from real ones.
+  // Providers with a key-gated catalogue must expose a genuine public source
+  // (TokenRouter: /api/pricing) instead.
   modelCache[id] = { models: [], fetchedAt: Date.now(), total: 0 };
   return { ok: false, error: apiFailed ? 'api failed' : 'no models' };
 }
@@ -169,7 +191,10 @@ async function scrapeModelsForProvider(provider) {
     clearTimeout(timeout);
     if (!r.ok) return null;
     const html = await r.text();
-    const ids = parse(html);
+    let ids = parse(html);
+    // Same non-chat exclusion as the keyed /models path, so the keyless docs
+    // scrape never offers speech/reranker/moderation models either.
+    if (provider.excludeModels) ids = ids.filter((id) => !provider.excludeModels.test(id));
     if (!ids.length) return null;
     // When a provider's catalogue is paid by default (e.g. TokenRouter, where
     // only explicitly `-free`/`:free` models are a temporary free promo), mark
@@ -209,10 +234,12 @@ async function fetchFromPublicListApi(provider) {
     const models = list
       .filter((m) => m && m.id)
       .map((m) => {
-        const p = m.pricing || {};
+        // Flatten any pricing shape (flat object or Requesty-style array of
+        // volume tiers) so the paid flag and pricing row stay honest.
+        const p = normalizePricing(m.pricing) || {};
         const price = (v) => (v == null ? null : Number(v));
-        const prompt = price(p.prompt ?? p.input_price);
-        const completion = price(p.completion ?? p.output_price);
+        const prompt = price(p.prompt ?? p.input ?? p.input_price);
+        const completion = price(p.completion ?? p.output ?? p.output_price);
         return {
           id: m.id,
           name: m.name || m.id,
@@ -255,11 +282,12 @@ async function fetchFromPricingApi(provider) {
     if (!r.ok) return null;
     const data = await r.json();
     const list = Array.isArray(data?.data) ? data.data : [];
-    // Same classification rules as customModelFetch.tryPricingApi so every
-    // gateway is counted identically: the gateway's is_free flag and the
-    // `:free`/`-free` id convention are free regardless of the quota weight;
-    // a money-priced model (model_money/model_price > 0, quota_type 1) is paid
-    // even when its quota ratio is 0; everything else with a zero quota is free.
+    // Free/paid classification: only an EXPLICIT signal marks a model free — the
+    // gateway's own is_free flag or the `:free`/`-free` id convention. A money
+    // price (model_money/model_price > 0) always wins and marks it paid, even at
+    // ratio 0. An ambiguous zero rate with no free marker resolves to PAID,
+    // because claiming free without a real signal is the one mistake the UI
+    // cannot recover from (see the per-field notes below).
     const markerFree = /(^|[:._\-\s/])free(?=$|[:._\-\s/])/i;
     const models = list
       .filter((m) => m && (m.alias || m.model_name || m.id))
@@ -269,12 +297,30 @@ async function fetchFromPricingApi(provider) {
         const compRatio = Number(m.completion_ratio ?? NaN);
         const money = Number(m.model_money ?? m.model_price ?? NaN);
         const flaggedFree = m.is_free === true || m.is_free === 1 || m.free === true || m.free === 1 || m.isFree === true;
-        const zeroCredit = flaggedFree || markerFree.test(id) ||
-          (Number.isFinite(ratio) && ratio === 0 && money === 0);
-        const paid = !zeroCredit &&
-          ((Number.isFinite(ratio) && ratio !== 0) || (Number.isFinite(money) && money > 0) || Number(m.model_price) > 0);
-        const inP = paid && Number.isFinite(ratio) && ratio > 0 ? ratio : (paid && Number.isFinite(money) && money > 0 ? money : 0);
-        const outP = paid && Number.isFinite(compRatio) && compRatio > 0 ? compRatio : inP;
+        // Free requires an EXPLICIT signal — the gateway's own is_free flag or the
+        // `:free`/`-free` id convention.
+        //
+        // A bare model_ratio of 0 is NOT a free signal. On TokenRouter, for
+        // instance, `stealth/union-alpha` and `stealth/ox-alpha` publish the same
+        // ratio 0 / price 0 / quota_type 0 row as the genuinely free
+        // `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`, but only the
+        // latter is actually free — the others are zero-weighted placeholders
+        // that still bill. Treating ratio 0 as free invented two free models, so
+        // an ambiguous zero rate now resolves to PAID and we never claim free
+        // without a real signal. Verified safe for the other pricingApi
+        // providers: agentrouter has no zero-ratio rows at all, and all four of
+        // orcarouter's zero-ratio rows carry the `:free` marker.
+        const paidSignal = (Number.isFinite(ratio) && ratio !== 0)
+          || (Number.isFinite(money) && money > 0)
+          || Number(m.model_price) > 0;
+        const isFree = !paidSignal && (flaggedFree || markerFree.test(id));
+        // A paid model must never carry zero pricing: the client's free/paid
+        // classifier reads input/output and treats 0 as free, so an unknown rate
+        // falls back to the codebase's honest "paid, price unknown" default of 1.
+        const inP = isFree ? 0
+          : (Number.isFinite(ratio) && ratio > 0 ? ratio
+            : (Number.isFinite(money) && money > 0 ? money : 1));
+        const outP = isFree ? 0 : (Number.isFinite(compRatio) && compRatio > 0 ? compRatio : inP);
         return {
           id,
           name: id,
@@ -282,8 +328,8 @@ async function fetchFromPricingApi(provider) {
           // server isFreeModel reads prompt/completion, the client reads input/output.
           pricing: { prompt: inP, completion: outP, input: inP, output: outP },
           supported_endpoint_types: Array.isArray(m.supported_endpoint_types) ? m.supported_endpoint_types : null,
-          free: !paid,
-          paid,
+          free: isFree,
+          paid: !isFree,
         };
       });
     if (!models.length) return null;

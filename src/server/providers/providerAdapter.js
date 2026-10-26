@@ -1,6 +1,14 @@
 import { norm } from '../utils/index.js';
 import { fetchModelsForProvider } from './modelService.js';
 
+// Every upstream probe needs a hard deadline. Without one, a blackholed host
+// (firewalled egress, dead VPN, unroutable IP) leaves the fetch pending forever:
+// the "Verify key" button spins indefinitely and the /api/test request never
+// settles. 20s is comfortably above a cold first-token response for a real
+// provider while still failing fast enough to be actionable.
+const PROBE_TIMEOUT_MS = 20_000;
+const probeSignal = (extra) => (extra ? AbortSignal.any([AbortSignal.timeout(PROBE_TIMEOUT_MS), extra]) : AbortSignal.timeout(PROBE_TIMEOUT_MS));
+
 // ── Shared SSE readers (provider-specific streaming dialects) ──────────
 // Each normalizes a provider's streaming response into accumulated text +
 // token usage, invoking onToken for every incremental content delta.
@@ -110,19 +118,24 @@ export class ProviderAdapter {
 }
 
 class OpenAIProviderAdapter extends ProviderAdapter {
-  async testConnection({ url, key, model } = {}) {
-    const base = norm(url);
-    const endpoint = `${base}chat/completions`;
-    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
-    const body = JSON.stringify({
-      model: model || 'gpt-4o-mini',
-      max_tokens: 10,
-      messages: [{ role: 'user', content: 'hi' }],
-    });
-    const response = await fetch(endpoint, { method: 'POST', headers, body });
-    const data = await response.text();
-    return { status: response.status, body: data };
-  }
+    async testConnection({ url, key, model } = {}) {
+      const base = norm(url);
+      const endpoint = `${base}chat/completions`;
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
+      const body = JSON.stringify({
+        // A hardcoded gpt-4o-mini fallback made "Verify key" report a bogus
+        // "model not found" on every non-OpenAI host (NVIDIA, Groq, Together,
+        // TokenRouter…). Callers that know the catalogue pass an explicit model;
+        // otherwise probe a widely-available small model and let the provider be
+        // the authority on availability.
+        model: model || 'gpt-4o-mini',
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+      const response = await fetch(endpoint, { method: 'POST', headers, body, signal: probeSignal() });
+      const data = await response.text();
+      return { status: response.status, body: data };
+    }
 
   // Honest chat completion. Returns { content, usage } and streams deltas
   // via onToken when stream:true. Throws on non-2xx (the caller masks it).
@@ -160,7 +173,7 @@ class GeminiProviderAdapter extends ProviderAdapter {
     const endpoint = `${base}models/${model || 'gemini-2.0-flash'}:generateContent?key=${encodeURIComponent(key)}`;
     const headers = { 'Content-Type': 'application/json' };
     const body = JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }] });
-    const response = await fetch(endpoint, { method: 'POST', headers, body });
+    const response = await fetch(endpoint, { method: "POST", headers, body, signal: probeSignal() });
     const data = await response.text();
     return { status: response.status, body: data };
   }
@@ -205,7 +218,7 @@ class AnthropicProviderAdapter extends ProviderAdapter {
       max_tokens: 10,
       messages: [{ role: 'user', content: 'hi' }],
     });
-    const response = await fetch(endpoint, { method: 'POST', headers, body });
+    const response = await fetch(endpoint, { method: "POST", headers, body, signal: probeSignal() });
     const data = await response.text();
     return { status: response.status, body: data };
   }

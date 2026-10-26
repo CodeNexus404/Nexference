@@ -100,14 +100,20 @@ export function registerModelRoutes(app) {
     if (providerId) {
       const p = PROVIDERS.find(x => x.id === providerId);
       if (!p) return res.status(404).json({ error: 'Unknown provider' });
-      const result = await fetchModelsForProvider(p, key || '');
-      if (result.ok) modelCache[p.id].source = 'manual';
-      return res.json(result);
+      const result = await fetchModelsForProvider(p, key || '');      if (result.ok && result.source !== 'static') modelCache[p.id].source = 'manual';
+      // Return the resolved list, not just a count: callers that pass a transient
+      // key (e.g. the local-proxy dialog) need the real model ids to populate a
+      // picker without a second round-trip.
+      return res.json({
+        ...result,
+        models: result.ok ? (modelCache[p.id]?.models || []) : [],
+        freeModels: result.ok ? (modelCache[p.id]?.models || []).filter((m) => isFreeModel(p.id, m)) : [],
+      });
     }
     const results = await Promise.allSettled(
       PROVIDERS.map(async (p) => {
         const result = await fetchModelsForProvider(p, key || '');
-        if (result.ok) modelCache[p.id].source = 'manual';
+        if (result.ok && result.source !== 'static') modelCache[p.id].source = 'manual';
         return { id: p.id, ...result };
       })
     );

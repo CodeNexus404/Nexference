@@ -11,10 +11,39 @@
 // discover / normalize.
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { PROVIDER_CATEGORIES } from '../constants.js';
 
 const FETCH_TIMEOUT_MS = 8000;
+
+// UTF-8 BOM is common in files edited on Windows (Notepad/PowerShell). JSON.parse
+// rejects it, so strip it before parsing on every platform.
+function stripBom(text) {
+  return text && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+// Resolve a source path the same way on macOS, Linux and Windows:
+//   • file:// URLs are decoded to a filesystem path
+//   • absolute paths (POSIX or Windows drive) are used as-is
+//   • relative paths always resolve against the repo root, never process.cwd()
+//   • both / and \ separators are accepted so a registry written on one platform
+//     keeps working on another
+// `pathApi` is injectable so the Windows branch can be tested from any host.
+export function resolveSourcePath(baseDir, p, pathApi = path) {
+  if (typeof p !== 'string' || !p.trim()) return null;
+  const raw = p.trim();
+  if (/^file:\/\//i.test(raw)) {
+    try { return pathApi.normalize(fileURLToPath(raw)); } catch { return null; }
+  }
+  // Preserve a leading one/two-separator prefix (POSIX root, Windows drive root,
+  // UNC share such as \\server\share) while normalising the rest.
+  const lead = raw.match(/^[\\/]{1,2}/);
+  const prefix = lead ? lead[0].replace(/[\\/]/g, pathApi.sep) : '';
+  const rest = raw.slice(prefix.length).replace(/[\\/]+/g, pathApi.sep);
+  const normalized = prefix + rest;
+  return pathApi.isAbsolute(normalized) ? pathApi.normalize(normalized) : pathApi.resolve(baseDir, normalized);
+}
 
 async function fetchWithTimeout(url, ms) {
   const ctrl = new AbortController();
@@ -79,9 +108,10 @@ export function createStructuredRegistrySource(config, { baseDir }) {
     const errors = [];
     for (const p of config.paths || []) {
       try {
-        const file = join(baseDir, p);
+        const file = resolveSourcePath(baseDir, p);
+        if (!file) { errors.push(`invalid path ${p}`); continue; }
         if (!existsSync(file)) { errors.push(`missing file ${p}`); continue; }
-        raw.push(...coerceCandidates(JSON.parse(readFileSync(file, 'utf8'))));
+        raw.push(...coerceCandidates(JSON.parse(stripBom(readFileSync(file, 'utf8')))));
       } catch (e) { errors.push(`file ${p}: ${e.message}`); }
     }
     for (const u of config.rawUrls || []) {

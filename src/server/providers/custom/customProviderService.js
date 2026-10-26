@@ -247,11 +247,11 @@ export async function updateCustomProvider(id, input) {
     updated.integration = { status: 'unverified' };
   }
 
-  // Auto-resolve a logo when the site/base URL was edited and the provider does
-  // not already carry an uploaded/strong logo. Best-effort — network failures
-  // keep the current logo untouched.
-  const explicitLogo = input.logo;
-  if (!explicitLogo || !explicitLogo.url) {
+  // Auto-resolve a logo when the site/base URL was edited and the client did not
+  // explicitly manage the logo in this update. Passing `logo` (even with a null
+  // URL, e.g. an explicit "initials" choice) is authoritative — we never re-scrape
+  // over it. Best-effort — network failures keep the current logo untouched.
+  if (input.logo === undefined) {
     const urlKey = (v) => sanitizeUrl(v) || '';
     const urlChanged =
       (input.website !== undefined && urlKey(input.website) !== urlKey(existing.identity.website)) ||

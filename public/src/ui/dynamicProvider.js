@@ -3,11 +3,13 @@
 // integration state, provenance, models, and connection status.
 //
 // No secrets are ever shown: the modal displays metadata + test OUTCOME only.
-import { esc } from '../components/util.js';
+  import { esc } from '../components/util.js';
+  import { claudeCodeCompatibility } from '../providers/registry.js';
 import { router } from '../core/router.js';
 import { notify } from '../core/notifications.js';
 import { openModal, closeModal, confirmModal } from '../components/modal.js';
-import { renderTimeline } from '../components/intelligenceTimeline.js';
+  import { renderTimeline } from '../components/intelligenceTimeline.js';
+  import { renderProxyPanel } from './customProvider.js';
 import { integrationSectionHTML } from './providerIntegrations.js';
 
 function initials(name) {
@@ -39,33 +41,6 @@ function timeLabel(ts) {
 }
 
 // Card used inside the Cloud Providers grid (mirrors the curated card silhouette).
-export function dynamicProviderCard(p) {
-  const source = p.source || {};
-  const integ = p.integration || {};
-  const models = p.modelSupport || {};
-  const cfg = integ.level === 'adapter-ready' || integ.level === 'configurable';
-  const modelList = models.models || [];
-  const modelChips = modelList.slice(0, 3).map((m) => `<span class="chip chip-sm">${esc(m.name || m.modelId)}</span>`).join(' ');
-  const meta = [
-    badge('Ecosystem', 'badge-muted'),
-    integrationBadge(integ.level),
-    models.status && models.status !== 'unknown' ? badge(`${models.count} models`, 'badge-info') : '',
-  ].join(' ');
-  return `<div class="panel provider-card eco-cp-card" data-id="${esc(p.id)}" role="button" tabindex="0">
-    <div class="pc-head">
-      <div class="pc-logo-sm">${logoHtml(p)}</div>
-      <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(p.category || 'discovered')}</span></div>
-    </div>
-    ${modelList.length ? `<div class="eco-card-models">${modelChips}${models.count > 3 ? `<span class="chip chip-sm muted">+${models.count - 3} more</span>` : ''}</div>` : `<div class="eco-card-models muted">no discovered models</div>`}
-    <div class="pc-card-foot">
-      <span class="badge pi-src">ecosystem</span>
-      ${integrationBadge(integ.level)}
-      ${p.status === 'inactive' ? badge('inactive', 'badge-warn') : ''}
-    </div>
-    <div class="pc-intel-row"><span class="pi-status">${cfg ? 'configurable' : 'discovery only'}</span><span class="pi-checked">· ${esc(source.name || 'unknown')}</span></div>
-    <div class="pc-intel-row"><span class="pi-checked">updated ${timeLabel(p.lastUpdated)}</span></div>
-  </div>`;
-}
 
 async function openDynamicProvider(id) {
   let p;
@@ -82,6 +57,7 @@ async function openDynamicProvider(id) {
   const models = p.modelSupport || {};
   const connectionText = integ.status === 'tested' ? 'Tested (a real connection check succeeded)' : 'Not tested';
   const actions = actionButtons(p);
+  const proxyDescriptor = proxyDescriptorFor(p);
 
   const modelRows = (models.models && models.models.length)
     ? models.models.slice(0, 12).map((m) => `<span class="chip chip-sm">${esc(m.name || m.modelId)}</span>`).join(' ')
@@ -153,6 +129,8 @@ async function openDynamicProvider(id) {
         <h3>Actions</h3>
         <div class="eco-detail-actions">${actions}</div>
 
+        ${proxySectionFor(p)}
+
         <details class="intg-details" open>
           <summary>Provider Integration (v1.9.0)</summary>
           <div data-intg-host class="intg-section">Loading integration…</div>
@@ -167,8 +145,84 @@ async function openDynamicProvider(id) {
         const t = e.target.closest('[data-intg-action]');
         if (t && window.integrationAction) window.integrationAction(t.dataset.intgAction, t.dataset.id);
       });
+
+      // "Claude Code via Nexference" — reuse the shared inline panel instead of
+      // opening a second dialog, matching the curated and custom card surfaces.
+      const proxyHost = b.querySelector('[data-proxy-host]');
+      const proxyBtn = b.querySelector('[data-dp-proxy-toggle]');
+      // The panel reads the key from a host-supplied field; without this the
+      // adopted dialog had no key input and Verify/Connect dead-ended with
+      // "Enter an API key for this provider first."
+      const proxyKey = b.querySelector('[data-dp-proxy-key]');
+      if (proxyHost && proxyBtn) {
+        let rendered = false;
+        proxyBtn.addEventListener('click', async () => {
+          if (!rendered) {
+            rendered = true;
+            proxyHost.hidden = false;
+            try {
+              await renderProxyPanel(proxyHost, proxyDescriptor, id, {
+                getApiKey: () => proxyKey?.value || '',
+              });
+            } catch (err) {
+              rendered = false;
+              proxyHost.hidden = true;
+              notify.toast('Could not load proxy setup: ' + (err?.message || err), 'error');
+            }
+            return;
+          }
+          proxyHost.hidden = !proxyHost.hidden;
+          proxyBtn.textContent = proxyHost.hidden ? 'Set up' : 'Hide setup';
+        });
+      }
     },
   });
+}
+
+// The adopted (`dyn:`) dialog is the third card surface. It previously offered
+// only metadata actions + a throwaway Test Connection, so an OpenAI-compatible
+// adopted provider had NO "Claude Code via Nexference" route at all — the section
+// existed only on curated and custom (cst:) cards. This adds the same inline
+// panel, gated by the shared claudeCodeCompatibility() rule so Anthropic-
+// compatible providers don't get it either.
+function proxyDescriptorFor(p) {
+  // Adopted providers declare their wire format through capabilities/
+  // integration metadata, not the curated `api.format` shape. Only claim the
+  // proxy when the record positively says OpenAI-compatible — never guess from a
+  // truthy-looking string, so we don't offer a route that cannot work.
+  const openaiCompatible = p.capabilities?.openaiCompatible === true
+    || String(p.integration?.adapterType || '').toLowerCase() === 'openai'
+    || String(p.integration?.adapterType || '').toLowerCase() === 'openai-compatible';
+  if (!openaiCompatible) return null;
+  if (p.claudeCode?.anthropicCompatible === true) return null;
+
+  const descriptor = {
+    id: p.id,
+    name: p.name,
+    identity: { name: p.name },
+    api: { baseUrl: p.integration?.baseUrl || p.baseUrl || '', format: 'openai' },
+    format: 'openai',
+  };
+  try {
+    return claudeCodeCompatibility(descriptor).proxy ? descriptor : null;
+  } catch { return null; }
+}
+
+function proxySectionFor(p) {
+  const descriptor = proxyDescriptorFor(p);
+  if (!descriptor) return '';
+  return `
+    <div class="dp-proxy-wrap">
+      <div class="dp-proxy-head">
+        <span class="wizard-title">Claude Code via Nexference</span>
+        <button class="btn btn2 sm" data-dp-proxy-toggle type="button">Set up</button>
+      </div>
+      <div class="form-row">
+        <label>API key</label>
+        <input class="inp" data-dp-proxy-key type="password" placeholder="Paste the key — held in memory only" autocomplete="off" />
+      </div>
+      <div data-proxy-host hidden></div>
+    </div>`;
 }
 
 function actionButtons(p) {

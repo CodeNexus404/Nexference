@@ -3,16 +3,16 @@ import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { theme } from '../core/theme.js';
 import { router } from '../core/router.js';
-import { PROVIDERS, getProvider, providerTags, allProviders, setProviderExtras } from '../providers/registry.js';
+import { PROVIDERS, getProvider, providerTags, allProviders, setProviderExtras, claudeCodeCompatibility } from '../providers/registry.js';
 import { configEngine } from '../config/engine.js';
 import { CopyableRuntime, LocalSettingsRuntime } from '../config/runtimeAdapter.js';
-import { CLIENTS, getClient, isClientSupported } from '../config/clientAdapter.js';
+import { visibleClients, clientsForPage, getClient, isClientSupported } from '../config/clientAdapter.js';
 import { resolveSelection } from '../compatibility/capabilityResolver.js';
 import { levelBadge, compatNoteList, connectionLabel } from '../compatibility/ui.js';
 import { checkClientProvider } from '../compatibility/clientProviderCompatibility.js';
 import { checkClientRuntime } from '../compatibility/clientRuntimeCompatibility.js';
 import { RUNTIMES, getRuntime } from '../runtimes/registry.js';
-import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml } from '../components/util.js';
+import { esc, norm, maskKey, highlightJSON, logoHtml, clientLogoHtml, attributeEscape } from '../components/util.js';
 import { createGatewayCard } from '../components/gatewayCard.js';
 import { adoptedToCustomShape } from '../providers/adoptedProvider.js';
 import { customProviderCard, initCustomProviderActions, openAddCustomProviderWizard, refreshDynamicIndex } from './customProvider.js';
@@ -26,8 +26,95 @@ import { recordActivity, getActivities } from '../core/activityStore.js';
 import { openWorkflow, hasUsableDraft, discardDraft } from '../config/workflow.js';
 import { renderModelLibrary } from '../components/modelLibrary.js';
 import { renderFallbackPanel, refreshFallbackChip } from './fallbackUI.js';
+import {
+  applyAppearance, setAccent, setDensity, setMotion,
+  appearanceSummary, ACCENT_LABELS,
+} from './appearance.js';
 import { modelService } from '../models/modelService.js';
 import { renderModelPicker } from '../components/modelPicker.js';
+import { renderTopology, readProxyState } from '../components/topology.js';
+import { fallbackStore } from '../config/fallbackStore.js';
+
+// Project a client's fallback plan into the shape renderTopology expects.
+// Returns null when the master switch is off or the plan has no configured
+// provider, so the plain chain is shown unchanged.
+//
+// The plan stores references only (provider id + model) — never secrets — so it
+// is safe to read here. Provider ids can be `cst:`/`dyn:`, which getProvider
+// resolves through registryExtras, so a human-readable name is resolved for the
+// rail rather than showing a raw id.
+function readFallbackTopology(client) {
+  if (!client || !client.id) return null;
+  let plan = null;
+  try {
+    if (!fallbackStore.isMasterEnabled()) return null;
+    plan = fallbackStore.getPlan(client.id);
+  } catch { return null; }
+  if (!plan || !plan.enabled) return null;
+
+  // The primary is whichever provider the monitor would switch BACK to. Prefer the
+  // live applied config while the plan sits on its primary, because the user may have
+  // reconfigured the client (through the wizard or a provider card) and the stored
+  // snapshot can lag behind it. Once a switch is in effect (activeTier > 0) the
+  // applied record holds the TIER, not the primary, so the stored plan must win.
+  const applied = workspace.applied;
+  const st0 = fallbackStore.getState(client.id) || {};
+  const activePlan0 = Number.isInteger(st0.activeTier) ? st0.activeTier : 0;
+  const appliedForClient = applied && applied.client === client.id ? applied : null;
+  const livePrimary = appliedForClient && appliedForClient.provider && appliedForClient.model
+    ? { provider: appliedForClient.provider, model: appliedForClient.model }
+    : null;
+  const primarySnapshot = activePlan0 === 0 && livePrimary
+    ? livePrimary
+    : (plan.primary && plan.primary.provider
+      ? { provider: plan.primary.provider, model: plan.primary.model }
+      : (livePrimary || null));
+
+  // Build the DISPLAYED tier list, keeping each tier's ORIGINAL plan index.
+  // Mapping by display position instead of plan index silently mislabels the
+  // active hop when a tier is disabled (plan index 2 shown as the 2nd row would
+  // read as tier 1 and highlight the wrong provider).
+  const tiers = [];
+  if (primarySnapshot) tiers.push({ ...primarySnapshot, enabled: true, planIndex: 0, isPrimary: true });
+  (plan.tiers || []).forEach((t, i) => {
+    if (t && t.enabled && t.provider) {
+      tiers.push({ provider: t.provider, model: t.model, enabled: true, planIndex: i + 1, isPrimary: false });
+    }
+  });
+  if (!tiers.length) return null;
+
+  for (const t of tiers) {
+    const p = getProvider(t.provider);
+    t.providerName = p?.name || t.provider;
+    // OpenAI-shaped providers cannot be read directly by Claude Code — the monitor
+    // arms the loopback proxy for them. The topology has to show that hop, or it
+    // would draw a path that does not exist.
+    let viaProxy = false;
+    if (p) {
+      try {
+        const c = claudeCodeCompatibility(p);
+        viaProxy = !!(c && c.proxy && !c.anthropic);
+      } catch { viaProxy = false; }
+    }
+    t.viaProxy = viaProxy;
+  }
+
+  const st = fallbackStore.getState(client.id) || {};
+  const activePlanIndex = Number.isInteger(st.activeTier) ? st.activeTier : 0;
+  const active = tiers.find((t) => t.planIndex === activePlanIndex) || tiers[0];
+  return {
+    enabled: true,
+    activeTier: active.planIndex,
+    degraded: !!st.degraded,
+    failThreshold: plan.knobs?.failThreshold ?? 2,
+    cooldownMin: plan.knobs?.cooldownMin ?? 5,
+    tiers,
+    // Only draw the proxy hop when the ACTIVE hop actually needs it. Arming the
+    // proxy for an Anthropic tier that Claude Code reads directly would imply a
+    // detour that is not happening.
+    activeViaProxy: !!active.viaProxy,
+  };
+}
 import { playgroundService } from '../playground/playgroundService.js';
 import { historyStore } from '../playground/historyStore.js';
 import { miniMarkdown } from '../playground/markdown.js';
@@ -710,28 +797,15 @@ function setCrumb(name) {
   if (c) c.innerHTML = '';
 }
 
-function getGreeting(hour) {
-  if (hour < 5) return 'Good night';
-  if (hour < 8) return 'Good early morning';
-  if (hour < 12) return 'Good morning';
-  if (hour < 17) return 'Good afternoon';
-  if (hour < 21) return 'Good evening';
-  return 'Good night';
-}
-
 export function renderWorkspace() {
   updateCrumb('Workspace');
   const section = document.getElementById('page-workspace');
   if (!section) return;
 
-  const now = new Date();
-  const hour = now.getHours();
-  const greet = getGreeting(hour);
-
   section.innerHTML = `
     <div class="page-head reveal-f">
       <div>
-        <h1>${greet}</h1>
+        <h1>Workspace</h1>
         <p>Nexference reads your environment — installed clients, local runtimes, models and hardware — and shows what you can safely configure.</p>
       </div>
       <button class="btn btn2" id="wsRefresh" onclick="refreshWorkspace()">Refresh environment</button>
@@ -766,7 +840,7 @@ async function fetchEnvironment(force) {
   try {
     const res = await fetch('/api/environment' + (force ? '/refresh' : ''));
     const env = await res.json();
-    renderWorkspaceFromEnv(env);
+    await renderWorkspaceFromEnv(env);
 
   } catch {
     body.innerHTML = '<div class="panel"><div class="muted">Could not load environment state.</div></div>';
@@ -774,7 +848,8 @@ async function fetchEnvironment(force) {
 }
 
 
-function renderWorkspaceFromEnv(env) {
+// Async so the topology can read live proxy state before the first paint.
+async function renderWorkspaceFromEnv(env) {
   const body = document.getElementById('wsBody');
   if (!body) return;
   const health = env.health || {};
@@ -849,7 +924,43 @@ function renderWorkspaceFromEnv(env) {
     unknown: ['dev-idle', 'Detecting…'],
   };
   const [dotCls, dotLabel] = dotMap[healthStatus] || dotMap.unknown;
-  const loadedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const healthTitle = {
+    'healthy': 'Connection healthy — everything checks out.',
+    'attention': 'A provider or runtime needs review.',
+    'config-required': 'No client configuration written yet.',
+    'partial': 'Partially configured — some pieces are missing.',
+    'offline': 'Not reachable right now.',
+    'critical': 'A hard failure was detected.',
+    'unknown': 'Status not determined yet.',
+  }[healthStatus] || 'Status not determined yet.';
+  const devStatusHTML = `
+    <button class="dev-status" type="button" onclick="openHealthModal()" title="${esc(healthTitle)}" aria-label="${esc(healthTitle)}">
+      <span class="dev-dot ${dotCls}" aria-hidden="true"></span>
+      <span class="dev-status-label">${esc(dotLabel)}</span>
+      <svg class="dev-status-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"></polyline></svg>
+    </button>`;
+
+  const proxyState = await readProxyState();
+  // Does the CURRENTLY ACTIVE provider need the proxy? An armed session is not
+  // sufficient: a leftover armed session must not make the diagram claim a hop
+  // that no longer exists once the user moves to an Anthropic-compatible provider.
+  let activeNeedsProxy = false;
+  try {
+    if (activeProvider) {
+      const c = claudeCodeCompatibility(activeProvider);
+      activeNeedsProxy = !!(c && c.proxy && !c.anthropic);
+    }
+  } catch { activeNeedsProxy = false; }
+  const workspaceTopologyHTML = renderTopology({
+    client: { name: client.name, icon: ICON.client },
+    provider: activeProvider ? { name: activeProvider.name, icon: ICON.provider } : null,
+    runtime: activeRuntime ? { name: activeRuntime.name, icon: ICON.runtime } : null,
+    model: cfgModel, modelIcon: ICON.model,
+    proxy: { ...proxyState, icon: ICON.provider, requiredForActive: activeNeedsProxy },
+    configPath: client.configPath,
+    providerIcon: ICON.provider,
+    fallback: readFallbackTopology(client),
+  });
 
   body.innerHTML = `
     <div class="ws-hero">
@@ -859,76 +970,75 @@ function renderWorkspaceFromEnv(env) {
       <div class="ws-kpi reveal-f" style="--d:.16s"><span class="kpi-ico">${ICON.model}</span><b>${models.length}</b><span>Models</span><small>available on device</small></div>
     </div>
 
-    <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
-      <div class="ws-health-head">
-        <div>
-          <span class="ws-eyebrow">Environment Health</span>
-          <span class="badge ${health.status === 'healthy' ? 'configured' : health.status === 'critical' ? 'unsupported' : 'browse'}">${esc(health.status || 'unknown')}</span>
+      <div class="panel ws-health ${health.status || 'neutral'} reveal" style="--d:.05s">
+        <div class="ws-health-head">
+          <div class="ws-health-titles">
+            <span class="ws-eyebrow">Environment Health</span>
+            <span class="ws-health-state">${esc(healthTitle)}</span>
+          </div>
+          <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
         </div>
-        <button class="btn ghost sm" onclick="openHealthModal()" style="margin-left:auto">Details</button>
+        ${(() => {
+          const factors = health.factors || [];
+          if (!factors.length) return '<p class="ws-health-summary">Status unknown.</p>';
+          // Only REQUIRED checks gate health. Optional ones (local runtime / local
+          // models on a cloud setup) are collapsed into a single muted footnote so
+          // the card stays short and never implies work the user declined.
+          const applicable = factors.filter((f) => !f.optional);
+          const optional = factors.filter((f) => f.optional);
+          const bad = applicable.filter((f) => !f.ok);
+          const good = applicable.filter((f) => f.ok);
+          const pct = applicable.length ? Math.round((good.length / applicable.length) * 100) : 100;
+          const row = (f) => `<div class="health-factor bad"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`;
+          return `
+            <div class="ws-health-meter" role="img" aria-label="${good.length} of ${applicable.length} required checks passing">
+              <div class="ws-health-meter-track"><span class="ws-health-meter-fill" style="width:${pct}%"></span></div>
+              <div class="ws-health-meter-meta">
+                <b>${pct}%</b>
+                <span>${good.length}/${applicable.length} checks${bad.length ? ` · <b class="bad-n">${bad.length} to fix</b>` : ''}</span>
+              </div>
+            </div>
+            ${bad.length ? `<div class="ws-health-group">${bad.map(row).join('')}</div>` : ''}
+            ${optional.length ? `<p class="ws-health-foot">${optional.length} optional check${optional.length > 1 ? 's' : ''} not required \u2014 ${esc(optional.map((f) => f.label.toLowerCase()).join(', '))}.</p>` : ''}
+            ${healthAction}`;
+        })()}
       </div>
-      <p class="ws-health-headline">${esc(healthHeadline)}</p>
-      <p class="ws-health-summary">${esc(health.summary || 'Status unknown.')}</p>
-      ${healthAction}
-      <div class="health-factors">
-        ${(health.factors || []).map((f) => `<div class="health-factor ${f.ok ? 'ok' : 'bad'}"><span class="hf-dot"></span><div><b>${esc(f.label)}</b><span class="muted">${esc(f.detail || '')}</span></div></div>`).join('')}
-      </div>
-    </div>
 
     <div class="panel ws-quick reveal" style="--d:.07s">
       <span class="ws-eyebrow">Quick Actions</span>
       <div class="qa-grid">
         <button class="qa-card" onclick="openWorkflow()">
           <span class="qa-ico">${ICON.config}</span>
-          <span class="qa-text"><b>Configure Client</b><small>Open the guided configuration workspace</small></span>
+          <span class="qa-text"><b>Configure</b><small>Guided setup</small></span>
         </button>
         <button class="qa-card" onclick="navigate('models')">
           <span class="qa-ico">${ICON.model}</span>
-          <span class="qa-text"><b>Explore Models</b><small>Browse the cloud and local catalogue</small></span>
+          <span class="qa-text"><b>Models</b><small>Browse catalogue</small></span>
         </button>
         <button class="qa-card" onclick="navigate('playground')">
           <span class="qa-ico">${ICON.play}</span>
-          <span class="qa-text"><b>Test Playground</b><small>Run a model and inspect metrics</small></span>
+          <span class="qa-text"><b>Playground</b><small>Test a model</small></span>
         </button>
         <button class="qa-card" onclick="navigate('localai')">
           <span class="qa-ico">${ICON.runtime}</span>
-          <span class="qa-text"><b>Local Runtime</b><small>Manage Ollama / LM Studio</small></span>
+          <span class="qa-text"><b>Runtimes</b><small>Ollama, LM Studio</small></span>
         </button>
       </div>
-    </div>
-
-    <div class="panel ws-summary reveal" style="--d:.15s">
-      <h3>Environment Overview</h3>
-      <div class="stat-row"><div class="stat"><b>${installedClients.length}</b><span>clients detected</span></div><div class="stat"><b>${providersConfigured}</b><span>providers configured</span></div></div>
-      <div class="stat-row"><div class="stat"><b>${runningRt.length}</b><span>runtimes running</span></div><div class="stat"><b>${models.length}</b><span>local models</span></div></div>
-    </div>
-
-    <div class="panel ws-next reveal" style="--d:.20s">
-      <h3>Recommendations</h3>
-      <div class="ws-next-body">${recs.map((r) => `<div class="ws-next-item">${esc(r)}</div>`).join('')}</div>
     </div>
 
     <div class="panel ws-config ws-full reveal" style="--d:.10s">
       <div class="ws-config-head">
-        <span class="ws-eyebrow">Current Workspace</span>
-        <span class="dev-status"><span class="dev-dot ${dotCls}"></span><span>${esc(dotLabel)}</span></span>
+          <span class="ws-eyebrow">Current Workspace</span>
+          <span class="dev-status-slot">${devStatusHTML}</span>
+        </div>
+        ${workspaceTopologyHTML}
+        <div class="ws-config-foot">
+          <div class="ws-actions-row">
+            <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
+            <button class="btn btn2" onclick="navigate('configuration')">Configuration</button>
+          </div>
       </div>
-      <div class="ws-chain">
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Clients" aria-label="Open Clients page" onclick="navigate('clients')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.client}</span><span class="chain-label">Client</span><b>${esc(client.name)}</b></div>
-        <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Configuration" aria-label="Open Configuration" onclick="navigate('configuration')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.source}</span><span class="chain-label">AI Source</span><b>${esc(connectionLabel(applied ? connType : cfgSource))}</b></div>
-        <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" aria-label="Open ${esc(activeProvider ? 'Providers' : (activeRuntime ? 'Local AI' : 'Providers'))}" onclick="navigate('${activeProvider ? 'cloud-providers' : (activeRuntime ? 'localai' : 'cloud-providers')}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${activeProvider ? ICON.provider : ICON.runtime}</span><span class="chain-label">Provider / Runtime</span><b>${esc(activeProvider ? activeProvider.name : (activeRuntime ? activeRuntime.name : (cfgSource === 'cloud' ? 'detected' : '—')))}</b></div>
-        <span class="chain-arrow" aria-hidden="true">→</span>
-        <div class="chain-node clickable" role="button" tabindex="0" title="Open Model Library" aria-label="Open Model Library" onclick="navigate('models')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><span class="chain-ico">${ICON.model}</span><span class="chain-label">Model</span><b class="mono">${esc(cfgModel || '—')}</b></div>
-      </div>
-      <div class="ws-config-path muted">Config: <span class="mono">${esc(client.configPath || '~/.claude/settings.json')}</span></div>
-      <div class="ws-config-asof">Loaded ${esc(loadedAt)}</div>
-      <div class="ws-actions-row">
-        <button class="btn btn-go" onclick="openWorkflow()">Configure…</button>
-        <button class="btn btn2" onclick="navigate('configuration')">Configuration</button>
-      </div>
-    </div>
+
 
     <div class="panel ws-models reveal" id="wsModelIntel" style="--d:.25s">
       <h3>Model Intelligence</h3>
@@ -1272,7 +1382,7 @@ export function renderCompatibility(host) {
   if (host.id !== 'cfgSubview') host = document.getElementById('cfgSubview');
   if (!host) return;
   const cell = (ok, level) => `<span class="badge ${ok ? level : 'unsupported'}">${ok ? capShort(level) : '—'}</span>`;
-  const clientRows = CLIENTS.map((c) => {
+  const clientRows = visibleClients().map((c) => {
     const provCells = PROVIDERS.map((p) => {
       const r = checkClientProvider(c.id, p.id);
       return `<td title="${esc(p.name)}">${cell(r.compatible, r.level)}</td>`;
@@ -1312,7 +1422,7 @@ export function renderCompatibility(host) {
     const target = isRuntime ? RUNTIMES[idx] : PROVIDERS[idx];
     h.style.cursor = 'pointer';
     h.addEventListener('click', () => {
-      const rows = CLIENTS.map((c) => {
+      const rows = visibleClients().map((c) => {
         const r = isRuntime ? checkClientRuntime(c.id, target.id) : checkClientProvider(c.id, target.id);
         return `<div class="profile-row"><div><b>${esc(c.name)}</b> <span class="muted">${esc(r.level)}</span></div><div>${compatNoteList(r).replace(/^<ul>|<\/ul>$/g, '')}</div></div>`;
       }).join('');
@@ -1428,8 +1538,142 @@ function maskConfigForView(config) {
   return c;
 }
 
-// Shared backup list renderer — fills every known backup container.
-export async function loadBackups() {
+  // ── Backup multi-select ─────────────────────────────────────────
+  // Selection is OPT-IN. A backup list is mostly read (View / Restore), so a
+  // checkbox parked on every row by default turns a passive list into a form the
+  // user has to dismiss. A "Select" button enters select mode; leaving it clears
+  // the selection and restores the plain list.
+  //
+  // State is module-level and shared across every backup container, so entering
+  // select mode in one panel puts the other in it too, and a tick in one stays
+  // ticked in the other. Entries are pruned on load because a backup can
+  // disappear between renders (deleted here, or cleaned up on disk).
+  // How many rows the list renders. Selection is NOT limited to these.
+  const SHOWN_BACKUPS = 12;
+  let _backupSel = new Set();
+  // Every backup id the server knows about, not just the ones rendered. "Select all"
+  // must cover the full list — the visible window is only the 12 most recent, and a
+  // user who ticks "Select all" with 140 backups on disk means all 140, not 12.
+  let _backupAllIds = [];
+  let _backupSelMode = false;
+
+  function updateBackupSelUI() {
+    const n = _backupSel.size;
+    document.querySelectorAll('#bkSelCount').forEach((el) => {
+      el.textContent = n ? `${n} selected` : 'Nothing selected';
+    });
+    document.querySelectorAll('#bkSelDelete').forEach((el) => { el.disabled = n === 0; });
+    document.querySelectorAll('#bkSelClear').forEach((el) => { el.disabled = n === 0; });
+      const all = document.getElementById('bkSelAll');
+      if (all) {
+        const total = _backupAllIds.length;
+        all.checked = total > 0 && n === total;
+        all.indeterminate = n > 0 && n < total;
+      }
+    // In select mode the per-row actions are hidden so the checkbox is the only
+    // thing a click means — otherwise a stray "Delete" on a selected row is
+    // ambiguous about whether it deletes one or the selection.
+      document.querySelectorAll('.backup-row[data-bk-id]').forEach((row) => {
+        const on = _backupSel.has(row.dataset.bkId);
+        row.classList.toggle('is-selected', on);
+        // Mirror the selection onto the REAL input. Without this the row highlight
+        // updated (it is driven by the class above) but the checkbox never received
+        // .checked — so the drawn tick, which is styled off :checked, stayed hidden.
+        // Row clicks go through backupToggleOne() rather than the input's own
+        // onchange, so the input must be updated here or the two can disagree.
+        const input = row.querySelector('input.bk-check');
+        if (input && input.checked !== on) input.checked = on;
+        const box = row.querySelector('.backup-sel-box');
+        if (box) box.hidden = !_backupSelMode;
+        const acts = row.querySelector('.backup-acts');
+        if (acts) acts.hidden = _backupSelMode;
+      });
+    }
+
+  // Enter / leave select mode. Leaving discards the pending selection, which is
+  // what "Done" implies — otherwise a hidden selection could later be deleted
+  // by a toolbar the user thought was showing something else.
+  export function backupToggleSelectMode(on) {
+    _backupSelMode = on === undefined ? !_backupSelMode : !!on;
+    if (!_backupSelMode) _backupSel.clear();
+    document.querySelectorAll('#bkSelectMode').forEach((el) => {
+      el.hidden = _backupSelMode;
+    });
+    document.querySelectorAll('#bkSelBar').forEach((el) => {
+      el.hidden = !_backupSelMode;
+    });
+    // Toggle a class on the list itself rather than relying on a `:has()` selector to
+    // detect select mode, so the row hit-target styling works in every browser.
+    document.querySelectorAll('.backup-list, .backup-rows').forEach((el) => {
+      el.classList.toggle('is-selecting', _backupSelMode);
+    });
+    updateBackupSelUI();
+  }
+
+    // Clicking anywhere on a row (the name, the timestamp, the padding) toggles it in
+    // select mode. Outside select mode the click is ignored, because there a click
+    // means "read this row", not "select it". The per-row action buttons and the
+    // checkbox stop propagation in the markup so they keep their own meaning.
+    export function backupRowClick(ev, id) {
+      if (!_backupSelMode) return;
+      if (ev && ev.target && ev.target.closest && ev.target.closest('button, a, input, label')) return;
+      backupToggleOne(id, !_backupSel.has(id));
+    }
+
+    export function backupToggleOne(id, on) {
+    if (!_backupSelMode) return;
+    if (on) _backupSel.add(id); else _backupSel.delete(id);
+    updateBackupSelUI();
+  }
+
+    // Select-all works over every backup the server reported, not just the rows
+    // currently on screen. Toggling off clears the whole selection the same way.
+    export function backupToggleAll() {
+      if (!_backupSelMode) return;
+      if (_backupSel.size >= _backupAllIds.length) {
+        _backupSel.clear();
+      } else {
+        _backupSel = new Set(_backupAllIds);
+      }
+      updateBackupSelUI();
+    }
+
+  export function backupClearSelection() {
+    _backupSel.clear();
+    updateBackupSelUI();
+  }
+
+  export async function deleteSelectedBackups() {
+    const ids = [..._backupSel];
+    if (!ids.length) return;
+    const label = ids.length === 1 ? 'this backup' : `these ${ids.length} backups`;
+    if (!confirm(`Permanently delete ${label}? This cannot be undone.`)) return;
+    try {
+      const res = await fetch('/api/backups/delete-many', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'delete failed');
+      const gone = (d.deleted || []).length;
+      recordActivity('delete', `Deleted ${gone} backup${gone === 1 ? '' : 's'}`);
+      if (d.failed && d.failed.length) {
+        notify.toast(`Deleted ${gone}, ${d.failed.length} could not be removed`, 'warning');
+      } else {
+        notify.toast(`Deleted ${gone} backup${gone === 1 ? '' : 's'}`, 'info');
+      }
+      // Drop anything that survived, so the next render is not left claiming a
+      // selection that no longer exists on disk.
+      (d.failed || []).forEach((f) => _backupSel.delete(f.id));
+      loadBackups();
+    } catch (err) {
+      notify.toast(`Delete failed: ${err.message}`, 'error');
+    }
+  }
+
+  // Shared backup list renderer — fills every known backup container.
+  export async function loadBackups() {
   const hosts = ['backupListCfg', 'backupList']
     .map((id) => document.getElementById(id))
     .filter(Boolean);
@@ -1443,17 +1687,74 @@ export async function loadBackups() {
       hosts.forEach((h) => { h.innerHTML = '<div class="muted">No backups yet — they’re created automatically when you apply a configuration.</div>'; });
       return;
     }
-    const html = backups.slice(0, 12).map((b) => `
-      <div class="backup-row">
-        <span class="backup-name mono">${esc(b.name)}</span>
-        <span class="backup-time muted">${esc(b.mtime ? new Date(b.mtime).toLocaleString() : '')}</span>
-        <span class="backup-acts">
-          <button class="btn btn2" onclick="openBackupView('${esc(b.id)}')">View</button>
-          <button class="btn btn2" onclick="restoreBackupAction('${esc(b.id)}')">Restore</button>
-          <button class="btn btn2 danger" onclick="deleteBackupAction('${esc(b.id)}')">Delete</button>
-        </span>
-      </div>`).join('');
-    hosts.forEach((h) => { h.innerHTML = html; });
+      // NOTE: the selection is deliberately NOT reset here. loadBackups() re-renders
+      // after a delete or restore, and wiping the selection each time would drop the
+      // user's remaining picks. Select mode itself IS reset, because a fresh list is
+      // the natural end of a bulk operation.
+      const total = backups.length;
+      // The full id set drives "Select all"; only the most recent rows are rendered.
+      _backupAllIds = backups.map((b) => b.id);
+      const shown = backups.slice(0, SHOWN_BACKUPS);
+      // Prune selections for backups that no longer exist (deleted here, or cleaned
+      // up on disk) so a stale tick cannot be included in a bulk delete.
+      const live = new Set(_backupAllIds);
+      _backupSel = new Set([..._backupSel].filter((id) => live.has(id)));
+      // A re-render ends any in-progress selection: the row actions come back and
+      // the checkboxes go away, so the list returns to its normal read/restore form.
+      _backupSelMode = false;
+      // One persistent "Select" button; the select-mode bar is hidden until it is
+      // pressed, so the default list is a plain read/restore list.
+      const selectBtn = total > 1 ? `
+        <div class="backup-head">
+          <button class="btn btn2 sm" id="bkSelectMode" onclick="backupToggleSelectMode()">Select</button>
+          <span class="muted backup-count-hint">${total} backup${total === 1 ? '' : 's'}</span>
+        </div>` : '';
+      const selBar = total > 1 ? `
+        <div class="backup-sel-bar" id="bkSelBar" hidden>
+          <label class="backup-sel-all">
+            <input class="bk-check" type="checkbox" id="bkSelAll" onchange="backupToggleAll()">
+              <span class="bk-tick bk-tick-sm" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor"
+                     stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3.5 8.5l3 3 6-6.5"></path>
+                </svg>
+              </span>
+              <span>Select all ${total}</span>
+          </label>
+          <span class="muted backup-sel-count" id="bkSelCount">Nothing selected</span>
+          <span class="backup-sel-acts">
+            <button class="btn btn2 sm" id="bkSelClear" onclick="backupClearSelection()" disabled>Clear</button>
+            <button class="btn btn2 danger sm" id="bkSelDelete" onclick="deleteSelectedBackups()" disabled>Delete selected</button>
+            <button class="btn btn2 sm" onclick="backupToggleSelectMode(false)">Done</button>
+          </span>
+        </div>` : '';
+        const rows = shown.map((b) => `
+        <div class="backup-row" data-bk-id="${esc(b.id)}"
+             onclick="backupRowClick(event, '${esc(b.id)}')">
+          <label class="backup-sel-box" hidden onclick="event.stopPropagation()">
+            <input class="bk-check" type="checkbox" aria-label="Select backup ${esc(b.name)}"
+                   onchange="backupToggleOne('${esc(b.id)}', this.checked)">
+            <span class="bk-tick" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor"
+                   stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 8.5l3 3 6-6.5"></path>
+              </svg>
+            </span>
+          </label>
+          <span class="backup-name mono">${esc(b.name)}</span>
+          <span class="backup-time muted">${esc(b.mtime ? new Date(b.mtime).toLocaleString() : '')}</span>
+          <span class="backup-acts" onclick="event.stopPropagation()">
+            <button class="btn btn2" onclick="openBackupView('${esc(b.id)}')">View</button>
+            <button class="btn btn2" onclick="restoreBackupAction('${esc(b.id)}')">Restore</button>
+            <button class="btn btn2 danger" onclick="deleteBackupAction('${esc(b.id)}')">Delete</button>
+          </span>
+        </div>`).join('');
+      const more = total > shown.length
+        ? `<div class="muted backup-more">Showing the ${shown.length} most recent of ${total} backups.</div>`
+        : '';
+      const html = selectBtn + selBar + `<div class="backup-rows">${rows}</div>` + more;
+      hosts.forEach((h) => { h.innerHTML = html; });
+      updateBackupSelUI();
   } catch {
     hosts.forEach((h) => { h.innerHTML = '<div class="muted">Could not load backups.</div>'; });
   }
@@ -1789,10 +2090,21 @@ export async function renderLocalAI() {
       rtList.innerHTML = runtimes.map(rt => {
         const planned = !!rt.planned;
         const running = !!rt.running;
-        const detected = !!rt.detected;
-        const status = planned ? 'planned' : (running ? 'running' : (detected ? 'detected' : 'offline'));
-        const badge = planned ? 'Coming soon' : (running ? `${rt.modelCount} models` : (rt.modelCount ? `${rt.modelCount} installed` : (detected ? 'Detected' : 'Offline')));
-        const stateText = planned ? 'Planned' : (running ? 'Running' : (detected ? 'Detected' : 'Offline'));
+        // Four distinct states, because the available action differs in each:
+        //   running     → green, "N models", Disconnect
+        //   installed   → yellow, "Offline",      Start available
+        //   not present → neutral, "Not installed", Start unavailable
+        //   planned     → "Coming soon", no action at all
+        // Collapsing "installed but stopped" into "Offline" hid the fact that Start
+        // would actually work, and collapsing "not installed" into the same word
+        // implied a Start button that cannot succeed.
+        const present = !!(rt.detected || rt.installed);
+        const status = planned ? 'planned' : (running ? 'running' : (present ? 'detected' : 'missing'));
+        const badge = planned ? 'Coming soon'
+          : running ? `${rt.modelCount} models`
+          : present ? 'Offline'
+          : 'Not installed';
+        const stateText = planned ? 'Planned' : (running ? 'Running' : (present ? 'Offline' : 'Not installed'));
         const initial = (rt.name || '?').trim().charAt(0).toUpperCase();
         const logoHTML = `<span class="rt-logo-monogram">${esc(initial)}</span>` + (rt.logo
           ? `<img class="rt-logo-img" src="${esc(rt.logo)}" alt="${esc(rt.name)} logo" loading="lazy" onerror="this.closest('.rt-logo').classList.remove('has-img');this.remove()">`
@@ -1807,7 +2119,7 @@ export async function renderLocalAI() {
             <div class="rt-logo ${rt.logo ? 'has-img' : ''} rt-details" role="button" tabindex="0" data-details="${esc(rt.id)}" title="Runtime details" aria-label="Runtime details" style="--rt:hsl(${rtHue(rt.id)} 68% 58%)">${logoHTML}<span class="rt-info-i" aria-hidden="true">i</span></div>
             <div class="rt-title"><b>${esc(rt.name)}</b><span class="rt-meta">Local runtime</span></div>
             <span class="badge ${status}">${esc(badge)}</span>
-            ${!running && rt.supportsStart ? (rt.installed === false ? `<span class="rt-note-sm" title="Install the app to enable auto-start">Not installed</span>` : `<button class="btn btn-ghost sm rt-start" data-start="${esc(rt.id)}" title="Start ${esc(rt.name)}">Start</button>`) : ''}
+            ${!running && rt.supportsStart ? (!present ? `<span class="rt-note-sm" title="Install the app to enable auto-start">Not installed</span>` : `<button class="btn btn-ghost sm rt-start" data-start="${esc(rt.id)}" title="Start ${esc(rt.name)}">Start</button>`) : ''}
             ${running && rt.models && rt.models.length ? `<button class="btn btn-ghost sm rt-bench" data-bench="${esc(rt.id)}" title="Benchmark a model on ${esc(rt.name)}">Benchmark</button>` : ''}
           </div>
           <div class="rt-desc">${esc(rt.note || '')}</div>
@@ -2031,7 +2343,9 @@ export async function renderLocalAI() {
     if (!rt) return;
     const planned = !!rt.planned;
     const running = !!rt.running;
-    const status = planned ? 'planned' : (running ? 'running' : (rt.detected ? 'detected' : 'offline'));
+    // Matches the card's four states so the badge colour and the details agree.
+    const present = !!(rt.detected || rt.installed);
+    const status = planned ? 'planned' : (running ? 'running' : (present ? 'detected' : 'missing'));
     const models = (rt.models || []).filter(Boolean);
     const caps = rt.capabilities || {};
     const capMap = { local: 'Local', openAICompatible: 'OpenAI-compatible', anthropicCompatible: 'Anthropic-compatible', supportsModelDiscovery: 'Model discovery', supportsModelDownload: 'Model download', supportsChat: 'Chat' };
@@ -2040,7 +2354,7 @@ export async function renderLocalAI() {
     const rows = [
       add('Type', 'Local runtime'),
       add('Status', `<span class="badge ${status}">${esc(status)}</span>`),
-      add('Installed', rt.installed === false ? 'No' : (rt.installed ? 'Yes' : 'Unknown')),
+      add('Installed', present ? 'Yes' : 'No'),
       add('Running', running ? 'Yes' : 'No'),
       add('Detected', rt.detected ? 'Yes' : 'No'),
       add('Models on device', models.length ? String(models.length) : '0'),
@@ -2050,7 +2364,7 @@ export async function renderLocalAI() {
       : '<div class="muted">No models detected on this device.</div>';
     const siteHTML = rt.site ? `<a class="btn btn2" href="${esc(rt.site)}" target="_blank" rel="noopener">Open ${esc(rt.name)} site ↗</a>` : '';
     const actions = [];
-    if (!running && rt.supportsStart && rt.installed !== false) actions.push(`<button class="btn btn-go btn2" id="rtDetStart" type="button">Start runtime</button>`);
+    if (!running && rt.supportsStart && present) actions.push(`<button class="btn btn-go btn2" id="rtDetStart" type="button">Start runtime</button>`);
     if (running) actions.push(`<button class="btn btn-go btn2" id="rtDetBench" type="button">Benchmark</button>`);
     const body = `
       <div class="ml-detail">
@@ -2074,9 +2388,27 @@ export async function renderLocalAI() {
       onMount: (body, ctrl) => {
         body.querySelector('#rtDetClose')?.addEventListener('click', () => ctrl.close());
         const startBtn = body.querySelector('#rtDetStart');
-        if (startBtn) startBtn.addEventListener('click', () => { ctrl.close(); const b = grid.querySelector(`.rt-start[data-start="${rt.id}"]`); if (b) b.click(); });
+        if (startBtn) startBtn.addEventListener('click', async () => {
+          ctrl.close();
+          // Delegate to the card's own button so the existing start -> poll ->
+          // re-render flow runs (live countdown, success toast, live badge).
+          // Escape the id: runtime ids can contain ':' and a raw interpolated
+          // value turns this into a SyntaxError, making Start silently do nothing.
+          const b = grid.querySelector(`.rt-start[data-start="${attributeEscape(rt.id)}"]`);
+          if (b) { b.click(); return; }
+          // The card only renders a Start button while the runtime is NOT present,
+          // so if the state changed between render and click there is nothing to
+          // delegate to. Hit the endpoint directly instead of doing nothing.
+          try {
+            const r = await (await fetch(`/api/local-runtimes/${encodeURIComponent(rt.id)}/start`, { method: 'POST' })).json();
+            notify.toast(r.message || (r.ok ? `${rt.name} start requested.` : 'Could not start runtime.'), r.ok ? 'success' : 'warning');
+            setTimeout(() => loadRuntimes(), 1200);
+          } catch {
+            notify.toast('Could not reach the runtime start endpoint.', 'error');
+          }
+        });
         const benchBtn = body.querySelector('#rtDetBench');
-        if (benchBtn) benchBtn.addEventListener('click', () => { ctrl.close(); const b = grid.querySelector(`.rt-bench[data-bench="${rt.id}"]`); if (b) b.click(); });
+        if (benchBtn) benchBtn.addEventListener('click', () => { ctrl.close(); const b = grid.querySelector(`.rt-bench[data-bench="${attributeEscape(rt.id)}"]`); if (b) b.click(); });
       },
     });
   }
@@ -2220,18 +2552,22 @@ export function renderClients() {
   setCrumb('Clients');
   const grid = document.getElementById('clientGrid');
   if (!grid) return;
-  grid.innerHTML = CLIENTS.map(c => {
-    const supportLabel = c.support === 'verified' ? 'Verified' : c.support === 'manual' ? 'Manual setup' : 'Coming soon';
+  grid.innerHTML = clientsForPage().map(c => {
+    // The Clients page is a roadmap: only Claude Code can actually be configured.
+    // Every other entry says "Coming soon" regardless of the finer-grained
+    // `support` level in the registry (OpenCode/Codex are "manual" there).
+    const verified = c.support === 'verified';
+    const supportLabel = verified ? 'Verified' : 'Coming soon';
     const conns = (c.connectionTypes || []).map(t => `<span class="chipx">${esc(connectionLabel(t))}</span>`).join('') || '<span class="muted">—</span>';
     const configured = workspace.applied && workspace.applied.client === c.id;
-    const disabled = c.support === 'unsupported' ? 'disabled' : '';
+    const disabled = verified ? '' : 'disabled';
     return `
-    <div class="panel client-card ${c.support !== 'unsupported' ? 'live' : ''} ${configured ? 'sel' : ''}">
+    <div class="panel client-card ${verified ? 'live' : ''} ${configured ? 'sel' : ''}">
       <div class="client-top">
         <div class="client-logo" style="--cm:${esc(c.color || '#5b8def')}">${clientLogoHtml(c)}</div>
         <div class="client-id">
           <b>${esc(c.name)}</b>
-          <span class="badge ${c.support}">${esc(supportLabel)}</span>
+          <span class="badge ${verified ? 'verified' : 'unsupported'}">${esc(supportLabel)}</span>
         </div>
       </div>
       <div class="client-sub">${esc(c.note || '')}</div>
@@ -2246,15 +2582,107 @@ export function renderClients() {
   }).join('');
 }
 
+  // ── Settings → Appearance ────────────────────────────────────────
+  // Populates every control from the stored preferences and binds its change
+  // handler in one place. Rendering the whole panel at once (rather than letting
+  // each control bind itself) means a re-render can never leave one control
+  // showing a stale value — the summary line, the swatches and the toggle all
+  // derive from the same source.
+  const THEME_LABELS = { dark: 'Dark', light: 'Light', system: 'System' };
+  const ACCENT_SWATCH = {
+    indigo: '#5b8def', azure: '#2f9fe0', teal: '#1fb59a',
+    violet: '#9b6ef3', amber: '#e0a12c', rose: '#e2568c',
+  };
+
+  function renderAppearance() {
+    const seg = document.getElementById('themeSeg');
+    if (seg) {
+      // Scoped class rather than the shared `.seg-btn`. That class has two
+      // competing base rules and two different active-state names (`.on` and
+      // `.active`), so the later rule was overriding the pill shape and the
+      // light-theme contrast fix never reached this control.
+      seg.innerHTML = ['dark', 'light', 'system'].map((t) => `
+        <button class="ap-theme-btn${theme.current() === t ? ' is-on' : ''}" data-theme="${t}"
+                aria-pressed="${theme.current() === t}">${THEME_LABELS[t]}</button>`).join('');
+      seg.querySelectorAll('[data-theme]').forEach((b) => b.addEventListener('click', () => {
+        const next = b.dataset.theme;
+        // Re-clicking the active theme is a no-op, not an event worth reporting.
+        if (next === theme.current()) return;
+        theme.set(next);
+        // theme.set() writes the palette only; re-applying appearance keeps the
+        // accent / density the user chose across a theme change.
+        applyAppearance();
+        renderAppearance();
+        if (window.renderWorkspace) window.renderWorkspace();
+        // Same confirmation the navbar toggle gives, so changing the palette feels
+        // the same wherever it is triggered from.
+        notify.toast(`Theme: ${THEME_LABELS[next] || next}`, 'info');
+      }));
+    }
+
+    const acc = document.getElementById('apAccents');
+    const cur = Storage.getAccent();
+    if (acc) {
+      acc.innerHTML = Object.keys(ACCENT_SWATCH).map((k) => `
+        <button class="ap-swatch${k === cur ? ' is-on' : ''}" data-accent="${k}"
+                style="--sw:${ACCENT_SWATCH[k]}" role="radio" aria-checked="${k === cur}"
+                title="${ACCENT_LABELS[k] || k}" aria-label="Accent ${ACCENT_LABELS[k] || k}"></button>`).join('');
+      acc.querySelectorAll('[data-accent]').forEach((b) => b.addEventListener('click', () => {
+        setAccent(b.dataset.accent);
+        renderAppearance();
+      }));
+    }
+
+    const dens = document.getElementById('apDensity');
+    const dcur = Storage.getDensity();
+    if (dens) {
+      dens.querySelectorAll('[data-density]').forEach((b) => {
+        const on = b.dataset.density === dcur;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-pressed', String(on));
+        b.addEventListener('click', () => {
+          setDensity(b.dataset.density);
+          renderAppearance();
+          if (window.renderWorkspace) window.renderWorkspace();
+        });
+      });
+    }
+
+    const motion = document.getElementById('apMotion');
+    if (motion) {
+      motion.checked = Storage.getMotion() === 'reduced';
+      motion.addEventListener('change', () => setMotion(motion.checked ? 'reduced' : 'full'));
+    }
+
+    const reset = document.getElementById('apReset');
+    if (reset) {
+      reset.addEventListener('click', () => {
+        Storage.setAccent('indigo');
+        Storage.setDensity('comfortable');
+        Storage.setMotion('full');
+        theme.set('dark');
+        applyAppearance();
+        renderAppearance();
+        notify.toast('Appearance reset to defaults', 'info');
+      });
+    }
+
+    const sum = document.getElementById('apSummary');
+    if (sum) sum.textContent = appearanceSummary();
+  }
+
+
 export function renderSettings() {
   updateCrumb('Settings');
-  // Theme segmented control
-  const seg = document.getElementById('themeSeg');
-  if (seg) {
-    seg.innerHTML = ['dark', 'light', 'system'].map(t => `<button class="seg-btn ${theme.current() === t ? 'on' : ''}" onclick="setTheme('${t}')">${t[0].toUpperCase() + t.slice(1)}</button>`).join('');
-  }
+  renderAppearance();
   renderProfiles();
   loadBackups();
+
+  // Fallback is rendered FIRST so it lands ABOVE Provider Intelligence. Both panels
+  // append to the same settings grid, so whichever is created first appears first —
+  // previously Provider Intelligence was created first and pushed the auto-switch
+  // card to the bottom of the page.
+  renderFallbackPanel();
 
   // Provider Intelligence settings panel (v1.4.0) — manual refresh only.
   let piPanel = document.getElementById('piSettingsPanel');
@@ -2269,11 +2697,39 @@ export function renderSettings() {
   }
   fillProviderIntelSettings();
   fetchProviderIntel().then(fillProviderIntelSettings).catch(() => {});
-  renderFallbackPanel();
+
+  // Backups is authored in index.html, but the Fallback and Provider Intelligence
+  // panels are created here and appended to the grid — so those two always landed
+  // AFTER it in the DOM. Re-appending Backups now puts it last, which is the order
+  // the page reads in: Appearance, Profiles, Contact, Fallback, Provider
+  // Intelligence, Backups. Done explicitly rather than by relying on creation
+  // order, so it holds regardless of which panel is built first.
+  const gridEl = document.querySelector('#page-settings .settings-grid');
+  const bkPanel = document.getElementById('settingsBackups');
+  if (gridEl && bkPanel && gridEl.lastElementChild !== bkPanel) {
+    gridEl.appendChild(bkPanel);
+  }
+
+  // Place the Privacy card immediately BEFORE Provider Intelligence so the two sit
+  // side by side, privacy on the left. Both are grid items, so adjacency is set
+  // with insertBefore rather than by relying on creation order — the PI panel is
+  // built here, the privacy card in index.html.
+  const gridEl2 = gridEl;
+  const secPanel = document.getElementById('securityNote');
+  const piEl = document.getElementById('piSettingsPanel');
+  if (gridEl2 && secPanel && piEl && secPanel.nextElementSibling !== piEl) {
+    gridEl2.insertBefore(secPanel, piEl);
+  } else if (gridEl2 && secPanel && !piEl) {
+    gridEl2.appendChild(secPanel);
+  }
 }
 
 export function setTheme(t) {
   theme.set(t);
+  // Re-apply the accent / density / motion preferences. theme.set() writes the
+  // palette and data-theme only; without this the user's swatch would be lost on
+  // every theme change made from the navbar.
+  applyAppearance();
   renderSettings();
   notify.toast(`Theme: ${t}`, 'info');
 }
@@ -2848,6 +3304,10 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
   let activeCat = 'all';
   let q = '';
   let registryFilter = initialRegFilter || 'all';
+  // 'default' preserves the natural order the grid already renders (curated,
+  // then eco, adopted, custom) — the arrangement the registry intends. Every
+  // other value is an explicit re-sort.
+  let cardSort = 'default';
   let ecoDiscovered = workspace.ecoDiscovered || [];
   let dynamicProviders = workspace.dynamicProviders || [];
   let customProviders = [];
@@ -2908,6 +3368,12 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       cats.map(c => `<button class="chip-filter ${activeCat === c.id ? 'on' : ''}" data-cat="${c.id}">${esc(c.label)}</button>`).join('') +
       `<span class="cp-reg-sep"></span>` +
       `<div class="cp-reg-group"><span class="cp-reg-label">Registry:</span><select class="cp-reg-select" data-reg-select aria-label="Registry filter">${registryOptions}</select></div>` +
+        `<span class="cp-reg-sep"></span>` +
+        `<div class="cp-reg-group"><span class="cp-reg-label">Sort:</span>
+          <select class="cp-reg-select cp-sort-select" data-card-sort aria-label="Sort provider cards">
+            ${[["default","Default"],["name-asc","Name (A–Z)"],["name-desc","Name (Z–A)"],["models-desc","Most models"],["models-asc","Fewest models"],["free-desc","Most free"],["free-asc","Fewest free"],["status-asc","Status"],["configured-desc","Configured"]]
+              .map(([v, l]) => `<option value="${v}" ${cardSort === v ? "selected" : ""}>${l}</option>`).join("")}
+          </select></div>` +
       `<button class="btn btn2 cp-refresh-all-btn" title="Refresh models for every provider card" data-act="refresh-all" aria-label="Refresh all provider models">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
@@ -2920,6 +3386,9 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
     filtersEl.querySelector('[data-reg-select]')?.addEventListener('change', (e) => {
       registryFilter = e.target.value; drawFilters(); drawGrid();
     });
+      filtersEl.querySelector('[data-card-sort]')?.addEventListener('change', (e) => {
+        cardSort = e.target.value; drawFilters(); drawGrid();
+      });
     filtersEl.querySelector('[data-act="refresh-all"]')?.addEventListener('click', async () => {
       const btn = filtersEl.querySelector('[data-act="refresh-all"]');
       const setRefreshState = (refreshing) => {
@@ -3037,6 +3506,34 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
     });
   };
 
+  // Card ordering. Reads counts straight off the rendered badge markup so a sort
+  // can never disagree with the number printed on the card. Every comparator ends
+  // in an id tiebreaker: cards that tie on the sort key (a curated provider and a
+  // custom card sharing a name) keep a stable slot instead of swapping on redraw.
+  const cpIdOf = (h) => (String(h).match(/data-id=\\?"([^"]+)\\?"/) || [])[1] || '';
+  const cpNameOf = (h) => {
+    const m = String(h).match(/<div class=\\?"provider-meta\\?"><b>([\s\S]*?)<\/b>/);
+    return m ? m[1].replace(/<[^>]*>/g, '').trim() : '';
+  };
+  const sortNum = (h) => { const m = String(h).match(/(\d+)\s*total/); return m ? Number(m[1]) : 0; };
+  const sortFree = (h) => { const m = String(h).match(/(\d+)\s*free/); return m ? Number(m[1]) : 0; };
+  const cpStatus = (h) => { const m = String(h).match(/class=\\?"pi-status\\?">([^<]*)/); return m ? m[1].trim() : ''; };
+  const cpConfigured = (h) => /class=\\?"badge cc\\?">configured/.test(String(h));
+  const sortCardStrings = (arr) => {
+    const byId = (x, y) => cpIdOf(x).localeCompare(cpIdOf(y), undefined, { numeric: true });
+    const S = {
+      'name-asc':     (x, y) => cpNameOf(x).localeCompare(cpNameOf(y), undefined, { numeric: true }) || byId(x, y),
+      'name-desc':    (x, y) => -cpNameOf(x).localeCompare(cpNameOf(y), undefined, { numeric: true }) || byId(x, y),
+      'models-desc':  (x, y) => sortNum(y) - sortNum(x) || byId(x, y),
+      'models-asc':   (x, y) => sortNum(x) - sortNum(y) || byId(x, y),
+      'free-desc':    (x, y) => sortFree(y) - sortFree(x) || byId(x, y),
+      'free-asc':     (x, y) => sortFree(x) - sortFree(y) || byId(x, y),
+      'status-asc':   (x, y) => cpStatus(x).localeCompare(cpStatus(y)) || byId(x, y),
+      'configured-desc': (x, y) => (cpConfigured(y) ? 1 : 0) - (cpConfigured(x) ? 1 : 0) || byId(x, y),
+    }[cardSort];
+    return S ? [...arr].sort(S) : arr;
+  };
+
   const drawGrid = async () => {
     const ql = q.toLowerCase();
     let curatedCards = [];
@@ -3117,7 +3614,17 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
     const adoptedHtml = adoptedCards.map(customProviderCard).join('');
     const customHtml = customCards.map(customProviderCard).join('');
 
-    grid.innerHTML = curatedHtml + ecoHtml + adoptedHtml + customHtml;
+    // Sort across ALL registries together. Sorting each of the four groups
+    // separately would leave the grid implicitly grouped by registry, so a Name
+    // sort would come out as "Nvidia, then every Custom card, then OpenAI" and
+    // read as broken. Split on each card's opening tag so cards become sortable
+    // units, then rejoin. 'default' skips sorting entirely and keeps the natural
+    // curated -> eco -> adopted -> custom order.
+    const cardChunks = (curatedHtml + ecoHtml + adoptedHtml + customHtml)
+      .split(/(?=<div class="panel provider-card)/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    grid.innerHTML = sortCardStrings(cardChunks).join('');
 
     grid.querySelectorAll('.cp-card').forEach(c => {
       const isCustom = c.dataset.origin === 'custom';

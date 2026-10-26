@@ -66,3 +66,24 @@ export function deleteBackup(id) {
   unlinkSync(p);
   return true;
 }
+
+// Delete several backups in one call. Returns per-id outcomes rather than failing
+// wholesale, because a partial delete is the normal case when some ids are already
+// gone or were never valid — the user should see exactly which ones went.
+// `ids` is validated and capped so a malformed or oversized request cannot be used
+// to hammer the filesystem.
+export function deleteBackups(ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  const capped = list.slice(0, 200);
+  const deleted = [];
+  const failed = [];
+  for (const id of capped) {
+    try {
+      if (deleteBackup(id)) deleted.push(id);
+      else failed.push({ id, error: 'not found' });
+    } catch (err) {
+      failed.push({ id, error: err.message });
+    }
+  }
+  return { deleted, failed, skipped: list.length - capped.length };
+}

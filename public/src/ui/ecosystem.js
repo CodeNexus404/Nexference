@@ -9,6 +9,11 @@ import { workspace } from '../core/state.js';
 let ecoCache = { all: [], sources: [], summary: {} };
 let ecoFilter = 'all';
 let ecoSearch = '';
+let ecoRefreshing = false;
+let ecoPolling = false;
+let ecoNotifiedFinishedAt = null;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function formatCtx(n) {
   if (!n) return '';
@@ -57,6 +62,94 @@ async function fetchEcosystem() {
   ]);
   ecoCache = { all: p.providers || [], sources: s.sources || [], summary: sum };
   return ecoCache;
+}
+
+// Drive the Refresh Sources button from real server-side job state, so the
+// spinner stays visible for the entire run even when the request has already
+// returned and discovery keeps working in the background.
+function setRefreshState(refreshing) {
+  ecoRefreshing = !!refreshing;
+  const btn = document.getElementById('ecoDiscover');
+  if (!btn) return;
+  btn.disabled = ecoRefreshing;
+  btn.classList.toggle('is-refreshing', ecoRefreshing);
+  btn.setAttribute('aria-busy', ecoRefreshing ? 'true' : 'false');
+  const label = ecoRefreshing ? 'Refreshing…' : 'Refresh Sources';
+  const lbl = btn.querySelector('.eco-refresh-label');
+  if (lbl) lbl.textContent = label;
+  else btn.textContent = label;
+}
+
+function discoveryOutcome(status) {
+  if (status && status.error) return { msg: 'Refresh failed: ' + status.error, kind: 'error' };
+  const res = status && status.lastResult;
+  if (!res || res.ok === false) return { msg: 'Refresh failed — no result returned', kind: 'error' };
+  const parts = [`${res.newlyDiscovered || 0} new`, `${res.discovered || 0} total`];
+  if (res.withErrors) parts.push(`${res.withErrors} source(s) reported errors`);
+  const secs = res.elapsedMs != null ? ` in ${(res.elapsedMs / 1000).toFixed(1)}s` : '';
+  // Be explicit when the run succeeded but could not be saved (lock/permission).
+  if (res.persisted === false) {
+    return { msg: `Providers refreshed${secs} but the results were not saved — check disk permissions`, kind: 'warning' };
+  }
+  return { msg: `Providers refreshed — ${parts.join(', ')}${secs}`, kind: res.withErrors ? 'warning' : 'success' };
+}
+
+async function pollDiscoveryStatus() {
+  if (ecoPolling) return;
+  ecoPolling = true;
+  let failures = 0;
+  try {
+    for (;;) {
+      let status;
+      try {
+        const res = await fetch('/api/ecosystem/discover/status', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        status = await res.json();
+        failures = 0;
+      } catch {
+        if (++failures >= 10) {
+          setRefreshState(false);
+          notify.toast('Lost track of the refresh — reopen Ecosystem to check progress', 'warning');
+          return;
+        }
+        await sleep(1500);
+        continue;
+      }
+      if (status.running) {
+        setRefreshState(true);
+        await sleep(1200);
+        continue;
+      }
+      setRefreshState(false);
+      if (status.finishedAt && status.finishedAt !== ecoNotifiedFinishedAt) {
+        ecoNotifiedFinishedAt = status.finishedAt;
+        const { msg, kind } = discoveryOutcome(status);
+        notify.toast(msg, kind);
+        const root = document.getElementById('page-ecosystem');
+        if (root) await renderEcoBody(root);
+      }
+      return;
+    }
+  } finally {
+    ecoPolling = false;
+  }
+}
+
+// Reattach to a refresh that is already running (page reload / navigation).
+async function syncDiscoveryState() {
+  try {
+    const res = await fetch('/api/ecosystem/discover/status', { cache: 'no-store' });
+    if (!res.ok) return;
+    const status = await res.json();
+    if (status.running) {
+      ecoNotifiedFinishedAt = null;
+      setRefreshState(true);
+      pollDiscoveryStatus();
+    } else if (!ecoRefreshing) {
+      ecoNotifiedFinishedAt = status.finishedAt || ecoNotifiedFinishedAt;
+      setRefreshState(false);
+    }
+  } catch { /* non-fatal: the page still works without status */ }
 }
 
 function filteredProviders() {
@@ -201,10 +294,13 @@ export async function renderEcosystem() {
       <div class="seg eco-filter" id="ecoFilter">
         ${['all', 'discovered', 'review', 'adopted', 'ignored'].map((f) => `<button class="seg-btn ${f === ecoFilter ? 'active' : ''}" data-f="${f}" onclick="ecosystemSetFilter('${f}')">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}
       </div>
-      <button class="btn btn-go" id="ecoDiscover" onclick="ecosystemDiscover()">Refresh Sources</button>
+      <button class="btn btn-go${ecoRefreshing ? ' is-refreshing' : ''}" id="ecoDiscover" type="button" onclick="ecosystemDiscover()"${ecoRefreshing ? ' disabled aria-busy="true"' : ''}>
+        <span class="eco-refresh-label">${ecoRefreshing ? 'Refreshing…' : 'Refresh Sources'}</span>
+      </button>
     </div>
     <div id="ecoBody" class="ic-body"><div class="ic-loading muted">Loading ecosystem…</div></div>`;
   await renderEcoBody(root);
+  syncDiscoveryState();
 }
 
 async function renderEcoBody(root) {
@@ -302,17 +398,32 @@ window.ecoFetchModels = async (id) => {
   if (btn) { btn.disabled = false; btn.textContent = 'Fetch models'; }
 };
 window.ecosystemDiscover = async () => {
-  const btn = document.getElementById('ecoDiscover');
-  if (btn) { btn.disabled = true; btn.textContent = 'Discovering…'; }
+  if (ecoRefreshing || ecoPolling) return;
+  ecoNotifiedFinishedAt = null;
+  setRefreshState(true);
   try {
-    const r = await fetch('/api/ecosystem/discover', { method: 'POST' });
-    const d = await r.json().catch(() => ({}));
-    if (r.ok && d.ok) notify.toast(`Discovery complete — ${d.newlyDiscovered} new`, 'success');
-    else notify.toast(d.message || 'Discovery failed', 'error');
-  } catch (e) { notify.toast('Discovery failed: ' + (e.message || e), 'error'); }
-  const root = document.getElementById('page-ecosystem');
-  if (root) await renderEcoBody(root);
-  if (btn) { btn.disabled = false; btn.textContent = 'Refresh Sources'; }
+    const res = await fetch('/api/ecosystem/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+    // 202: accepted. Poll until the background run finishes so the button stays
+    // in its refreshing state for the whole run, not just the HTTP request.
+    if (data.running === false && data.finishedAt) {
+      setRefreshState(false);
+      const { msg, kind } = discoveryOutcome(data);
+      notify.toast(msg, kind);
+      const root = document.getElementById('page-ecosystem');
+      if (root) await renderEcoBody(root);
+      return;
+    }
+    await pollDiscoveryStatus();
+  } catch (e) {
+    setRefreshState(false);
+    notify.toast('Refresh failed: ' + (e.message || e), 'error');
+  }
 };
 window.ecosystemAction = async (token, id) => {
   const map = { adopt: ['adopt', 'Adopted'], ignore: ['ignore', 'Ignored'], restore: ['restore', 'Restored'], validate: ['validate', 'Validated'] };

@@ -12,7 +12,11 @@ import { esc } from '../components/util.js';
 import { fallbackStore } from '../config/fallbackStore.js';
 import { probeTier, fallbackChipLabel } from '../config/fallbackMonitor.js';
 
-const FB_CLIENTS = CLIENTS.filter((c) => Array.isArray(c.connectionTypes) && c.connectionTypes.includes('cloud'));
+// Only clients the monitor can actually drive. Cursor is excluded here anyway (no
+// connectionTypes), and the three manual-setup clients are hidden until the
+// fallback path can write their config.
+const FB_CLIENTS = CLIENTS.filter((c) => !c.hidden
+  && Array.isArray(c.connectionTypes) && c.connectionTypes.includes('cloud'));
 let selClient = (workspace.applied && workspace.applied.client) || 'claude-code';
 
 function providerName(id) {
@@ -81,29 +85,73 @@ function detailHTML(plan, master) {
         ${lastSwitch ? `<span class="muted">Last switch: ${esc(lastSwitch)}</span>` : '<span class="muted">No switches yet</span>'}
       </div>
 
-      <div class="fb-primary-box">
-        <div class="fb-tier-head"><b>Primary</b><span class="muted">main provider + model</span></div>
-        <div class="fb-tier-meta">
-          ${(primaryProvider || primaryModel)
-            ? `<span><b>${esc(providerName(primaryProvider))}</b>${primaryModel ? ` · <b class="mono">${esc(primaryModel)}</b>` : ''}</span>`
-            : `<span class="muted">Not captured yet — configure the main config first, then save a fallback, or capture from the current applied config.</span>`}
-          <span class="fb-tier-acts">
-            <button class="btn btn2" onclick="fbCapturePrimary()">${primaryProvider ? 'Recapture from current config' : 'Capture current config'}</button>
-          </span>
+        <div class="fb-primary-box">
+          <div class="fb-tier-head"><b>Primary</b><span class="muted">follows your applied config</span></div>
+          <div class="fb-tier-meta">
+            ${(primaryProvider || primaryModel)
+              ? `<span><b>${esc(providerName(primaryProvider))}</b>${primaryModel ? ` · <b class="mono">${esc(primaryModel)}</b>` : ''}</span>`
+              : `<span class="muted">Not captured yet — configure the main config first, then save a fallback, or capture from the applied selection.</span>`}
+            <span class="fb-tier-acts">
+              <button class="btn btn2" onclick="fbCapturePrimary()">${primaryProvider ? 'Recapture from current config' : 'Capture from applied config'}</button>
+            </span>
+          </div>
+          ${(primaryProvider || primaryModel) ? '<p class="fb-primary-note">Updates automatically whenever you apply a different provider for this client, so the monitor always reverts to where you actually are.</p>' : ''}
         </div>
+
       </div>
 
       <div class="fb-knobs">
-        <label>Fail threshold <input class="inp inp-sm" id="fbThreshold" type="number" min="1" max="5" value="${plan.knobs.failThreshold}" onchange="fbUpdateKnobs()"></label>
-        <label>Cooldown (min) <input class="inp inp-sm" id="fbCooldown" type="number" min="1" max="60" value="${plan.knobs.cooldownMin}" onchange="fbUpdateKnobs()"></label>
-        <label class="paid-toggle fb-auto">auto-revert <input type="checkbox" id="fbAutoRevert" ${plan.knobs.autoRevert ? 'checked' : ''} onchange="fbUpdateKnobs()"><span class="paid-track"></span></label>
+        <label class="fb-knob">Fail threshold
+          <input class="inp inp-sm" id="fbThreshold" type="number" min="1" max="5" step="1"
+                 value="${plan.knobs.failThreshold}" onchange="fbUpdateKnobs()"
+                 title="Consecutive failures before switching to the next tier">
+          <small class="fb-knob-hint">failures before switching</small>
+        </label>
+        <span class="fb-knob-sep" aria-hidden="true"></span>
+        <label class="fb-knob">Cooldown
+          <input class="inp inp-sm" id="fbCooldown" type="number" min="1" max="60" step="1"
+                 value="${plan.knobs.cooldownMin}" onchange="fbUpdateKnobs()"
+                 title="Minimum minutes between two switches">
+          <small class="fb-knob-hint">minutes between switches</small>
+        </label>
       </div>
 
-      ${plan.tiers.map((t, i) => tierHTML(i + 1, t)).join('')}
-
-      <div class="fb-acts">
-        <button class="btn btn2 danger" onclick="fbClearPlan()">Disable fallback for ${esc(getClient(selClient)?.name || selClient)}</button>
+      <div class="fb-auto-row">
+        <div class="fb-auto-head">
+          <b>Auto-revert</b>
+          <label class="switch fb-auto">
+            <input type="checkbox" id="fbAutoRevert" ${plan.knobs.autoRevert ? 'checked' : ''}
+                   onchange="fbUpdateKnobs()"
+                   title="Switch back to the primary automatically once it is healthy again">
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          </label>
+        </div>
+        <span class="fb-knob-hint">Return to the primary as soon as it recovers</span>
       </div>
+
+        ${plan.tiers.map((t, i) => tierHTML(i + 1, t)).join('')}
+
+        <div class="fb-tier-add">
+          <button class="btn btn2 fb-add-tier" onclick="fbAddTier()"
+            ${plan.tiers.length >= fallbackStore.maxTiers ? 'disabled' : ''}
+            title="${plan.tiers.length >= fallbackStore.maxTiers
+              ? `Maximum of ${fallbackStore.maxTiers} fallback tiers`
+              : `Add fallback tier ${plan.tiers.length + 1}`}">
+            + Add fallback tier
+          </button>
+          <span class="muted">${plan.tiers.length} of ${fallbackStore.maxTiers} tiers</span>
+          ${plan.tiers.length > fallbackStore.defaultTiers
+            ? `<button class="btn btn2 fb-remove-tier" onclick="fbRemoveTier()"
+                 title="Remove the last (empty) tier">Remove last</button>`
+            : ''}
+        </div>
+        ${plan.tiers.length >= fallbackStore.maxTiers
+          ? `<p class="muted fb-tier-cap">Maximum of ${fallbackStore.maxTiers} tiers reached. Remove one to swap a different provider in.</p>`
+          : ''}
+
+        <div class="fb-acts">
+          <button class="btn btn2 danger" onclick="fbClearPlan()">Disable fallback for ${esc(getClient(selClient)?.name || selClient)}</button>
+        </div>
     </div>`;
 }
 
@@ -186,7 +234,30 @@ export function fbUpdateKnobs() {
   notify.toast('Fallback settings updated', 'success');
 }
 
-export function fbCapturePrimary() {
+  // Grow / shrink the plan's tier list. The store enforces the cap and refuses a
+  // removal that would strand the monitor on a tier that no longer exists, so these
+  // stay thin wrappers that report the outcome honestly.
+  export function fbAddTier() {
+    const n = fallbackStore.addTier(selClient);
+    if (n === null) {
+      notify.toast(`Already at the maximum of ${fallbackStore.maxTiers} fallback tiers`, 'warning');
+      return;
+    }
+    notify.toast(`Added Fallback ${n} \u2014 choose a provider and model`, 'success');
+    renderFallbackPanel();
+  }
+
+  export function fbRemoveTier() {
+    const n = fallbackStore.removeTier(selClient);
+    if (n === null) {
+      notify.toast('Could not remove: the plan is switched to a higher tier, or is already at the minimum.', 'warning');
+      return;
+    }
+    notify.toast(`Removed the last tier \u2014 ${n} remaining`, 'info');
+    renderFallbackPanel();
+  }
+
+  export function fbCapturePrimary() {
   const applied = (workspace.applied && workspace.applied.client === selClient)
     ? workspace.applied
     : Storage.getApplied && Storage.getApplied().client === selClient ? Storage.getApplied() : null;

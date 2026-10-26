@@ -16,9 +16,11 @@ export function registerLocalRoutes(app) {
 
   // Start a local runtime that is offline. Uses a safe, allowlisted command
   // per runtime — never arbitrary shell input.
-  app.post('/api/local-runtimes/:id/start', (req, res) => {
+  app.post('/api/local-runtimes/:id/start', async (req, res) => {
     try {
-      const result = startRuntime(req.params.id);
+      // Awaited: the start path now confirms the process actually came up before
+      // reporting success, so the response reflects reality rather than 'spawn called'.
+      const result = await startRuntime(req.params.id);
       if (result?.ok) {
         recordActivity('runtime', 'start', 'success', `${result.app || result.id} runtime start requested`, { runtimeId: req.params.id, app: result.app });
       } else if (result?.supported === false) {

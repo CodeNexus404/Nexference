@@ -8,6 +8,31 @@ import { esc } from '../components/util.js';
 // v0.3.0: toasts now stack, auto-dismiss, can be closed manually, and carry
 // semantic icons. No browser alert() is ever used.
 export class NotificationManager {
+  // The toast container is fixed to the top-right, but it has to clear the sticky
+  // navbar. That navbar's height is content-driven — the breadcrumb and the
+  // config-status label both change with the active page, and either can wrap on a
+  // narrow viewport — so the old hardcoded `top:68px` was a guess that drifted out
+  // of alignment and let toasts sit under (or float far below) the bar. Measure
+  // the real height and publish it as --toast-top, so the stack always starts just
+  // beneath the navbar and re-syncs when the bar changes height.
+  _syncTopOffset() {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return;
+    const h = Math.round(bar.getBoundingClientRect().height);
+    // A hidden/unlaid-out bar measures 0 — keep the previous value rather than
+    // collapsing the toasts to the top of the viewport.
+    if (h > 0) document.documentElement.style.setProperty('--toast-top', `${h}px`);
+  }
+
+  _observeTopbar() {
+    if (this._topbarObserver || typeof ResizeObserver === 'undefined') return;
+    const bar = document.querySelector('.topbar');
+    if (!bar) return;
+    this._topbarObserver = new ResizeObserver(() => this._syncTopOffset());
+    this._topbarObserver.observe(bar);
+    window.addEventListener('resize', () => this._syncTopOffset(), { passive: true });
+  }
+
   // Lazily create the stacked-toast container so this works even if index.html
   // hasn't declared one (it should, with id="toasts").
   _container() {
@@ -20,6 +45,8 @@ export class NotificationManager {
       el.setAttribute('aria-label', 'Notifications');
       document.body.appendChild(el);
     }
+    this._syncTopOffset();
+    this._observeTopbar();
     return el;
   }
 
@@ -78,3 +105,13 @@ export class NotificationManager {
 }
 
 export const notify = new NotificationManager();
+
+// Publish --toast-top on load, not only when the first toast appears. The Models
+// catalogue bar also consumes it as its sticky offset, and that bar must sit
+// below the navbar from the very first paint — waiting for a toast would leave
+// the bar mis-offset until the user happened to trigger a notification.
+if (typeof document !== 'undefined') {
+  const init = () => { notify._syncTopOffset(); notify._observeTopbar(); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  else init();
+}

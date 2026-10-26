@@ -46,13 +46,18 @@ export const CLIENTS = [
     id: 'opencode-cli', name: 'OpenCode', logo: '/clients/opencode-cli.png', support: 'manual', level: 2, adapter: 'opencode-cli',
     connectionTypes: ['cloud', 'local'], configPath: '~/.config/opencode/opencode.json',
     capabilities: CAP.assisted,
-    note: 'OpenCode consumes OpenAI-compatible endpoints. Auto-configure guidance only.',
+    note: 'OpenCode reads OpenAI-compatible endpoints. Configuration support coming soon.',
   },
   {
     id: 'codex', name: 'Codex CLI', logo: '/clients/codex.svg', support: 'manual', level: 2, adapter: 'codex',
     connectionTypes: ['cloud'], configPath: '~/.codex/config.json',
     capabilities: CAP.cloudOnly,
-    note: 'Codex CLI uses the OpenAI-compatible API. Auto-configure guidance only.',
+    note: 'Codex CLI uses the OpenAI-compatible API. Configuration support coming soon.',
+  },
+  {
+    id: 'antigravity-cli', name: 'Antigravity CLI', logo: '/clients/antigravity-cli.svg', support: 'unsupported', level: 3, adapter: null,
+    connectionTypes: ['cloud'], configPath: '~/.gemini/antigravity-cli/settings.json',
+    capabilities: CAP.detectOnly, note: 'Antigravity CLI runs on Gemini models. Configuration support coming soon.',
   },
   {
     id: 'gemini-cli', name: 'Gemini CLI', logo: '/clients/gemini-cli.svg', support: 'manual', level: 2, adapter: 'gemini-cli',
@@ -63,7 +68,7 @@ export const CLIENTS = [
   {
     id: 'cursor', name: 'Cursor', logo: '/clients/cursor.svg', support: 'unsupported', level: 3, adapter: null,
     connectionTypes: [], configPath: '~/.cursor/config.json',
-    capabilities: CAP.detectOnly, note: 'Detected · configuration support coming soon',
+    capabilities: CAP.detectOnly, note: 'Configuration support coming soon',
   },
 ];
 

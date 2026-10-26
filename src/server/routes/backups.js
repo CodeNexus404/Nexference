@@ -1,4 +1,4 @@
-import { listBackups, readBackup, restoreBackup, deleteBackup } from '../config/backupStore.js';
+import { listBackups, readBackup, restoreBackup, deleteBackup, deleteBackups } from '../config/backupStore.js';
 import { BACKUP_DIR } from '../config/settingsStore.js';
 import { recordActivity } from '../activity/activityService.js';
 
@@ -41,7 +41,27 @@ export function registerBackupRoutes(app) {
   });
 
   // ─── DELETE a backup ───
-  app.delete('/api/backups/:id', (req, res) => {
+    // ─── POST bulk delete ───
+    // One request for a whole selection, instead of N sequential DELETEs. Reports
+    // per-id results so the UI can be precise about what actually went.
+    app.post('/api/backups/delete-many', (req, res) => {
+      try {
+        const ids = req.body && req.body.ids;
+        if (!Array.isArray(ids) || !ids.length) {
+          return res.status(400).json({ error: 'ids must be a non-empty array' });
+        }
+        const { deleted, failed, skipped } = deleteBackups(ids);
+        if (deleted.length) {
+          recordActivity('backup', 'delete', 'info',
+            `Deleted ${deleted.length} backup${deleted.length === 1 ? '' : 's'}`, { ids: deleted });
+        }
+        res.json({ success: true, deleted, failed, skipped });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    app.delete('/api/backups/:id', (req, res) => {
     try {
       const ok = deleteBackup(req.params.id);
       if (!ok) return res.status(404).json({ error: 'backup not found' });

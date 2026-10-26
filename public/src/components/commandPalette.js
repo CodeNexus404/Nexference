@@ -67,7 +67,7 @@ export function toggleCommandPalette() {
     { label: 'Toggle Sidebar', hint: 'Appearance', run: () => { if (window.toggleSidebar) window.toggleSidebar(); } },
   ];
   // Client quick-launch (start the wizard pre-selected to that client).
-  CLIENTS.filter((c) => c.support !== 'unsupported').forEach((c) => {
+  CLIENTS.filter((c) => !c.hidden && c.support !== 'unsupported').forEach((c) => {
     actions.push({
       label: `Configure: ${c.name}`,
       hint: 'Workflow',
@@ -88,38 +88,105 @@ export function toggleCommandPalette() {
     });
   });
 
+  // Detect the right modifier label instead of hardcoding ⌘K — on Windows and
+  // Linux the same shortcut is Ctrl+K, and telling a PC user to press ⌘ is wrong.
+  const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+  const modKey = isMac ? '⌘K' : 'Ctrl K';
+
   const { close } = openModal({
     title: 'Command Palette',
-    subtitle: '⌘K · type to filter',
+    subtitle: `${modKey} · type to filter`,
     size: 'wide',
     bodyHTML: `<div class="palette">
-        <input class="inp palette-input" placeholder="Type a command…" aria-label="Command filter" />
-        <div class="palette-list" id="paletteList" role="listbox"></div>
+        <div class="palette-search">
+          <span class="palette-search-ico" aria-hidden="true">${isMac ? '⌘' : 'Ctrl'}</span>
+          <input class="inp palette-input" placeholder="Type a command or page name…" aria-label="Command filter"
+                 role="combobox" aria-expanded="true" aria-controls="paletteList" aria-autocomplete="list" />
+        </div>
+        <div class="palette-meta"><span id="paletteCount"></span></div>
+        <div class="palette-list" id="paletteList" role="listbox" aria-label="Commands"></div>
+        <div class="palette-foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> run</span>
+          <span><kbd>esc</kbd> close</span>
+        </div>
       </div>`,
     onMount: (body, ctrl) => {
       paletteOpen = true;
       const input = body.querySelector('.palette-input');
       const list = body.querySelector('#paletteList');
+      const count = body.querySelector('#paletteCount');
       let active = 0;
 
+      // Subsequence matching, not just substring: "gcp" then finds
+      // "Go to Cloud Providers" without the user having to type every letter.
+      // Exact substring matches still rank first so the obvious thing stays on top.
+      const fuzzy = (hay, needle) => {
+        let i = 0;
+        for (const ch of hay) if (ch === needle[i]) i += 1;
+        return i === needle.length;
+      };
       const filtered = () => {
-        const q = input.value.toLowerCase();
-        return actions.filter((a) => !q || a.label.toLowerCase().includes(q) || a.hint.toLowerCase().includes(q));
+        const q = input.value.trim().toLowerCase();
+        if (!q) return actions.map((a, i) => ({ a, i }));
+        return actions
+          .map((a, i) => {
+            const label = a.label.toLowerCase();
+            const hint = a.hint.toLowerCase();
+            if (label.includes(q)) return { a, i, rank: 0 };
+            if (label.startsWith(q)) return { a, i, rank: 1 };
+            if (hint.includes(q)) return { a, i, rank: 2 };
+            if (fuzzy(label, q)) return { a, i, rank: 3 };
+            return null;
+          })
+          .filter(Boolean)
+          .sort((x, y) => x.rank - y.rank);
       };
       function draw() {
         const fa = filtered();
         if (active >= fa.length) active = Math.max(0, fa.length - 1);
-        list.innerHTML = fa.map((a, i) => `
-          <button type="button" class="palette-item ${i === active ? 'active' : ''}" data-i="${i}" role="option">
-            <span class="palette-label">${esc(a.label)}</span>
-            <span class="palette-hint">${esc(a.hint)}</span>
+        if (count) {
+          count.textContent = fa.length
+            ? `${fa.length} command${fa.length === 1 ? '' : 's'}${input.value.trim() ? ' matched' : ''}`
+            : '';
+        }
+        if (!fa.length) {
+          list.innerHTML = `<div class="palette-empty">
+            <b>No commands match “${esc(input.value.trim())}”</b>
+            <span class="muted">Try a page name, a provider, or “refresh”.</span>
+          </div>`;
+          return;
+        }
+        list.innerHTML = fa.map((x, i) => `
+          <button type="button" class="palette-item ${i === active ? 'active' : ''}" data-i="${i}"
+                  role="option" aria-selected="${i === active}">
+            <span class="palette-label">${esc(x.a.label)}</span>
+            <span class="palette-hint">${esc(x.a.hint)}</span>
           </button>`).join('');
-        list.querySelectorAll('.palette-item').forEach((b) => b.addEventListener('click', () => runAction(parseInt(b.dataset.i, 10))));
+        list.querySelectorAll('.palette-item').forEach((b) => {
+          const i = parseInt(b.dataset.i, 10);
+          b.addEventListener('click', () => runAction(i));
+          // Hovering must move the keyboard cursor too, otherwise mouse and keyboard
+          // highlight disagree and Enter runs something other than what is pointed at.
+          b.addEventListener('mousemove', () => {
+            if (active === i) return;
+            active = i;
+            list.querySelectorAll('.palette-item').forEach((x) => {
+              const on = parseInt(x.dataset.i, 10) === active;
+              x.classList.toggle('active', on);
+              x.setAttribute('aria-selected', String(on));
+            });
+          });
+        });
+        // Keep the keyboard cursor visible when arrowing past the fold.
+        const cur = list.querySelector('.palette-item.active');
+        if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
       }
       function runAction(i) {
         const fa = filtered();
-        const a = fa[i];
-        if (!a) return;
+        const entry = fa[i];
+        if (!entry) return;
+        const a = entry.a;
         ctrl.close();
         paletteOpen = false;
         a.run();
@@ -130,6 +197,8 @@ export function toggleCommandPalette() {
         const fa = filtered();
         if (e.key === 'ArrowDown') { active = Math.min(active + 1, fa.length - 1); draw(); e.preventDefault(); }
         else if (e.key === 'ArrowUp') { active = Math.max(active - 1, 0); draw(); e.preventDefault(); }
+        else if (e.key === 'Home' && fa.length) { active = 0; draw(); e.preventDefault(); }
+        else if (e.key === 'End' && fa.length) { active = fa.length - 1; draw(); e.preventDefault(); }
         else if (e.key === 'Enter') { runAction(active); }
       });
       draw();

@@ -291,7 +291,7 @@ export async function renderModelLibrary(host) {
   // Build the per-model change index (NEW / REMOVED / FREE CHANGED) from the
   // secret-free change feed. Best-effort; ignored on failure.
   await fetchModelChanges(300).catch(() => {});
-  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false, changed: false, access: '', availability: '', lifecycle: '', sourceStatus: '' };
+  const filterState = { q: '', type: 'all', provider: '', free: false, chat: false, changed: false, access: '', availability: '', lifecycle: '', sourceStatus: '', sort: 'name-asc' };
 
   function providersList() {
     return [...new Set(all.map((m) => m.providerId))]
@@ -325,6 +325,25 @@ export async function renderModelLibrary(host) {
         return false;
       });
     }
+    // Sort applied AFTER filtering, so it never changes which rows appear.
+    // Every comparator ends in an id tiebreaker: without it, models that tie on
+    // the sort key (two with the same context length, say) keep whatever order
+    // the source array happened to have and visibly reshuffle between draws.
+    const byId = (a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+    const capCount = (m) => (Array.isArray(m.capabilities) ? m.capabilities.length : 0);
+    const S = {
+      'name-asc':     (a, b) => String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), undefined, { numeric: true }) || byId(a, b),
+      'name-desc':    (a, b) => -String(a.name || a.id || '').localeCompare(String(b.name || b.id || ''), undefined, { numeric: true }) || byId(a, b),
+      'provider-asc': (a, b) => String(a.providerName || a.providerId || '').localeCompare(String(b.providerName || b.providerId || ''), undefined, { numeric: true }) || byId(a, b),
+      'models-desc':  (a, b) => capCount(b) - capCount(a) || byId(a, b),
+      'models-asc':   (a, b) => capCount(a) - capCount(b) || byId(a, b),
+      'free-desc':    (a, b) => (b.isFree ? 1 : 0) - (a.isFree ? 1 : 0) || byId(a, b),
+      'free-asc':     (a, b) => (a.isFree ? 1 : 0) - (b.isFree ? 1 : 0) || byId(a, b),
+      'context-desc': (a, b) => (b.contextLength || 0) - (a.contextLength || 0) || byId(a, b),
+      'context-asc':  (a, b) => (a.contextLength || 0) - (b.contextLength || 0) || byId(a, b),
+      'newest':       (a, b) => String(b.addedAt || b.firstSeen || '').localeCompare(String(a.addedAt || a.firstSeen || '')) || byId(a, b),
+    }[filterState.sort];
+    list = S ? [...list].sort(S) : list;
     return list;
   }
 
@@ -368,21 +387,43 @@ export async function renderModelLibrary(host) {
               <button class="ml-seg-btn ${filterState.type === 'local' ? 'on' : ''}" data-type="local">Local</button>
             </div>
             <select class="inp ml-prov-sel"><option value="">All providers</option>${providersList().map((p) => `<option value="${esc(p.id)}" ${filterState.provider === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
-            <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
-            <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
-            <label class="ml-toggle"><input type="checkbox" class="ml-changed-chk" ${filterState.changed ? 'checked' : ''}> Changed recently</label>
-            <select class="inp ml-access-sel" title="Access type" aria-label="Access type">
-              <option value="">Any access</option><option value="free">Free</option><option value="paid">Paid</option><option value="freemium">Freemium</option>
-            </select>
-            <select class="inp ml-avail-sel" title="Availability" aria-label="Availability">
-              <option value="">Any availability</option><option value="available">Available</option><option value="unknown">Unknown</option>
-            </select>
-            <select class="inp ml-life-sel" title="Lifecycle" aria-label="Lifecycle">
-              <option value="">Any lifecycle</option><option value="active">Active</option><option value="unknown">Unknown</option>
-            </select>
-            <select class="inp ml-src-sel" title="Source status" aria-label="Source status">
-              <option value="">Any source</option><option value="live">Live</option><option value="fallback-website">Fallback site</option><option value="fallback-static">Fallback static</option><option value="installed">Installed</option><option value="cached">Cached</option>
-            </select>
+            <details class="ml-more">
+              <summary class="ml-more-sum">
+                <span class="ml-more-label">More filters</span>
+                <span class="ml-more-count" data-more-count hidden></span>
+                <svg class="ml-more-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </summary>
+              <div class="ml-more-body">
+              <label class="ml-toggle"><input type="checkbox" class="ml-free-chk" ${filterState.free ? 'checked' : ''}> Free only</label>
+              <label class="ml-toggle"><input type="checkbox" class="ml-chat-chk" ${filterState.chat ? 'checked' : ''}> Chat</label>
+              <label class="ml-toggle"><input type="checkbox" class="ml-changed-chk" ${filterState.changed ? 'checked' : ''}> Changed recently</label>
+              <select class="inp ml-access-sel" title="Access type" aria-label="Access type">
+                <option value="">Any access</option><option value="free">Free</option><option value="paid">Paid</option><option value="freemium">Freemium</option>
+              </select>
+              <select class="inp ml-avail-sel" title="Availability" aria-label="Availability">
+                <option value="">Any availability</option><option value="available">Available</option><option value="unknown">Unknown</option>
+              </select>
+              <select class="inp ml-life-sel" title="Lifecycle" aria-label="Lifecycle">
+                <option value="">Any lifecycle</option><option value="active">Active</option><option value="unknown">Unknown</option>
+              </select>
+              <select class="inp ml-src-sel" title="Source status" aria-label="Source status">
+                <option value="">Any source</option><option value="live">Live</option><option value="fallback-website">Fallback site</option><option value="fallback-static">Fallback static</option><option value="installed">Installed</option><option value="cached">Cached</option>
+              </select>
+              </div>
+            </details>
+            <div class="ml-sort-group"><span class="cp-reg-label">Sort:</span>
+              <select class="inp ml-sort-sel" data-sort-select aria-label="Sort models">
+                <option value="name-asc">Name (A–Z)</option>
+                <option value="name-desc">Name (Z–A)</option>
+                <option value="provider-asc">Provider (A–Z)</option>
+                <option value="models-desc">Most models</option>
+                <option value="models-asc">Fewest models</option>
+                <option value="free-desc">Most free</option>
+                <option value="free-asc">Fewest free</option>
+                <option value="context-desc">Largest context</option>
+                <option value="context-asc">Smallest context</option>
+                <option value="newest">Recently added</option>
+              </select></div>
             <button class="btn btn2 sm ml-clear-filters" id="mlClearFilters" type="button" hidden>Clear filters</button>
           </div>
         </div>
@@ -448,6 +489,7 @@ export async function renderModelLibrary(host) {
     root.querySelector('.ml-avail-sel').addEventListener('change', (e) => { filterState.availability = e.target.value; draw(); });
     root.querySelector('.ml-life-sel').addEventListener('change', (e) => { filterState.lifecycle = e.target.value; draw(); });
     root.querySelector('.ml-src-sel').addEventListener('change', (e) => { filterState.sourceStatus = e.target.value; draw(); });
+    root.querySelector('[data-sort-select]')?.addEventListener('change', (e) => { filterState.sort = e.target.value; draw(); });
     root.querySelector('#mlRefresh').addEventListener('click', async (ev) => {
       const btn = ev.currentTarget; btn.disabled = true; btn.classList.add('spinning');
       try {
@@ -504,6 +546,7 @@ export async function renderModelLibrary(host) {
   draw();
 }
 
+
 // ── Unified picker for the config workflow (cloud step) ──
 // Mirrors the existing modelPicker UX but reads the unified catalogue so it
 // shows source status, free/paid, and capability honestly.
@@ -557,7 +600,13 @@ export async function renderModelPickerUnified(host, providerId, opts = {}) {
       if (live?.models?.length) {
         list = live.models.map((m) => ({
           ...(m || {}),
-          isFree: m.isFree ?? (m.pricing ? parseFloat(m.pricing.input) === 0 && parseFloat(m.pricing.output) === 0 : false),
+          // A model is free when its input and output price are both $0 (flat
+          // object or Requesty-style array of volume tiers).
+          isFree: m.isFree ?? (m.pricing
+            ? (Array.isArray(m.pricing)
+              ? !m.pricing.some((t) => (Number(t?.input_price ?? t?.input ?? t?.prompt) || 0) > 0 || (Number(t?.output_price ?? t?.output ?? t?.completion) || 0) > 0)
+              : parseFloat(m.pricing.input) === 0 && parseFloat(m.pricing.output) === 0)
+            : false),
         }));
       }
     }

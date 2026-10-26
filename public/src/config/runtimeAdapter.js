@@ -56,8 +56,10 @@ export class CopyableRuntime extends RuntimeAdapter {
   }
 }
 
-// Modal copy/title text — preserved exactly from configClientMeta.
-function configClientMeta(config) {
+  // Modal copy/title text — preserved exactly from configClientMeta.
+  // Exported so a host dialog can render the same copy inline instead of
+  // stacking a second modal (see providerConfig.js).
+  export function configClientMeta(config) {
   if (config.env?.GOOGLE_API_KEY) {
     return {
       title: 'Google Gemini config',

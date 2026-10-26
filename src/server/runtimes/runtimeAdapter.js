@@ -1,4 +1,4 @@
-import { getRuntime } from '../local/runtimes.js';
+import { getRuntime, getRuntimeLogo } from '../local/runtimes.js';
 import { discoverModels } from './modelDiscoveryService.js';
 
 // ═══════════════════════════════════════════════════
@@ -62,6 +62,7 @@ export async function detectRuntime(id) {
   const meta = getRuntime(id);
   const name = meta?.name || id;
   const planned = meta?.planned ?? true;
+  const logo = await getRuntimeLogo(id);
   if (id === 'ollama') {
     const probe = await probeOllama();
     return {
@@ -69,6 +70,7 @@ export async function detectRuntime(id) {
       ...probe,
       planned: false,
       capabilities: getRuntimeCapabilities(id),
+      logo,
     };
   }
   // Planned / detection-only runtimes are reported honestly.
@@ -83,6 +85,7 @@ export async function detectRuntime(id) {
     error: null,
     planned,
     capabilities: getRuntimeCapabilities(id),
+    logo,
   };
 }
 

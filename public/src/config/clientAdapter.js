@@ -95,6 +95,9 @@ export function getClientAdapter(format) {
 // now lives in ../clients/registry.js. ───
 export {
   CLIENTS,
+  visibleClients,
+  clientsForPage,
+  isClientVisible,
   getClient,
   isClientSupported,
   isClientAutoApply,

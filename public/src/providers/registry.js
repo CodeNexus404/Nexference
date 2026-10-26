@@ -50,9 +50,13 @@ export const PROVIDERS = [
     accent: '#76b900', glow: 'rgba(118,185,0,.18)',
     format: 'openai', claudeCode: false,
     baseUrl: 'https://integrate.api.nvidia.com/v1/',
-    desc: 'Free hosted open models — Nemotron, DeepSeek, Qwen, GPT-OSS, GLM, Kimi, Llama.',
+    desc: 'Hosted open models — Nemotron, DeepSeek, Qwen, GPT-OSS, GLM, Kimi, Llama. Most are free on build.nvidia.com; embedding/rerank models are listed too.',
     signup: 'https://build.nvidia.com',
-    defaultKey: '', isFree: (m) => !/embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma/i.test(m.id || ''),
+    // No client-side isFree: the previous ~700-char regex here was never read by
+    // any classifier (free/paid is derived server-side in isFreeModel via
+    // NON_CHAT_PROVIDERS), so it was a second copy that could silently drift out
+    // of sync with the server's list. The server owns this classification.
+    defaultKey: '',
   },
   {
     id: 'groq', name: 'Groq', sub: 'console.groq.com',
@@ -60,9 +64,12 @@ export const PROVIDERS = [
     accent: '#f55036', glow: 'rgba(245,80,54,.18)',
     format: 'openai', claudeCode: false,
     baseUrl: 'https://api.groq.com/openai/v1/',
-    desc: 'Blazing-fast free inference — Llama, DeepSeek-R1 distill, Qwen.',
+    desc: 'Very fast LPU inference — Llama, Qwen, DeepSeek, GPT-OSS, compound. Free developer tier with rate limits; add a key for live results.',
     signup: 'https://console.groq.com/keys',
-    defaultKey: '', isFree: () => true,
+    // The old isFree: () => true was never read by any classifier (free/paid is
+    // derived from real pricing on the server) and implied every Groq model is
+    // free, which is not true — Groq has a rate-limited free tier plus paid use.
+    defaultKey: '',
   },
   {
     id: 'gemini', name: 'Google Gemini', sub: 'aistudio.google.com',
@@ -70,6 +77,12 @@ export const PROVIDERS = [
     accent: '#4285f4', glow: 'rgba(66,133,244,.18)',
     format: 'gemini', claudeCode: false,
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/',
+    // Google serves a genuine OpenAI-compatible surface at /v1beta/openai/:
+    // Bearer auth on the header and OpenAI `messages`/`chat/completions`
+    // payloads. Declaring it here is what lets the Nexference proxy front Gemini
+    // for Claude Code, while `format: 'gemini'` is left intact so the native
+    // Gemini client config and test adapter keep working.
+    openaiCompat: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/' },
     desc: 'Generous free tier — Gemini 2.0 Flash, 1.5 Pro & Flash.',
     signup: 'https://aistudio.google.com/apikey',
     defaultKey: '', isFree: () => true,
@@ -100,9 +113,12 @@ export const PROVIDERS = [
     accent: '#fa520f', glow: 'rgba(250,82,15,.18)',
     format: 'openai', claudeCode: false,
     baseUrl: 'https://api.mistral.ai/v1/',
-    desc: 'Free "La Plateforme" tier — Mistral Large, Codestral, Small.',
+    desc: 'Mistral AI models on La Plateforme — Large, Medium, Small, Codestral, Devstral, Magistral. Metered: add a key for live pricing.',
     signup: 'https://console.mistral.ai/api-keys',
-    defaultKey: '', isFree: () => true,
+    // No isFree override: the old `() => true` was never read by any classifier
+    // (free/paid is derived from real pricing on the server), and it wrongly
+    // implied every Mistral model is free.
+    defaultKey: '',
   },
   {
     id: 'huggingface', name: 'Hugging Face', sub: 'router.huggingface.co',
@@ -129,10 +145,22 @@ export const PROVIDERS = [
     logo: '/providers/tokenrouter.png',
     accent: '#8b5cf6', glow: 'rgba(139,92,246,.18)',
     format: 'openai',
-    baseUrl: 'https://api.tokenrouter.io/v1/',
-    desc: 'Token routing service — Claude, GPT & more. Efficient key management.',
+    baseUrl: 'https://api.tokenrouter.com/v1/',
+    desc: 'Token routing service — Claude, GPT, NVIDIA & more across 140+ models. Keys start with tr_ and are sent as a Bearer token.',
     signup: 'https://www.tokenrouter.com',
-    defaultKey: '', isFree: () => true,
+    // TokenRouter rejects `x-api-key` outright and demands
+    // `Authorization: Bearer tr_...`. Every built-in path for this card is
+    // already Bearer-native (the model fetch and /api/test send
+    // `Authorization: Bearer`, and "Show config" emits OPENAI_API_KEY), so this
+    // flag is not consulted today. It is kept as the record of fact for the
+    // ClaudeCodeAdapter branch, which is the one shape that would emit an
+    // x-api-key apiKeyHelper that TokenRouter rejects.
+    bearerAuth: true,
+    // The catalogue is paid — only explicitly `:free` / `-free` ids are free
+    // (a temporary promo). Matches the server registry's scrapeDefaultPaid and
+    // its all-paid static list; claiming free here would show a bogus
+    // "N free" badge on the card.
+    defaultKey: '', isFree: (m) => /(^|[:._\-\s])free($|[:._\-\s])/i.test(m?.id || '') || /(^|[:._\-\s])free($|[:._\-\s])/i.test(m?.name || ''),
   },
   {
     id: 'custom', name: 'Custom Gateway', sub: 'your-endpoint.com',
@@ -160,12 +188,6 @@ export function setProviderExtras(list) {
   (Array.isArray(list) ? list : []).forEach((p) => { if (p && p.id) registryExtras[p.id] = p; });
 }
 
-// Register the merged, UI-safe list (from allProviders) as the fallback index.
-export function registerProviderExtras({ dynamic = [], custom = [] } = {}) {
-  setProviderExtras(allProviders({ dynamic, custom }));
-}
-
-export function getProviderExtras() { return registryExtras; }
 
 // Filter tags used by the Cloud Providers explorer (All / Popular / Free /
 // Anthropic Compatible / OpenAI Compatible / Google). Presentation-only.
@@ -182,7 +204,10 @@ export const PROVIDER_TAGS = {
   mistral: ['openai', 'free'],
   huggingface: ['openai', 'free'],
   chutes: ['openai', 'free'],
-  tokenrouter: ['openai', 'free'],
+  // Paid catalogue — only explicitly `:free`/`:-free` ids are a temporary promo,
+  // so TokenRouter must NOT carry the 'free' tag or it would surface under the
+  // Cloud Providers "Free" filter while offering nothing free.
+  tokenrouter: ['openai'],
   custom: ['anthropic', 'openai'],
 };
 
@@ -196,6 +221,45 @@ export function providerTags(id) {
 // excluded (their configs are shown copyable, not written to settings.json).
 export function claudeCodeProviders() {
   return PROVIDERS.filter((p) => p.claudeCode || p.id === 'openrouter');
+}
+
+// ─── Single source of truth: how does this provider reach Claude Code? ───
+//
+// Curated, custom (cst:) and adopted (dyn:) providers all pass through here so
+// the three card types can never drift apart again. They used to apply three
+// different rules — curated checked `format === 'openai'`, custom checked
+// `api.format === 'anthropic'` for the apply button but `=== 'openai'` for the
+// proxy, and adopted had no shared check at all. The visible symptom was
+// OpenRouter (format 'openai' but claudeCode:true) rendering BOTH "Apply to
+// Claude Code" and "Use with Claude Code (via Nexference)".
+//
+// The rule:
+//   • A provider is Anthropic-compatible when it speaks the Anthropic Messages
+//     API — native `format: 'anthropic'`, or a gateway that also serves it
+//     (claudeCode flag, or OpenRouter which the engine forces to Anthropic).
+//     These configure Claude Code directly and must NOT be offered the proxy.
+//   • Only a provider that is NOT Anthropic-compatible and is OpenAI-shaped
+//     needs the local proxy to be usable with Claude Code at all.
+export function claudeCodeCompatibility(provider) {
+  if (!provider) return { format: 'unknown', anthropic: false, proxy: false };
+  const api = provider.api || {};
+  const format = api.format || provider.format || 'unknown';
+  const claudeCode = !!(provider.claudeCode || api.claudeCode);
+  // OpenRouter is dual-compatible; the engine emits Anthropic config for it.
+  const dualAnthropic = provider.id === 'openrouter' || api.dualAnthropic === true;
+  const anthropic = format === 'anthropic' || claudeCode || dualAnthropic;
+  // Some providers publish a SEPARATE OpenAI-compatible surface alongside their
+  // native dialect. Google Gemini is the case in point: its native API is
+  // /v1beta (key in the query string, `contents` payloads) which the proxy's
+  // OpenAI translator cannot speak, but Google ALSO serves
+  // /v1beta/openai/chat/completions with plain Bearer auth and OpenAI payloads.
+  // Declaring that explicitly makes the card proxy-capable WITHOUT relabelling
+  // the provider as `openai`, which would break its native Gemini client config
+  // (GOOGLE_GENAI_BASE_URL / GOOGLE_API_KEY) and the Gemini test adapter.
+  const openaiCompat = provider.openaiCompat || api.openaiCompat || null;
+  const proxyBaseUrl = (openaiCompat && (openaiCompat.baseUrl || openaiCompat)) || null;
+  const proxy = !anthropic && (format === 'openai' || !!proxyBaseUrl);
+  return { format, anthropic, proxy, proxyBaseUrl, proxyFormat: 'openai' };
 }
 
 // ─── Global provider list (v2.2.1) ───

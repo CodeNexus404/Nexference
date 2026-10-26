@@ -7,7 +7,7 @@
 // (their config files are well-defined and Nexference writes them via the
 // same safe pipeline). Gemini CLI has no written-config path yet — it stays
 // MANUAL/SUPPORTED. Nexference remains honest about that distinction.
-import { getProvider, providerProtocols } from '../providers/registry.js';
+import { getProvider, providerProtocols, claudeCodeCompatibility } from '../providers/registry.js';
 import { verified, supported, experimental, unsupported } from './result.js';
 
 // The API/protocol each client natively understands for configuration.
@@ -57,19 +57,31 @@ export function checkClientProvider(clientId, providerId) {
         'Anthropic-format gateway — consumed directly by Claude Code.',
       ]);
     }
-    if (provider.format === 'openai') {
-      return unsupported(
-        'Claude Code expects the Anthropic Messages API; OpenAI providers are not directly compatible.',
-        ['You can export an OpenAI config for an OpenAI-compatible client instead.']
-      );
+    // Decide from claudeCodeCompatibility() rather than the raw `format` field.
+    // That keeps one source of truth and, crucially, handles DUAL-surface
+    // providers whose top-level format understates what they can do: Gemini
+    // reports format 'gemini' but also exposes an OpenAI-compatible endpoint, so
+    // the old format checks rejected it even though the proxy can drive it.
+    const compat = claudeCodeCompatibility(provider);
+    if (compat.proxy && !compat.anthropic) {
+      // Previously "unsupported" — true before the Nexference proxy existed, but it
+      // silently hid every OpenAI-compatible provider from Claude Code, including
+      // the fallback tier picker, even though the proxy translates OpenAI <-> Anthropic
+      // in both directions.
+      return supported('openai-proxy', 'claude-code', [
+        `Routed through the Nexference proxy, which translates ${String(compat.proxyFormat || 'openai')} chat completions to the Anthropic Messages API.`,
+        'The proxy runs on 127.0.0.1 and holds the API key in memory only — it is never written to your settings file.',
+      ]);
     }
-    if (provider.format === 'gemini') {
-      return unsupported(
-        'Claude Code expects the Anthropic Messages API; Gemini providers are not directly compatible.',
-        ['You can export a Gemini config for the Gemini CLI instead.']
-      );
+    if (compat.proxy && compat.anthropic) {
+      return supported('anthropic-proxy', 'claude-code', [
+        'Prefer the native Anthropic surface; the proxy is kept as a fallback path.',
+      ]);
     }
-    return unsupported('This provider has no known compatibility path with Claude Code.');
+    return unsupported(
+      'Claude Code expects the Anthropic Messages API, and this provider exposes no Anthropic or OpenAI-compatible surface.',
+      ['You can export a config for a client that speaks this provider\u2019s native protocol instead.']
+    );
   }
 
   const clientProtocols = CLIENT_PROTOCOLS[clientId] || [];

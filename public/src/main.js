@@ -2,6 +2,7 @@ import { workspace } from './core/state.js';
 import { Storage } from './core/storage.js';
 import { PROVIDERS } from './providers/registry.js';
 import { theme } from './core/theme.js';
+import { applyAppearance } from './ui/appearance.js';
 import { router } from './core/router.js';
 import { notify } from './core/notifications.js';
 import { openProviderConfig } from './components/providerConfig.js';
@@ -9,7 +10,7 @@ import { toggleCommandPalette } from './components/commandPalette.js';
 import { openWorkflow } from './config/workflow.js';
 import { startFallbackMonitor, tickFallbackMonitor } from './config/fallbackMonitor.js';
 import * as UI from './ui/app.js';
-import { renderFallbackPanel, refreshFallbackChip, fbSetMaster, fbSelectClient, fbEnableForClient, fbToggleTier, fbConfigureTier, fbTestTier, fbUpdateKnobs, fbCapturePrimary, fbClearPlan } from './ui/fallbackUI.js';
+import { renderFallbackPanel, refreshFallbackChip, fbSetMaster, fbSelectClient, fbEnableForClient, fbToggleTier, fbConfigureTier, fbTestTier, fbUpdateKnobs, fbCapturePrimary, fbAddTier, fbRemoveTier, fbClearPlan } from './ui/fallbackUI.js';
 import { renderIntelligenceCenter } from './ui/intelligenceCenter.js';
 import { renderEcosystem } from './ui/ecosystem.js';
 import { initIntegrationActions } from './ui/providerIntegrations.js';
@@ -22,6 +23,10 @@ import { getIntegrations } from './providers/integrationService.js';
 // inline onclick/oninput handlers in index.html keep working.
 
 theme.apply();
+// Apply accent / density / motion / text scale. The inline boot script in
+// index.html already set these before first paint; this re-applies them from the
+// same source of truth, which is what makes them survive a theme change.
+applyAppearance();
 
 // Register page renderers with the router.
 router.register('workspace', UI.renderWorkspace);
@@ -64,6 +69,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('nx-fallback', () => {
     if (document.body.dataset.page === 'settings') renderFallbackPanel();
     refreshFallbackChip();
+    // The Workspace topology shows the ACTIVE fallback tier, so a switch has to
+    // repaint it — otherwise the page keeps showing the pre-switch provider and
+    // the user cannot see what auto-switch actually did.
+    if (document.body.dataset.page === 'workspace' && window.renderWorkspace) window.renderWorkspace();
   });
 
   // Keep pulling the server cache until its startup fetch settles.
@@ -165,6 +174,12 @@ const GLOBALS = {
   openHealthModal: UI.openHealthModal,
   openActivityModal: UI.openActivityModal,
   loadBackups: UI.loadBackups,
+  backupToggleSelectMode: UI.backupToggleSelectMode,
+  backupRowClick: UI.backupRowClick,
+  backupToggleOne: UI.backupToggleOne,
+  backupToggleAll: UI.backupToggleAll,
+  backupClearSelection: UI.backupClearSelection,
+  deleteSelectedBackups: UI.deleteSelectedBackups,
   refreshConfigStatus: UI.refreshConfigStatus,
   viewCurrentConfig: UI.viewCurrentConfig,
   openBackupView: UI.openBackupView,
@@ -184,6 +199,8 @@ const GLOBALS = {
   fbTestTier,
   fbUpdateKnobs,
   fbCapturePrimary,
+  fbAddTier,
+  fbRemoveTier,
   fbClearPlan,
   runFallbackTick: tickFallbackMonitor,
   notifyToast: (msg, type) => notify.toast(msg, type || 'error'),

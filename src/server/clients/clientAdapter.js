@@ -60,7 +60,15 @@ export class ClientAdapter {
   validateConfig(config) {
     if (!config || typeof config !== 'object') return { valid: false, error: 'Config must be an object' };
     if (config.env && typeof config.env !== 'object') return { valid: false, error: 'env must be an object' };
-    return { valid: true };
+      // An empty object carries no model and no provider endpoint, so writing it
+      // would silently strip the live configuration down to nothing. Unlike
+      // /api/config/apply — which already rejects a bare `{}` — this route is
+      // reachable with one, so the guard belongs here where every write through
+      // this adapter funnels.
+      if (Object.keys(config).length === 0) {
+        return { valid: false, error: 'Refusing to write an empty configuration \u2014 it would clear your provider, model and API key.' };
+      }
+      return { valid: true };
   }
 
   // Safe apply: backup + atomic write + verify (delegates to settingsStore).

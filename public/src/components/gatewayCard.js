@@ -50,7 +50,12 @@ export function createGatewayCard(provider) {
   const fetching = isFetching(provider.id);
   const source = getModelSource(provider.id);
   const showPaid = Storage.getPaid(provider.id);
-  const listModels = showPaid ? allModels : freeModels;
+  // Same paid-only fallback as the modal picker: a gateway whose entire
+  // catalogue is paid (TokenRouter) would otherwise render an empty <select>
+  // with Include-paid off, leaving no model to test or apply.
+  const listModels = showPaid
+    ? allModels
+    : (freeModels.length ? freeModels : allModels);
   const freeIds = new Set(freeModels.map(m => m.id));
 
   const modelDisplay = (!needsKey && model) ? model : '';

@@ -13,6 +13,15 @@ const PAID = (id) => `gw_paid_${id}`;
 const CUSTOM_FORMAT = 'gw_custom_format';
 const PAGE = 'nx_page';
 const THEME = 'nx_theme';
+// Appearance preferences. All are cosmetic and local-only, so they live in the
+// same localStorage bucket as everything else — nothing here leaves the device.
+const ACCENT = 'nx_accent';
+const DENSITY = 'nx_density';
+const MOTION = 'nx_motion';
+
+// The accent palette offered in Settings. Keys map to CSS custom properties set
+// on <html>; see ACCENT_VARS in ui/appearance.js for the resolved values.
+const ACCENTS = ['indigo', 'azure', 'teal', 'violet', 'amber', 'rose'];
 const INTEL_PERIOD = 'nx_intel_period';
 const SIDEBAR = 'nx_sidebar';
 const PROFILE = (id) => `nx_profile_${id}`;
@@ -80,6 +89,31 @@ export const Storage = {
   },
   setTheme(val) {
     localStorage.setItem(THEME, val);
+  },
+
+  // ── Appearance preferences ──
+  // `prefs()` returns a complete, validated object so callers never have to guard
+  // against a missing or hand-edited localStorage value. Unknown stored values
+  // fall back to the default rather than rendering an unusable control.
+  getAccent() {
+    const v = localStorage.getItem(ACCENT) || '';
+    return ACCENTS.includes(v) ? v : 'indigo';
+  },
+  setAccent(v) {
+    if (ACCENTS.includes(v)) localStorage.setItem(ACCENT, v);
+  },
+  getDensity() {
+    const v = localStorage.getItem(DENSITY) || '';
+    return ['comfortable', 'compact'].includes(v) ? v : 'comfortable';
+  },
+  setDensity(v) {
+    if (['comfortable', 'compact'].includes(v)) localStorage.setItem(DENSITY, v);
+  },
+  getMotion() {
+    return localStorage.getItem(MOTION) === 'reduced' ? 'reduced' : 'full';
+  },
+  setMotion(v) {
+    localStorage.setItem(MOTION, v === 'reduced' ? 'reduced' : 'full');
   },
 
   // Sidebar collapse state: 'collapsed' | 'expanded'

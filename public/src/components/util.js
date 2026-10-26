@@ -10,6 +10,16 @@ export function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Escape a value for safe use INSIDE a CSS attribute selector, e.g.
+// `[data-id="${attributeEscape(id)}"]`. `esc()` is for HTML text/attribute
+// context, not CSS: an id containing ':' or a quote terminates the selector or
+// injects one, and querySelector then throws a SyntaxError that surfaces as the
+// control silently doing nothing. CSS string escaping only needs the quote and
+// the backslash handled; ':' and '[]' are legal inside a quoted CSS string.
+export function attributeEscape(v) {
+  return String(v ?? '').replace(/[\\"]/g, (c) => '\\' + c);
+}
+
 export function norm(u) {
   return u && u.endsWith('/') ? u : (u || '') + '/';
 }
@@ -81,4 +91,20 @@ export function highlightJSON(json) {
       }
       return `<span class="${cls}">${match}</span>`;
     });
+}
+
+// Provider ids are NOT CSS-safe. Custom ("cst:…") and adopted ("dyn:…") ids
+// contain a colon, so a bare class selector like `.api-key-cst:you-mue7kbj3` is
+// parsed as a class followed by a `:pseudo-class` and querySelector throws a
+// DOMException — which silently broke Test Connection and Apply for every custom
+// and adopted provider. Quoting the id inside an attribute selector keeps the
+// colon literal, so this works for all id shapes.
+export function cpField(root, cls, id) {
+  if (!id) return null;
+  const scope = root || document;
+  try {
+    return scope.querySelector(`[class~="${cls}-${id}"]`);
+  } catch {
+    return null;
+  }
 }

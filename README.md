@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="76" height="76" alt="Nexference" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAxMDAgMTAwJz48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9J2cnIHgxPScwJyB5MT0nMCcgeDI9JzEnIHkyPScxJz48c3RvcCBvZmZzZXQ9JzAnIHN0b3AtY29sb3I9JyM3NGExZmYnLz48c3RvcCBvZmZzZXQ9JzEnIHN0b3AtY29sb3I9JyMzZDYzZDgnLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEwMCcgcng9JzI0JyBmaWxsPSd1cmwoI2cpJy8+PHBhdGggZD0nTTMxIDczVjI3bDM4IDQ1VjI3JyBzdHJva2U9JyNmZmZmZmYnIHN0cm9rZS13aWR0aD0nOScgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBzdHJva2UtbGluZWpvaW49J3JvdW5kJy8+PC9zdmc+" />
+<img width="76" height="76" alt="Nexference" src="nexference-mark.svg" />
 
 # ⚡ Nexference
 
@@ -19,7 +19,7 @@
 
 ## Overview
 
-**Nexference v2.3.0 ([`d69183e`](https://github.com/CodeNexus404/Nexference/commit/d69183e)) — Custom Provider Registry & Provider Onboarding** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
+**Nexference v2.4.0 — Local Proxy, Fallback Hardening & Ecosystem Discovery** is a local-first AI workspace for discovering AI environments, configuring compatible AI clients, managing providers and local runtimes, safely generating configuration files, and testing models through a unified execution workspace.
 
 It spans five kinds of intelligence and a safety-first configuration pipeline:
 
@@ -30,6 +30,7 @@ It spans five kinds of intelligence and a safety-first configuration pipeline:
 - **Model Intelligence** — one honest record per model with capability flags, availability, access type (free/paid/freemium), and lifecycle derived only from what a provider/runtime actually reports.
 - **Client Compatibility** — a single compatibility engine answering "can client X use provider Y / runtime Z, and how?".
 - **Unified Execution Gateway** (v2.0.0) — central orchestration layer that routes execution through the appropriate bridge (legacy provider, integration adapter, or runtime) and returns normalized results with honest errors.
+- **Nexference Local Proxy** — a loopback translation hop that makes **OpenAI-compatible and Gemini providers usable from Claude Code**. Claude Code speaks only the Anthropic Messages API; the proxy accepts `/v1/messages` on `127.0.0.1:3000` and rewrites it to the upstream provider's OpenAI dialect and back. Anthropic-compatible providers skip the proxy entirely. API keys stay in server memory and are **never written to disk**.
 
 On top of that sits a **Safe Configuration Management** pipeline and a **Unified Playground** with an honest execution engine, metrics, history, and comparison. A **Workspace Health** report and an **Activity** feed give you observability without exposing secrets.
 
@@ -37,11 +38,80 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 
 ### Recent releases
 
+- **v2.4.0** — Local proxy, fallback hardening, and ecosystem discovery
 - **v2.3.0** — Fallback auto-switch, model-list fixes, and UI polish ([`d69183e`](https://github.com/CodeNexus404/Nexference/commit/d69183e))
 - **v2.2.1** — Stabilize provider ecosystem and client configuration ([`7e5e2f4`](https://github.com/CodeNexus404/Nexference/commit/7e5e2f4))
 - **v2.2.0** — Multi-Source Provider Discovery & Discovered Models ([`8b8bdb9`](https://github.com/CodeNexus404/Nexference/commit/8b8bdb9))
 
 ---
+
+## Screenshots
+
+A quick tour of the workspace — every screen is served locally.
+
+| Workspace | Ecosystem discovery |
+| --- | --- |
+| ![Workspace dashboard](docs/screenshots/01-dashboard.png) | ![Ecosystem discovery](docs/screenshots/02-ecosystem-discovery.png) |
+| **Provider details** | **Cloud providers** |
+| ![Provider details](docs/screenshots/03-provider-details.png) | ![Cloud providers](docs/screenshots/04-cloud-providers.png) |
+| **Custom providers** | **Configuration workspace** |
+| ![Custom providers](docs/screenshots/05-custom-providers.png) | ![Configuration workspace](docs/screenshots/06-configuration-workspace.png) |
+| **Fallback system** | **Playground** |
+| ![Fallback system](docs/screenshots/07-fallback-system.png) | ![Playground](docs/screenshots/08-playground.png) |
+| **Intelligence center** | **Clients** |
+| ![Intelligence center](docs/screenshots/09-intelligence-center.png) | ![Clients](docs/screenshots/10-client-registry.png) |
+| **Configuration diff** | |
+| ![Configuration diff](docs/screenshots/11-configuration-diff.png) | |
+
+---
+
+## What's new in v2.4.0
+
+> This section documents the work since the `v2.3.0` release.
+
+**Nexference Local Proxy + workspace honesty** — the headline change is that Claude Code can now use
+**OpenAI-compatible providers at all**, plus a Workspace page rebuilt around what is actually true.
+
+- **Local proxy (`src/server/proxy/`)** — Claude Code only speaks the Anthropic Messages API. The proxy
+  accepts `/v1/messages` on `127.0.0.1:3000` and translates it to the upstream provider's OpenAI dialect
+  (tools, streaming, thinking blocks, usage and error mapping included), then translates the reply back.
+  Anthropic-compatible providers are detected and skip the proxy entirely — no needless hop.
+  **API keys live in server memory and are never written to `settings.json`.**
+- **Compatibility engine corrected** — `checkClientProvider()` now decides from `claudeCodeCompatibility()`
+  instead of a raw `format` check. This unblocked **9 previously-unreachable OpenAI-compatible providers**
+  (Groq, Mistral, Cerebras, NVIDIA, Chutes, Hugging Face, TokenRouter, OrcaRouter, Gemini-via-OpenAI) —
+  all 14 curated providers are now usable from Claude Code. Dual-surface providers whose top-level `format`
+  understated their capability were being wrongly rejected.
+- **Workspace topology** — a new `topology.js` component renders the live request path. By default it is
+  only **Client → Provider → Model**; the proxy node appears when the proxy is genuinely in the path, and a
+  compact tier spine descends from the provider node when a fallback plan is armed. An *armed but unused*
+  proxy session is deliberately **not** drawn — it would claim a hop that does not exist.
+- **Fallback plans hold up to 5 tiers** (was a hard-coded 2), with an opt-in **Select** button and a
+  `+ Add fallback tier` control. Tiers are no longer truncated on load, and a plan that is currently
+  switched away from a tier refuses to drop it.
+- **Fallback primary tracks your applied config** — applying a different provider for a client now updates
+  the plan's primary automatically, so the monitor can never revert to a stale provider and undo your change.
+- **Environment Health no longer cries wolf** — local runtime and local-model checks are scoped to
+  configurations that actually target a local server. A correct cloud setup was reporting
+  "Configuration requires attention" while failing 2 of 4 checks; it now reports **healthy / 100%**.
+  Both `/api/environment` and `/api/health` agree.
+- **Backup multi-select** — opt-in select mode, a live "n selected" count, and `Select all` that covers
+  **every** backup on disk rather than only the 12 rendered. Bulk delete reports per-id results.
+- **Command palette (⌘K / Ctrl K)** — platform-correct modifier, fuzzy subsequence matching, a result
+  count, an empty state, and a fix so hovering and arrowing can no longer disagree about what Enter runs.
+- **Safety fix** — the per-client config route refused nothing, so a bare `{}` body could overwrite a live
+  `settings.json` with an empty file. It now rejects empty configurations, matching `/api/config/apply`.
+- **Dead code removed** — the unused `trendChart.js` and `dynamicProviderCard` were deleted, along with
+  `stopFallbackMonitor`, two unused registry helpers, 88 lines of orphaned CSS and two duplicate rules.
+- **Ecosystem refresh is a real background job** — `POST /api/ecosystem/discover` now returns `202` immediately
+  and exposes `GET /api/ecosystem/discover/status`; the **Refresh Sources** button shows a spinner and
+  "Refreshing…" for the whole run, including after navigation. Sources are fetched concurrently, validation and
+  logo checks are concurrency-limited and cached (12h / 7d), so a warm refresh drops from ~90–120s to ~2s.
+  Source paths resolve cross-platform (relative, absolute, `file://`, `/` or `\`) and UTF-8 BOMs are tolerated,
+  so the shipped `data/` registry works unchanged on Windows.
+- **Clients page** — adds OpenCode, Codex CLI, and Antigravity CLI ahead of Cursor. Claude Code remains the
+  only configurable client; every other card is marked **Coming soon** and keeps its Configure action disabled.
+- **Version** — bumped to `2.4.0` across `package.json`, the UI, and this document.
 
 ## What's new in v2.3.0
 
@@ -50,7 +120,7 @@ On top of that sits a **Safe Configuration Management** pipeline and a **Unified
 **Fallback Auto-Switch, Model-List Fixes & UI Polish** — the latest release adds an honest, safety-first fallback engine that keeps you running through provider outages, fixes the model picker so it never dead-ends, and polishes client identity.
 
 - **Fallback auto-switch** — while the dashboard is open, the new `fallbackMonitor` quietly probes the active provider/model once a minute. After `failThreshold` consecutive real failures it auto-switches to the next enabled tier by reusing the proven apply path (`configForSelection` → preview → backup → verified write). If every tier fails it reverts to the primary and marks the client degraded; with `autoRevert` enabled it keeps probing the primary and switches back the moment it is healthy again.
-- **Per-client fallback plans** — the new `fallbackStore` persists per-client plans (primary + up to two enabled tiers) plus knobs (`failThreshold`, `cooldownMin`, `autoRevert`) and live monitor state (active tier, fail streak, last switch time, degraded flag). Plans hold provider/model references only — no secrets ever.
+- **Per-client fallback plans** — the new `fallbackStore` persists per-client plans (primary + up to five enabled tiers) plus knobs (`failThreshold`, `cooldownMin`, `autoRevert`) and live monitor state (active tier, fail streak, last switch time, degraded flag). Plans hold provider/model references only — no secrets ever.
 - **Fallback UI** — a dedicated `fallbackUI` manages plans and monitors state inline in the configuration workflow, with clear transition labels; a follow-up fix [`2ba1edd`](https://github.com/CodeNexus404/Nexference/commit/2ba1edd) sharpens those labels and auto-clears the degraded state when the primary recovers.
 - **Honesty & safety preserved** — detection and switching run only while a tab is open (closing the dashboard leaves the last written config exactly as-is); switching pauses while an external change is pending so it never fights manual edits; probes reuse the existing key store and `/api/test` — no secret material is persisted or logged.
 - **Model-list fixes** — the Model Library resolves the unified catalogue and falls back to the full list whenever a free-only request comes back empty (some providers expose only paid models in their pricing catalogue, e.g. Agent Router — the picker no longer dead-ends), merges client-side `liveModels` for custom (`cst:`) gateways, and never hangs on a persistent "Loading models…".
@@ -375,12 +445,14 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 | **Provider Intelligence** | Live, normalised cloud model catalogue; free/paid detection; honest source status. |
 | **Runtime Intelligence** | Real local-runtime detection, installed models, safe start (e.g. LM Studio / "Bionic" on macOS). |
 | **Model Intelligence** | One honest record per model; capability flags from real reports. |
+| **Nexference Local Proxy** | Loopback Anthropic↔OpenAI translation so Claude Code can use OpenAI-compatible and Gemini providers. Keys stay in memory. |
 | **Client Compatibility** | "Can client X use provider Y / runtime Z, and how?" with reasons and required config. |
 | **Safe Configuration** | Preview CURRENT → NEW diff, atomic+verified write, automatic backups, restore, external-change watch. |
 | **Profiles** | Reusable, secret-free saved selections (client + provider/runtime + model). |
 | **Unified Playground** | Pre-flight validation, SSE streaming, honest metrics, history, side-by-side compare. |
 | **Execution History** | Secret-free local run log (no prompts bodies beyond a short preview, no keys). |
-| **Workspace Health** | Honest overall + per-category status and score. |
+| **Workspace Topology** | Live request path as a graph; the proxy node and fallback spine appear only when they are real. |
+| **Workspace Health** | Honest overall + per-category status and score; local checks are optional on cloud configs. |
 | **Activity** | Persistent, secret-free feed of important workspace events. |
 
 ---
@@ -391,6 +463,11 @@ The architecture, backend APIs, provider/runtime/client adapters, Model Intellig
 - **Atomic writes** — config is written to a temp file then renamed into place; a failed write never corrupts the live file.
 - **Verification** — after writing, the file is re-read and validated before success is reported.
 - **Secret handling** — API keys stay in the browser `localStorage` and are only sent to the provider you choose. Profiles, history, activity, previews, and APIs never contain keys, tokens, or authorization headers.
+- **Proxy keys never touch disk** — when a request is routed through the local proxy, the provider key is
+  held in server memory only. `settings.json` records just the loopback URL, so the key is not written into
+  any config file or backup.
+- **Empty-config guard** — both config apply paths reject an empty payload, so a malformed request cannot
+  wipe a working `settings.json` and silently break the client.
 - **No fake data** — metrics are measured, not estimated (live numbers are clearly labelled "(live)" while a stream is in flight); capabilities come only from what providers/runtimes actually report.
 
 ## Support Honesty
@@ -434,13 +511,16 @@ src/server/
   routes/                 # thin HTTP handlers
   health/                 # workspace health service + rules
   activity/               # persistent, secret-free activity service
+  proxy/                  # loopback Anthropic<->OpenAI translation (store, router, codec)
 
 public/src/
   core/                   # router, state, storage, theme, notifications, activityStore
-  components/             # modal, command palette, provider/client config
-  config/                 # configuration workflow
+  components/             # modal, command palette, provider/client config, workspace topology
+  config/                 # configuration workflow, fallback store/monitor/UI
+  providers/              # curated provider registry + Claude Code compatibility
   models/                 # model service + library
   playground/             # playground service, history, markdown
+  localProxy.js           # client for /api/local-proxy/* (arm, disarm, status)
   ui/                     # page renderers (app.js)
 ```
 
@@ -457,6 +537,9 @@ public/src/
 | `/api/provider-changes`, `/api/provider-changes/summary`, `/api/provider-changes/:providerId` | Provider change feed |
 | `/api/config/status`, `/api/config/preview`, `/api/config/apply`, `/api/config/events` | Safe configuration |
 | `/api/backups` | Backups list / restore / delete |
+| `/api/backups/delete-many` | Bulk delete a selection (per-id results) |
+| `/api/local-proxy/status`, `/api/local-proxy/arm`, `/api/local-proxy/disarm` | Local proxy session lifecycle |
+| `/v1/messages` (loopback) | Anthropic Messages endpoint the proxy exposes to Claude Code |
 | `/api/profiles` | Portable profiles |
 | `/api/runtimes`, `/api/runtimes/:id/status`, `/api/runtimes/:id/models`, `/api/local-runtimes` | Runtime detection + start |
 | `/api/clients`, `/api/config/compatibility` | Clients + compatibility |

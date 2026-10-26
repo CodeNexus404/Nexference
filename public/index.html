@@ -20,6 +20,31 @@
         if (localStorage.getItem('nx_sidebar') === 'collapsed') {
           document.documentElement.classList.add('sidebar-collapsed');
         }
+
+        // Appearance (accent / density / motion) is applied here,
+        // before first paint, so a reload never flashes the default palette and
+        // then swaps to the saved one. This inline copy mirrors ui/appearance.js
+        // because the module cannot run before the document element exists;
+        // re-applying it from Settings afterwards is idempotent.
+        var A = {
+          indigo: ['#5b8def', 'rgba(91,141,239,.16)',  'rgba(91,141,239,.34)'],
+          azure:  ['#2f9fe0', 'rgba(47,159,224,.16)',  'rgba(47,159,224,.34)'],
+          teal:   ['#1fb59a', 'rgba(31,181,154,.16)',  'rgba(31,181,154,.34)'],
+          violet: ['#9b6ef3', 'rgba(155,110,243,.16)', 'rgba(155,110,243,.34)'],
+          amber:  ['#e0a12c', 'rgba(224,161,44,.16)',  'rgba(224,161,44,.34)'],
+          rose:   ['#e2568c', 'rgba(226,86,140,.16)',  'rgba(226,86,140,.34)'],
+        };
+        var acc = A[localStorage.getItem('nx_accent')] || A.indigo;
+        var rs = document.documentElement.style;
+        rs.setProperty('--accent', acc[0]);
+        rs.setProperty('--accent-soft', acc[1]);
+        rs.setProperty('--accent-glow', acc[2]);
+        document.documentElement.setAttribute('data-density',
+          localStorage.getItem('nx_density') === 'compact' ? 'compact' : 'comfortable');
+        var reduced = localStorage.getItem('nx_motion') === 'reduced' ||
+          (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        document.documentElement.setAttribute('data-motion', reduced ? 'reduced' : 'full');
+        if (reduced) document.documentElement.classList.add('reduce-motion');
       } catch (e) { document.documentElement.setAttribute('data-page', 'workspace'); }
     })();
   </script>
@@ -90,7 +115,14 @@
         </div>
       </nav>
       <div class="sidebar-foot">
-        <div class="ver">v2.3.0</div>
+        <div class="ver">v2.4.0</div>
+        <div class="side-links">
+          <a class="side-link" href="https://github.com/CodeNexus404/Nexference" target="_blank" rel="noopener noreferrer"
+             title="View the source, star the project or report an issue"><span class="mark-frame"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.12 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23 .66 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.89-.01 3.29 0 .32.22.7.83.58C20.57 22.3 24 17.8 24 12.5 24 5.87 18.63.5 12 .5Z"/></svg></span><span class="side-link-tx">GitHub</span></a>
+            <a class="side-link side-link-coffee" href="https://www.buymeacoffee.com/CodeNexus404" target="_blank" rel="noopener noreferrer"
+               title="Support development — buy me a coffee"><span class="bmc-mark" role="img" aria-label="Buy me a coffee"><img class="bmc-light" src="/brand/buy-me-a-coffee.svg" alt="" loading="lazy" decoding="async"><img class="bmc-dark" src="/brand/buy-me-a-coffee-dark.svg" alt="" loading="lazy" decoding="async"></span><span class="side-link-tx">Buy me a coffee</span></a>
+
+        </div>
       </div>
     </aside>
 
@@ -112,7 +144,9 @@
           <button class="icon-btn theme-toggle" id="themeToggle" onclick="cycleTheme()" title="Cycle theme" aria-label="Cycle theme">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
-          <div class="app-ver" id="appVersion">v2.3.0</div>
+          <a class="icon-btn gh-link" href="https://github.com/CodeNexus404/Nexference" target="_blank" rel="noopener noreferrer"
+                 title="Nexference on GitHub — star, report an issue or read the source"
+                 aria-label="Nexference on GitHub"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.12 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23 .66 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.89-.01 3.29 0 .32.22.7.83.58C20.57 22.3 24 17.8 24 12.5 24 5.87 18.63.5 12 .5Z"/></svg></a>
         </div>
       </header>
 
@@ -192,29 +226,83 @@
           <p>Theme, configuration profiles, backups and security.</p>
         </div>
         <div class="settings-grid">
-          <div class="panel">
+          <div class="panel settings-appearance">
             <h3>Appearance</h3>
-            <div class="seg" id="themeSeg"></div>
-          </div>
-          <div class="panel settings-profiles">
-            <h3>Configuration Profiles</h3>
-            <p class="muted">Profiles reference a provider &amp; model — they never store secrets.</p>
-            <div class="profile-list" id="profileList"></div>
-            <div class="profile-new">
-              <input id="profileName" class="inp" placeholder="Profile name (e.g. Work)">
-              <button class="btn btn-go" onclick="createProfile()">Save current as profile</button>
+            <p class="muted" id="apSummary">Loading…</p>
+
+            <div class="ap-row">
+              <span class="ap-label">Theme</span>
+              <div class="ap-seg" id="themeSeg"></div>
+            </div>
+
+            <div class="ap-row ap-row-stack">
+              <span class="ap-label">Accent colour</span>
+              <div class="ap-accents" id="apAccents" role="radiogroup" aria-label="Accent colour"></div>
+            </div>
+
+            <div class="ap-row">
+              <span class="ap-label">Layout density</span>
+              <div class="ap-seg ap-seg-sm" id="apDensity" role="radiogroup" aria-label="Layout density">
+                <button class="ap-theme-btn" data-density="comfortable">Comfortable</button>
+                <button class="ap-theme-btn" data-density="compact">Compact</button>
+              </div>
+            </div>
+
+            <div class="ap-row ap-row-end">
+              <span class="ap-label">Reduce motion
+                <small class="ap-hint">Calms transitions and the status pulse</small>
+              </span>
+              <label class="switch">
+                <input type="checkbox" id="apMotion" aria-label="Reduce motion">
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="ap-reset">
+              <button class="btn btn2 sm" id="apReset">Reset to defaults</button>
             </div>
           </div>
-          <div class="panel settings-backups">
+          <div class="settings-col">
+            <div class="panel settings-profiles">
+              <h3>Configuration Profiles</h3>
+              <p class="muted">Profiles reference a provider &amp; model &mdash; they never store secrets.</p>
+              <div class="profile-list" id="profileList"></div>
+              <div class="profile-new">
+                <input id="profileName" class="inp" placeholder="Profile name (e.g. Work)">
+                <button class="btn btn-go" onclick="createProfile()">Save current as profile</button>
+              </div>
+            </div>
+
+            <div class="panel settings-support">
+              <h3>Contact &amp; Support</h3>
+              <p class="support-desc">
+                Nexference is built and maintained in the open. If something is broken, a feature is
+                missing, or you just want to say hello &mdash; the GitHub repo is the fastest way to
+                reach me. If it saved you time, a coffee is a lovely way to say thanks and keeps the
+                work going.
+              </p>
+              <div class="support-row">
+                <a class="support-btn" href="https://github.com/CodeNexus404/Nexference" target="_blank" rel="noopener noreferrer"
+                   title="View the source, star the project or report an issue"><span class="mark-frame"><svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.12 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23 .66 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.89-.01 3.29 0 .32.22.7.83.58C20.57 22.3 24 17.8 24 12.5 24 5.87 18.63.5 12 .5Z"/></svg></span><span>GitHub</span></a>
+                <a class="support-btn support-btn-coffee" href="https://www.buymeacoffee.com/CodeNexus404" target="_blank" rel="noopener noreferrer"
+                 title="Support development — buy me a coffee"><span class="bmc-mark" role="img" aria-label="Buy me a coffee"><img class="bmc-light" src="/brand/buy-me-a-coffee.svg" alt="" loading="lazy" decoding="async"><img class="bmc-dark" src="/brand/buy-me-a-coffee-dark.svg" alt="" loading="lazy" decoding="async"></span><span>Buy me a coffee</span></a>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="panel settings-backups" id="settingsBackups">
             <h3>Backups</h3>
             <p class="muted">Before each apply, the previous <code>~/.claude/settings.json</code> is copied to <code>~/.nexference/backups/</code> with a timestamp.</p>
             <div id="backupList" class="backup-list"></div>
           </div>
         </div>
-        <div class="security-note">
-          <span class="lock">🔒</span>
-          <span>API keys stay in your browser's localStorage. They are never sent anywhere except the gateway you choose. Config is written through the local server to <code>~/.claude/settings.json</code> after a backup is made.</span>
-        </div>
+          <div class="panel security-note" id="securityNote">
+            <div class="sec-head"><span class="lock" aria-hidden="true">🔒</span><h3>Privacy</h3></div>
+            <p class="sec-body">API keys stay in your browser's <code>localStorage</code>. They are never sent
+              anywhere except the gateway you choose. Config is written through the local server to
+              <code>~/.claude/settings.json</code> after a backup is made.</p>
+          </div>
       </section>
     </main>
   </div>

@@ -30,11 +30,22 @@ export function renderModelPicker(host, providerId, opts = {}) {
   if (paidToggle) paidToggle.addEventListener('change', (e) => { showPaid = e.target.checked; draw({ force: true }); });
 
   function draw({ force = false } = {}) {
-    const all = showPaid ? getModels(providerId) : getFreeModels(providerId);
+    const allModels = getModels(providerId);
+    // Gateways whose whole catalogue is paid (TokenRouter, and any provider
+    // whose live list carries no free entry) would otherwise show a permanently
+    // empty picker with "Include paid" off — blocking Test Connection and Apply
+    // even though models ARE cached. Fall back to the full list in that case so
+    // the user can actually choose a model; the per-row "free" badge still
+    // marks what is genuinely free. Adopted (dyn:) providers keep the strict
+    // behaviour — their classification is authoritative, so 0 free must read as
+    // empty rather than silently spilling paid models into the list.
+    const freeOnly = getFreeModels(providerId);
+    const effectiveFree = freeOnly.length ? freeOnly : (providerId.startsWith('dyn:') ? [] : allModels);
+    const all = showPaid ? allModels : effectiveFree;
     const q = query.trim().toLowerCase();
     const matches = all.filter((m) =>
       !q || (m.id || '').toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
-    const freeIds = new Set(getFreeModels(providerId).map((m) => m.id));
+    const freeIds = new Set(freeOnly.map((m) => m.id));
     // The custom gateway has no model catalogue of its own — the user types the
     // model name manually, so don't show the generic empty states.
     const isCustom = providerId === 'custom';
@@ -44,7 +55,7 @@ export function renderModelPicker(host, providerId, opts = {}) {
     // long list while the user is hovering/scrolling — that is the model-list
     // "flicker". Signing the rendered state and bailing out when identical keeps
     // the list stable; scrollTop is preserved across genuine re-renders too.
-    const sig = `${showPaid}|${isFetching(providerId)}|${getModelSource(providerId) || ''}|${q}|${matches.length ? matches.map((m) => m.id).join(',') : ''}`;
+    const sig = `${showPaid}|${isFetching(providerId)}|${getModelSource(providerId) || ''}|${q}|${allModels.length}|${matches.length ? matches.map((m) => m.id).join(',') : ''}`;
     if (!force && list.dataset.sig === sig) return;
     list.dataset.sig = sig;
     const prevScroll = list.scrollTop;
@@ -52,7 +63,15 @@ export function renderModelPicker(host, providerId, opts = {}) {
     if (!all.length) {
       if (isCustom) { list.innerHTML = ''; return; }
       const fetching = isFetching(providerId);
-      list.innerHTML = `<div class="mp-empty">${fetching ? 'Loading models…' : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available')}</div>`;
+      // Distinguish "we have no catalogue for this provider yet" (usually a
+      // missing key) from "every cached model is paid and Include-paid is off",
+      // which is a filter state, not a fetch failure.
+      const msg = fetching
+        ? 'Loading models…'
+        : (allModels.length
+          ? 'All models are paid — enable “Include paid” to pick one.'
+          : (getModelSource(providerId) ? 'No models cached — add an API key first' : 'No models available'));
+      list.innerHTML = `<div class="mp-empty">${msg}</div>`;
       return;
     }
     if (!matches.length) {

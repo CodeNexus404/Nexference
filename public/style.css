@@ -107,7 +107,6 @@ a:hover{color:var(--accent-2)}
 
 /* Entrance: apply .reveal to any block; stagger with style="--d:.08s" */
 .reveal{opacity:0;animation:fadeUp .6s var(--ease) forwards;animation-delay:var(--d,0s)}
-.reveal-r{opacity:0;animation:slideInRight .55s var(--ease) forwards;animation-delay:var(--d,0s)}
 .reveal-f{opacity:0;animation:floatIn .5s var(--ease) forwards;animation-delay:var(--d,0s)}
 
 /* Premium card feel: soft lift + accent hairline on hover */
@@ -201,16 +200,6 @@ a:hover{color:var(--accent-2)}
 }
 .gsearch:focus{border-color:var(--accent-line);background:var(--surface);box-shadow:0 0 0 4px var(--accent-soft);color:var(--text)}
 
-.btn-icon{
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;
-  border:1px solid var(--border);background:var(--surface);color:var(--text-2);
-  cursor:pointer;padding:10px 14px;border-radius:var(--radius-sm);
-  font-family:var(--mono);font-size:15px;transition:all var(--med) var(--ease);
-}
-.btn-icon:hover{color:var(--accent);border-color:var(--accent-line);background:var(--surface-2);transform:translateY(-2px);box-shadow:0 4px 14px var(--accent-glow)}
-.btn-icon:active{transform:scale(.95)}
-.btn-icon:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.btn-icon:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .btn-icon.spinning svg,.btn-icon.spinning .ico{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
@@ -226,6 +215,11 @@ a:hover{color:var(--accent-2)}
 .btn:active{transform:translateY(0);box-shadow:none}
 .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+/* Background job in progress (e.g. Ecosystem source refresh): spinner + locked button. */
+.btn.is-refreshing{opacity:.9;cursor:progress;transform:none;box-shadow:none}
+.btn.is-refreshing:hover{transform:none;box-shadow:none;background:var(--surface-2);color:var(--text-2)}
+.btn.btn-go.is-refreshing:hover{background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#fff;filter:none}
+.btn.is-refreshing::before{content:"";flex:0 0 auto;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .75s linear infinite}
 .btn2{padding:8px 15px;font-size:12.5px;font-weight:600}
 .btn.sm{padding:5px 11px;font-size:11.5px;font-weight:700;border-radius:var(--radius-sm)}
 .btn-go{
@@ -258,12 +252,6 @@ a:hover{color:var(--accent-2)}
 .modal-overlay[hidden]{display:none}
 .modal{width:min(560px,100%);background:#0e1117;border:1px solid #1c2330;border-radius:18px;box-shadow:0 30px 80px rgba(0,0,0,.6);padding:22px 22px 18px;animation:pop .18s ease}
 @keyframes pop{from{transform:scale(.96);opacity:0}to{transform:scale(1);opacity:1}}
-.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.modal-head h3{margin:0;font-family:'Sora',sans-serif;font-size:18px;color:#e8eefb}
-.modal-x{background:none;border:none;color:#8b97ad;font-size:24px;line-height:1;cursor:pointer;padding:0 4px}
-.modal-x:hover{color:#fff}
-.modal-sub{color:#9aa6bd;font-size:13px;line-height:1.5;margin:10px 0 14px}
-.modal-sub code{background:#0a0d13;padding:1px 6px;border-radius:6px;color:#cfe0ff;font-family:'IBM Plex Mono',monospace;font-size:12px}
 .config-code{background:#06080c;border:1px solid #1a2230;border-radius:12px;padding:14px 16px;color:#bdf5d6;font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-all;max-height:42vh;overflow:auto;margin:0}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
 
@@ -415,16 +403,7 @@ a:hover{color:var(--accent-2)}
 .term{
   margin-top:18px;background:var(--inset);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;
 }
-.term-bar{
-  display:flex;align-items:center;gap:12px;padding:11px 15px;background:var(--surface-2);border-bottom:1px solid var(--border);
-}
-.term-dots{display:flex;gap:6px}
-.tdot{width:11px;height:11px;border-radius:50%}
 .tdot.r{background:#ff5f57}.tdot.y{background:#febc2e}.tdot.g{background:#28c840}
-.term-title{flex:1;font-family:var(--mono);font-size:11px;color:var(--text-3);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.term-clear{border:none;background:transparent;font-family:var(--mono);font-size:10.5px;color:var(--text-3);cursor:pointer;padding:4px 9px;border-radius:6px;transition:all var(--med) var(--ease)}
-.term-clear:hover{color:var(--error);background:var(--error-soft)}
-.term-body{padding:16px 18px;min-height:96px;max-height:240px;overflow-y:auto;font-family:var(--mono);font-size:12px;line-height:1.8;white-space:pre-wrap;word-break:break-word}
 .term-body .cm{color:var(--text-3)}
 .term-body .pr{color:var(--accent)}
 .term-body .cmd{color:var(--text);font-weight:500}
@@ -447,13 +426,30 @@ a:hover{color:var(--accent-2)}
 }
 
 /* ── Notifications / toasts ──────────────────────────────────── */
-.toasts{position:fixed;top:68px;right:20px;z-index:1200;display:flex;flex-direction:column;align-items:flex-end;gap:10px;
-  width:min(400px,calc(100vw - 32px));pointer-events:none}
+/* --toast-top is published by NotificationManager from the sticky navbar's
+   measured height, so the stack always sits just below it. 68px is only the
+   pre-measurement fallback for the window before the first toast. */
+.toasts{position:fixed;top:calc(var(--toast-top,68px) + 12px);right:20px;z-index:1200;display:flex;flex-direction:column;align-items:stretch;gap:10px;
+  width:min(400px,calc(100vw - 32px));pointer-events:none;
+  /* Right-align rows that are narrower than the container (see .toast-info) so
+     they stay pinned to the corner instead of drifting to the left. */
+  align-items:flex-end}
 .toast{
   position:relative;pointer-events:auto;overflow:hidden;
-  align-self:flex-end;width:fit-content;min-width:min(330px,100%);max-width:100%;
+  /* Shape: a consistent rounded rectangle.
+     This used to be `width:fit-content; min-width:min(330px,100%)`, which sized
+     each toast to its own text. With a fixed 16px radius that produced a ragged
+     stack — a short toast read as a squat rounded box, a long one as a stretched
+     bar, and neither matched. Sizing to the container instead gives every toast
+     an identical width and therefore one coherent shape, which is what makes the
+     stack read as a deliberate component rather than loose floating text.
+     `min-height` pins the baseline so single- and multi-line toasts share a
+     common rhythm; the radius stays a smooth 14px against a ~48px height. */
+  width:100%;
   display:flex;align-items:center;gap:10px;
-  padding:11px 13px;border-radius:16px;
+  min-height:48px;padding:11px 13px;
+
+  border-radius:14px;
   font-family:var(--sans);font-size:11.5px;font-weight:550;color:var(--text);
   /* Liquid glass: dense translucent frost, glossy top sheen and a faint
      tinted core so the accent color glows through soft and premium. */
@@ -481,7 +477,10 @@ a:hover{color:var(--accent-2)}
   background:linear-gradient(180deg,rgba(255,255,255,.16),transparent 40%);
 }
 .toast::after{
-  content:"";position:absolute;left:14px;bottom:3px;height:2px;width:calc(100% - 28px);border-radius:2px;transform-origin:left;
+  /* Inset by the radius so the bar never collides with the rounded corners —
+     `overflow:hidden` clips it to the border-radius, but sitting it inside the
+     curve keeps the shape clean instead of a hairline slicing the corner. */
+  content:"";position:absolute;left:16px;bottom:5px;height:2px;width:calc(100% - 32px);border-radius:2px;transform-origin:left;
   background:linear-gradient(90deg,var(--tc,var(--accent)),color-mix(in srgb,var(--tc,var(--accent)) 30%,transparent));
   box-shadow:0 0 10px color-mix(in srgb,var(--tc,var(--accent)) 45%,transparent);
   animation:toastBar var(--toast-dur,4000ms) linear forwards;
@@ -506,11 +505,30 @@ a:hover{color:var(--accent-2)}
    the accent color vars (tap / icon / countdown / label / glow) change.
    Note: the element's classes are `toast toast-success` (NOT `toast`+`success`),
    so these use the compound `toast-success` selector. */
-.toast-success{--tc:var(--success);--tc-ink:#04231a}
+.toast-success{--tc:var(--success);--tc-ink:#04231a;
+  /* Same treatment as Information. Success messages are short confirmations
+     ("Model catalogue refreshed", "Backup restored") for the same reason a
+     400px card reads as an empty band. Errors and warnings keep the full width —
+     those carry the text you most need to read. */
+  width:min(288px,calc(100vw - 32px));
+  max-height:96px;overflow:hidden}
 .toast-error{--tc:var(--error);--tc-ink:#fff}
 .toast-warning{--tc:var(--warning);--tc-ink:#2a1c05}
-.toast-info{--tc:var(--accent);--tc-ink:#fff}
-.toast-msg{flex:1 1 auto;min-width:0;line-height:1.4;letter-spacing:.1px;overflow-wrap:anywhere;word-break:break-word}
+.toast-info{--tc:var(--accent);--tc-ink:#fff;
+  /* INFORMATION ONLY: narrower than the other types.
+     Confirmations ("Model catalogue refreshed") are short and frequent, so a
+     400px card for one short line left a wide empty band across the corner.
+     Success / warning / error keep the full width — an error message is usually
+     the longest text the app shows and must never be clipped to fit. */
+  width:min(288px,calc(100vw - 32px));
+  /* Cap at ~3 lines: a narrow box plus a long confirmation would otherwise run
+     down the corner. Errors and warnings are NOT capped. */
+  max-height:96px;overflow:hidden}
+/* Long messages (an error body, a provider's rejection text) would otherwise grow
+   the box to an arbitrary height and break the uniform shape. Cap it and scroll
+   instead, so every toast keeps the same silhouette. */
+.toast-msg{flex:1 1 auto;min-width:0;line-height:1.4;letter-spacing:.1px;overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .toast-x{
   position:relative;flex:0 0 auto;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
   border:none;background:transparent;color:var(--text-3);font-size:15px;line-height:1;cursor:pointer;
@@ -519,14 +537,17 @@ a:hover{color:var(--accent-2)}
 .toast-x:hover{background:color-mix(in srgb,var(--surface-3) 65%,transparent);color:var(--text)}
 @keyframes toastBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
 
-/* ── Responsive ──────────────────────────────────────────────── */
-@media (max-width:720px){
-  .toasts{top:auto;bottom:24px;width:min(420px,calc(100vw - 24px))}
+  /* ── Responsive ──────────────────────────────────────────────── */
+  @media (max-width:720px){
+    /* Kept top-right beneath the navbar on small screens too — it used to flip to
+       the bottom here, which put notifications in a different place than the rest
+       of the app. The measured --toast-top offset still applies, so the stack
+       clears the (possibly taller, wrapped) navbar instead of a fixed guess. */
+    .toasts{bottom:auto;right:12px;left:12px;width:auto}
   .grid{grid-template-columns:1fr}
   .stat{padding:0 11px}
   .stat b{font-size:18px}
   .toolbar{flex-wrap:wrap}
-  .term-title{display:none}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
@@ -541,7 +562,10 @@ a:hover{color:var(--accent-2)}
   --bg:#eef0f4; --bg-2:#e7eaf0; --surface:#ffffff; --surface-2:#f4f6fa; --surface-3:#eaeef5; --inset:#f0f2f6;
   --border:rgba(10,12,20,.10); --border-strong:rgba(10,12,20,.18); --border-faint:rgba(10,12,20,.06);
   --text:#16181d; --text-2:#4a4e57; --text-3:#787d87;
-  --accent:#3b6fd4; --accent-2:#5b8def; --accent-soft:rgba(59,111,212,.12);
+  --accent-2:#5b8def;
+  /* --accent / --accent-soft are set on <html> by ui/appearance.js. Declaring
+     them here re-overrode the chosen swatch in light mode, so every accent
+     looked identical once the palette changed. Only --accent-2 is token-owned. */
   --success:#1c9e78; --warning:#b9791b; --error:#d2455c;
   --success-soft:rgba(28,158,120,.14); --warning-soft:rgba(185,121,27,.14); --error-soft:rgba(210,69,92,.14);
 }
@@ -594,9 +618,6 @@ body{background:var(--bg);background-image:radial-gradient(1200px 600px at 80% -
 .cfg-status.copy{color:var(--text-2);border-color:var(--border-strong);background:var(--surface-3)}
 .cfg-status.copy .dot{background:var(--text-2)}
 .crumb{font-family:var(--display);font-weight:700;font-size:13px;color:var(--text-2);letter-spacing:.3px;display:flex;align-items:center}
-.crumb-home{cursor:pointer;color:var(--text-3);transition:color var(--fast) var(--ease)}
-.crumb-home:hover{color:var(--accent)}
-.crumb-sep{margin:0 9px;color:var(--text-3);opacity:.55}
 .crumb-cur{color:var(--text)}
 .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--border);font-size:12.5px;color:var(--text-2)}
 
@@ -668,7 +689,6 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .ws-summary .kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border-faint);font-size:14px}
 .ws-summary .kv span{color:var(--text-3)}
 .ws-summary .kv b.mono{font-family:var(--mono);font-size:12.5px}
-.ws-note{margin-top:12px;color:var(--text-2);font-size:13px}
 .ws-actions .qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .qa{display:flex;flex-direction:column;gap:3px;align-items:flex-start;text-align:left;padding:13px 14px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);color:var(--text);cursor:pointer;transition:transform var(--fast) var(--ease),border-color var(--fast) var(--ease)}
 .qa:hover{transform:translateY(-2px);border-color:var(--accent-line)}
@@ -676,9 +696,7 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .qa span{font-size:12px;color:var(--text-3)}
 
 /* Configuration */
-.cfg-wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
 .cfg-steps .step{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--border-faint)}
-.cfg-acts{display:flex;gap:10px;margin-top:6px}
 .muted{color:var(--text-3);font-size:12.5px}
 
 /* Local AI / Clients grids */
@@ -734,6 +752,9 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .rt-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--border-strong)}
 .rt-card.live::before{background:var(--success)}
 .rt-card.detected::before{background:var(--warning)}
+/* Not present on the device: no accent stripe, so it reads as inactive
+   rather than as something that merely needs starting. */
+.rt-card.missing::before{background:var(--border-strong)}
 .rt-card.planned::before{background:var(--border-strong)}
 .rt-card:hover{transform:translateY(-3px);border-color:var(--accent-line);box-shadow:var(--shadow-2),0 0 0 1px var(--accent-line),0 14px 38px color-mix(in srgb,var(--accent) 26%,transparent)}
 .rt-card-top{display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
@@ -747,7 +768,6 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .rt-title b{font-family:var(--display);font-size:15px;line-height:1.2}
 .rt-meta{font-size:11px;color:var(--text-3);font-family:var(--mono)}
 .rt-desc{color:var(--text-2);font-size:13px;line-height:1.5;margin-bottom:10px}
-.rt-models{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .rt-foot{margin-top:auto;display:flex;gap:10px;padding-top:10px;border-top:1px solid var(--border-faint)}
 .rt-foot-item{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .rt-foot-item span{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)}
@@ -758,7 +778,9 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .badge{padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--border)}
 .badge.live,.badge.running{background:var(--success-soft);color:var(--success);border-color:transparent}
 .badge.detected{background:var(--warning-soft);color:var(--warning);border-color:transparent}
-.badge.planned,.badge.offline{background:var(--surface-2);color:var(--text-3)}
+.badge.planned,.badge.offline,.badge.missing{background:var(--surface-2);color:var(--text-3)}
+/* Offline (installed, stopped) and Not installed share a neutral badge, but
+   the card stripe separates them: yellow = startable, grey = absent. */
 .badge.browse{background:var(--accent-soft);color:var(--accent-2)}
 .badge.cc{background:var(--accent-soft);color:var(--accent-2)}
 
@@ -795,6 +817,13 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 
 /* Settings */
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
+/* Right-hand column: Configuration Profiles stacked over Contact & Support.
+   Both are wrapped so they share one grid cell. With `align-items:stretch` the
+   cell matches the Appearance panel's height, and the two panels inside split it
+   — so the left and right columns line up top-to-bottom instead of leaving a
+   ragged gap under the shorter card. */
+.settings-col{display:flex;flex-direction:column;gap:16px;min-width:0}
+.settings-col > .panel{flex:1 1 auto;min-height:0}
 .settings-grid > .panel{display:flex;flex-direction:column;min-height:0}
 .settings-backups{grid-column:1 / -1}
 .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:4px;gap:4px}
@@ -837,7 +866,6 @@ body[data-page="ecosystem"] #page-ecosystem{display:block}
 .ws-health.critical{--hc:#ef4444}
 .ws-health .ws-health-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
 .ws-health-summary{margin:0 0 12px;color:var(--text)}
-.health-factors{display:flex;flex-direction:column;gap:8px}
 .health-factor{display:flex;gap:10px;align-items:flex-start}
 .hf-dot{width:9px;height:9px;margin-top:5px;border-radius:50%;flex:0 0 9px;background:var(--hc,#888)}
 .health-factor.ok .hf-dot{background:var(--ok,#22c55e)}
@@ -910,6 +938,7 @@ html.sidebar-collapsed .sidebar{padding:34px 10px;overflow:hidden}
 html.sidebar-collapsed .sidebar-head{flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;padding:4px 0 22px;margin-bottom:0}
   html.sidebar-collapsed .nav-label,
   html.sidebar-collapsed .ver,
+  html.sidebar-collapsed .side-links,
   html.sidebar-collapsed #pathText{display:none}
 html.sidebar-collapsed .nav-toggle{margin-left:0}
 html.sidebar-collapsed .nav-toggle:hover{background:var(--surface-3);color:var(--text);border-color:var(--border-strong)}
@@ -972,8 +1001,6 @@ html.sidebar-collapsed .ic-path{margin:0}
 .icon-btn:hover{color:var(--text);border-color:var(--accent-line);background:var(--surface-2);transform:translateY(-1px)}
 .theme-toggle{width:30px;height:30px}
 .theme-toggle svg{width:16px;height:16px}
-.app-ver{font-family:var(--mono);font-size:11px;color:var(--text-3);letter-spacing:.3px;padding:6px 10px;
-  border:1px solid var(--border);border-radius:100px;background:var(--surface)}
 
 /* ── Sidebar foot / collapsed refinements ── */
 .sidebar-foot{align-items:flex-start;padding-left:8px}
@@ -1050,24 +1077,40 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 .ws-config.ws-full{grid-column:1/-1}
 .ws-config-head{display:flex;align-items:center;justify-content:space-between}
 .ws-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-3)}
-.ws-chain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
-.chain-node{flex:1 1 130px;min-width:0;padding:10px 12px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
-.chain-ico{width:30px;height:30px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);margin-bottom:1px}
-.chain-ico svg{width:17px;height:17px}
-.chain-node .chain-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
-.chain-node b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chain-arrow{display:flex;align-items:center;color:var(--text-3);font-size:15px;flex:0 0 auto}
-.ws-config-path{font-size:12px}
 .ws-config-path .mono{font-family:var(--mono)}
 
 /* ── Live status dot (Feature 4) ── */
 .dev-status{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--text-2);margin-left:6px}
 .dev-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;position:relative}
-.dev-dot::after{content:"";position:absolute;inset:-3px;border-radius:50%;animation:pulse-ring 2s cubic-bezier(.4,0,.6,1) infinite}
-.dev-ok{background:#22c55e}.dev-ok::after{box-shadow:0 0 0 0 rgba(34,197,94,.45)}
-.dev-warn{background:#eab308}.dev-warn::after{box-shadow:0 0 0 0 rgba(234,179,8,.45)}
-.dev-err{background:#ef4444}.dev-err::after{box-shadow:0 0 0 0 rgba(239,68,68,.45)}
-.dev-idle{background:#9ca3af}.dev-idle::after{animation:none}
+/* The pulse is a WARNING signal, so it must only run for states that actually
+   need attention. It used to be declared on the base `.dev-dot` rule, which meant
+   a fully healthy connection (`.dev-ok`) pulsed with the exact same ring as a
+   failure — indistinguishable from "Attention" at a glance, and pure noise when
+   everything was fine. The healthy state is now a static dot. */
+.dev-dot::after{content:"";position:absolute;inset:-3px;border-radius:50%;opacity:0;animation:none}
+.dev-ok{background:#22c55e}
+.dev-ok::after{box-shadow:0 0 0 0 rgba(34,197,94,.45);animation:none}
+.dev-warn{background:#eab308}
+.dev-warn::after{box-shadow:0 0 0 0 rgba(234,179,8,.45);animation:pulse-ring 2s cubic-bezier(.4,0,.6,1) infinite}
+.dev-err{background:#ef4444}
+.dev-err::after{box-shadow:0 0 0 0 rgba(239,68,68,.45);animation:pulse-ring 1.4s cubic-bezier(.4,0,.6,1) infinite}
+.dev-idle{background:#9ca3af}
+.dev-idle::after{animation:none}
+
+/* Status control. Previously an inert <span> showing the bare word "Attention",
+   with the actionable detail (the health modal) one click away but invisible.
+   It is now a button: states what is wrong, and opens the details. */
+.dev-status-slot{display:inline-flex;align-items:center}
+button.dev-status{
+  appearance:none;border:1px solid var(--border);background:var(--surface-2);
+  padding:4px 9px;border-radius:100px;cursor:pointer;font:inherit;color:var(--text-2);
+  transition:border-color var(--fast) var(--ease),background var(--fast) var(--ease),color var(--fast) var(--ease);
+}
+button.dev-status:hover{border-color:var(--accent-line);background:var(--surface);color:var(--text)}
+button.dev-status:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dev-status-label{white-space:nowrap}
+.dev-status-caret{opacity:.5;flex:0 0 auto;transition:transform var(--fast) var(--ease)}
+button.dev-status:hover .dev-status-caret{opacity:.9;transform:translateX(1px)}
 @keyframes pulse-ring{0%{transform:scale(1);opacity:1}70%{transform:scale(2.2);opacity:0}100%{transform:scale(1);opacity:0}}
 .ws-config-asof{font-size:11px;color:var(--text-3);margin-top:-4px}
 .ws-actions-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
@@ -1075,12 +1118,9 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
    never stretches edge-to-edge like the older full-width row. */
 .ws-quick{gap:8px}
 .ws-quick .qa-grid{grid-template-columns:repeat(2,1fr);gap:10px;margin-top:auto}
-.stat-row{display:flex;gap:10px;margin-top:6px}
 .stat-row .stat{flex:1;padding:12px 14px;border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);text-align:center}
 .stat-row .stat b{display:block;font-family:var(--display);font-size:22px;color:var(--text)}
 .stat-row .stat span{font-size:11px;color:var(--text-3)}
-.ws-activity .term-body{max-height:200px}
-
 /* ══ Premium Workspace ═══════════════════════════════════════════ */
 .workspace .page-head{position:relative;overflow:hidden;padding:22px 24px;border-radius:var(--radius-lg);
   background:
@@ -1116,8 +1156,6 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 /* Health card premium accent */
 .ws-health{border-color:color-mix(in srgb,var(--hc,var(--accent)) 30%,var(--border))}
 .ws-health .ws-health-head .badge{margin-left:0}
-.ws-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-3)}
-
 /* Recommendation / next-step list with marker */
 .ws-next-body{display:flex;flex-direction:column;gap:2px}
 .ws-next-item{position:relative;padding:9px 0 9px 22px;border-bottom:1px solid var(--border-faint);font-size:13.5px;color:var(--text-2)}
@@ -1155,6 +1193,9 @@ code{font-family:var(--mono);font-size:12px;background:var(--inset);padding:1px 
 .modal-overlay.open .modal-card{transform:none}
 .modal-overlay[data-size="compact"] .modal-card{width:min(440px,100%)}
 .modal-overlay[data-size="wide"] .modal-card{width:min(900px,100%)}
+/* The Custom Provider editor is the widest form in the app — give its two
+   settings cards real estate so base URL / website inputs are not cramped. */
+.modal-card:has(.cp-edit-grid){width:min(1040px,100%)}
 .modal-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 22px 8px}
 .modal-card-titles{display:flex;flex-direction:column;gap:3px;min-width:0}
 .modal-card-title{font-family:var(--display);font-size:19px;color:var(--text);letter-spacing:-.3px}
@@ -1456,7 +1497,7 @@ body.modal-open{overflow:hidden}
 .client-card .badge,.provider-card .badge{white-space:nowrap}
 
 /* Client Manager cards */
-.client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px}
+.client-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:16px}
 .client-card{display:flex;flex-direction:column;gap:12px;transition:transform var(--fast) var(--ease),border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease)}
 .client-card:hover{transform:translateY(-3px);border-color:var(--accent-line);box-shadow:var(--shadow-2),0 0 0 1px var(--accent-line),0 14px 38px color-mix(in srgb,var(--cm,var(--accent)) 22%,transparent)}
 .client-top{display:flex;align-items:center;gap:12px}
@@ -1465,7 +1506,9 @@ body.modal-open{overflow:hidden}
 .client-id{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
 .client-id b{font-size:16px}
 .client-meta{display:flex;flex-direction:column;gap:6px}
-.client-meta .kv{font-size:13px}
+.client-meta .kv{display:flex;align-items:baseline;justify-content:space-between;gap:12px;min-width:0;font-size:13px}
+.client-meta .kv span{flex:0 0 auto;color:var(--text-3)}
+.client-meta .kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
 .client-acts{margin-top:auto;display:flex;gap:8px}
 
 /* Connection-type selection cards */
@@ -1704,19 +1747,9 @@ body.modal-open{overflow:hidden}
 @keyframes pulseDot{ 0%{ box-shadow:0 0 0 0 var(--accent-soft); } 70%{ box-shadow:0 0 0 8px transparent; } 100%{ box-shadow:0 0 0 0 transparent; } }
 
 /* Workspace Recent Executions (v0.9.0) */
-.ws-recent{ margin-top:18px; padding:14px 16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-1); }
-.ws-recent-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-.ws-recent-head h3{ font-size:14px; margin:0; }
-.ws-recent-list{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
-.ws-recent-item{ display:flex; align-items:center; gap:10px; padding:9px 11px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); }
 .ws-recent-item .dot{ width:8px; height:8px; border-radius:50%; flex:none; }
 .ws-recent-item .dot.ok{ background:var(--success); }
 .ws-recent-item .dot.bad{ background:var(--error); }
-.ws-recent-main{ display:flex; flex-direction:column; min-width:0; }
-.ws-recent-main b{ font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ws-recent-sub{ font-size:11.5px; color:var(--text-3); }
-.ws-recent-time{ margin-left:auto; font-size:11.5px; color:var(--text-3); white-space:nowrap; }
-
 /* ════════════════════════════════════════════════════════════════
    Nexference v1.2.0 — Modern Web Application UI & Experience
    Refinement layer. Purely additive styling on top of the existing
@@ -1763,12 +1796,7 @@ body.modal-open{overflow:hidden}
 .btn:active{transform:translateY(0) scale(.98)}
 .btn-go{transition:transform var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),filter var(--dur-fast) var(--ease)}
 .btn-go:active{transform:translateY(0) scale(.985)}
-.btn-primary{background:linear-gradient(180deg,var(--accent-2),var(--accent));border-color:transparent;color:#fff;box-shadow:0 6px 20px var(--accent-glow)}
-.btn-primary:hover{color:#fff;filter:brightness(1.06);box-shadow:0 10px 28px var(--accent-glow);transform:translateY(-2px)}
-.btn-primary:active{transform:translateY(0) scale(.985)}
 .icon-btn:active{transform:scale(.94)}
-.btn-icon:active{transform:scale(.95)}
-
 /* — Interactive cards: unified, restrained hover depth — */
 .provider-card,.client-card,.rt-card,.card,.ml-row,.conn-card,.ws-recent-item,.cp-card{
   transition:transform var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease);
@@ -1786,17 +1814,7 @@ body.modal-open{overflow:hidden}
 .inp:focus,input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft)}
 
 /* — Workspace chain: connected, state-aware, subtle motion — */
-.ws-chain{gap:10px}
-.chain-node{
-  position:relative;background:linear-gradient(180deg,var(--surface-2),var(--surface));
-  border:1px solid var(--border);box-shadow:var(--elev-1);
-  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease);
-}
-.chain-node:hover{border-color:var(--accent-line);box-shadow:var(--elev-2);transform:translateY(-2px)}
-.chain-arrow{color:var(--text-3);opacity:.85}
-
 /* — Workspace panels polish — */
-.ws-recent{background:var(--surface)}
 .ws-kpi{box-shadow:var(--elev-1)}
 .ws-kpi b{color:var(--text)}
 
@@ -1817,7 +1835,6 @@ body.modal-open{overflow:hidden}
   .ws-hero{grid-template-columns:1fr}
   .content{padding:14px 12px 28px}
   .crumb{display:none}
-  .app-ver{display:none}
   .modal-overlay{padding:10px}
 }
 
@@ -1833,7 +1850,6 @@ body.modal-open{overflow:hidden}
 
 /* — Workspace: contextual health headline + action — */
 .ws-health-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.ws-health-headline{font-family:var(--display);font-size:16px;font-weight:600;margin:6px 0 2px;color:var(--text);line-height:1.35}
 .ws-health-action{margin:10px 0 2px}
 
 /* — Workspace: application-like quick actions — */
@@ -1849,9 +1865,6 @@ body.modal-open{overflow:hidden}
 .qa-text small{font-size:11.5px;color:var(--text-3);line-height:1.35}
 
 /* — Workspace: grouped recent activity — */
-.ws-recent-group{margin-top:10px}
-.ws-recent-group-h{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin:6px 0 6px;padding-left:2px}
-
 
 
 /* — Animated tab/segment indicator (microinteraction) — */
@@ -1875,7 +1888,6 @@ body.modal-open{overflow:hidden}
 .lai-bench{margin-top:16px}
 .lai-bench-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:4px}
 .lai-bench-head .muted{margin:4px 0 0;font-size:12.5px;line-height:1.45}
-.bench-charts{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:12px}
 .bench-chart-h{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:10px}
 .bar-chart{display:flex;flex-direction:column;gap:10px}
 .bar-row{display:grid;grid-template-columns:150px 1fr auto;gap:10px;align-items:center}
@@ -1917,7 +1929,6 @@ body.modal-open{overflow:hidden}
 .lc-swatch-ttft{background:var(--lc-ttft)}
 
 @media (max-width:860px){
-  .bench-charts{grid-template-columns:1fr}
   .bar-row{grid-template-columns:110px 1fr auto}
 }
 
@@ -1926,13 +1937,86 @@ body.modal-open{overflow:hidden}
    every card min-width:0 + overflow:hidden) so it can never exceed its
    container — the same pattern the Clients/Runtimes pages use. */
 .ml-page{display:flex;flex-direction:column;gap:14px;min-width:0;max-width:100%;overflow-x:clip}
-.ml-bar{position:sticky;top:0;z-index:5;display:flex;flex-direction:column;gap:10px;padding:10px 0 8px;max-width:100%;background:linear-gradient(180deg,var(--surface) 82%,rgba(0,0,0,0))}
-.ml-bar-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+/* The catalogue bar is sticky so the filters stay reachable while scrolling a
+   1,177-model list. It used to stick at `top:0`, which is where the navbar also
+   sticks — so the bar slid up underneath the navbar and was simply hidden
+   (z-index 5 vs the navbar's 30). `--toast-top` is published by
+   NotificationManager from the navbar's measured height, so reuse it here and
+   the two stay in sync automatically when the breadcrumb wraps. */
+/* Sticky catalogue bar.
+   Background: the old rule was `linear-gradient(180deg, var(--surface) 82%,
+   rgba(0,0,0,0))` — a hard fade to fully transparent over the last 18%. Model
+   cards scrolled visibly through that window, and because the fade colour was a
+   literal transparent black it read as a dark smear in light mode. Replaced with
+   an opaque base + blur so it is a real surface in BOTH themes from one rule: the
+   base is `color-mix`ed against `--bg`, which resolves to #0a0b0d in dark and
+   #eef0f4 in light, so no per-theme override is needed.
+   The bottom hairline + shadow are what actually sell "sticky" — without a
+   leading edge the content just disappears under the bar. */
+/* Catalogue bar surface.
+   Rebuilt as a single opaque rule. It previously needed FOUR declarations to
+   paint one background: a color-mix against --bg, a backdrop-filter blur, a
+   light-theme override, and an @supports fallback for browsers without blur.
+
+   None of that was necessary. --surface is already fully opaque in both themes
+   (#141519 dark / #ffffff light), so a plain var(--surface) is correct
+   everywhere and needs no override, no fallback, and no per-theme branch.
+
+   The blur and partial transparency were actively counterproductive here: model
+   cards scroll underneath this bar, and letting them show through made the
+   filter labels hard to read exactly when the user was scrolling the list. An
+   opaque surface plus a hairline gives a clean leading edge instead. */
+/* Catalogue bar — a compact card that scrolls with the page.
+   Rewritten again, and this time it is NOT sticky. Being sticky was the root of
+   every problem here: a floating bar has to paint an opaque surface (or model
+   cards bleed through the filters while scrolling), and it also had to be
+   manually kept clear of the navbar with a measured offset. Scrolling away with
+   the content removes that whole class of problem — the bar is just the first
+   card on the page, so it needs no z-index, no sticky offset, no scroll listener
+   and no is-stuck toggle.
+
+   Layout: a single surface with real margin around it (not a full-bleed strip),
+   tighter internal padding, and a smaller control height so the stats row and the
+   filter row read as one compact block. --surface is already opaque in both
+   themes (#141519 / #ffffff), so no per-theme branch is needed. */
+.ml-bar{
+  display:flex;flex-direction:column;gap:8px;min-width:0;max-width:100%;
+  margin:0 0 12px;padding:10px 12px;
+  background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--radius-lg);
+}
+
+
+/* The stats row and the filter row are one visual block, so the gap between
+   them is a hairline plus symmetric inset rather than a loose flex gap — the
+   chips used to float against the search field with no grouping. */
+/* No hairline under the stats row: inside a bordered card it read as a second
+   nested frame. A small gap is enough to separate the two rows. */
+.ml-bar-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .ml-stats{display:flex;gap:8px;flex-wrap:wrap;min-width:0}
-.ml-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border);border-radius:999px;font-size:12.5px;color:var(--text-2);background:var(--surface-2);white-space:nowrap}
-.ml-chip b{color:var(--text);font-size:13.5px}
-.ml-refresh{white-space:nowrap;flex:0 0 auto}
-.ml-filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ml-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--text-2);background:var(--surface-2);white-space:nowrap}
+.ml-chip b{color:var(--text);font-size:12.5px}
+/* Refresh lives in the stats row, so it never inherits the filter row 32px
+   control height and sat visibly taller than the chips beside it. Match it. */
+.ml-refresh{white-space:nowrap;flex:0 0 auto;height:28px;padding:0 12px;font-size:12px}
+  .ml-filters{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  /* One control height for the whole primary row (32px, compact).
+     These rules were previously split across five selectors and only partially
+     applied, leaving the search field with .inp's own padding (10px 13px, an
+     ~38px natural height) inside a shorter box, so its text was vertically
+     cramped while every sibling was not. Zeroing vertical padding and centring
+     via flex makes all five identical in height AND optical text position. */
+  .ml-filters .ml-search,
+  .ml-filters .ml-prov-sel,
+  .ml-filters .ml-seg,
+  .ml-filters .ml-more-sum,
+  .ml-filters .ml-sort-sel{height:32px;box-sizing:border-box;padding-top:0;padding-bottom:0}
+  .ml-filters .ml-search{padding-left:32px;padding-right:13px}
+  .ml-filters .ml-prov-sel{padding-left:13px;padding-right:30px}
+  .ml-filters .ml-seg-btn{height:100%;display:inline-flex;align-items:center;padding:0 14px}
+  .ml-filters .ml-more-sum{padding:0 11px}
+  /* Centre the glyph inside the search box against the taller field. */
+  .ml-search-ico{line-height:1;display:flex;align-items:center}
 .ml-search-wrap{position:relative;display:inline-flex;align-items:center;flex:1 1 240px;min-width:0}
 .ml-search-ico{position:absolute;left:11px;color:var(--text-3);font-size:15px;pointer-events:none}
 .ml-search-wrap .ml-search{flex:1 1 auto;width:100%;min-width:0;padding-left:30px}
@@ -2084,10 +2168,6 @@ body.modal-open{overflow:hidden}
 
 /* Direction pill */
 .dir{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
-.dir-up{color:var(--success);background:var(--success-soft);border-color:transparent}
-.dir-down{color:var(--error);background:var(--error-soft);border-color:transparent}
-.dir-flat{color:var(--text-3);background:var(--surface-2);border-color:transparent}
-
 /* Provider trend card */
 .ic-ptrend{padding:14px 16px}
 .ic-ptrend-head{margin-bottom:10px}
@@ -2285,13 +2365,19 @@ body.modal-open{overflow:hidden}
 }
 .cp-toolbar .gsearch:focus{border-color:var(--accent-line);box-shadow:0 0 0 3px var(--accent-soft);background-color:var(--surface)}
 .cp-toolbar .gsearch::placeholder{color:var(--text-3)}
-.cp-filters{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  padding:12px 16px;margin-top:8px;
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)
-}
+  .cp-filters{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    /* 8px above keeps the filter bar off the search field; 14px below restores the
+       breathing room to the card grid. `.cp-toolbar` is margin-bottom:0 and this
+       rule had no bottom margin at all, so `#cpGrid` sat flush against the bar and
+       the whole control block read as fused to the cards. 14px matches the grid's
+       own `gap`, so the vertical rhythm is uniform. */
+    padding:12px 16px;margin:8px 0 14px;
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg)
+  }
 .cp-reg-sep{display:inline-block;width:1px;height:20px;background:var(--border-strong);margin:0 4px;flex-shrink:0}
 .cp-reg-group{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+
 .cp-reg-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-right:2px;white-space:nowrap}
 .cp-reg-select{
   appearance:none;-webkit-appearance:none;padding:6px 28px 6px 12px;max-width:170px;
@@ -2358,6 +2444,165 @@ body.modal-open{overflow:hidden}
 .cpw-logo-preview{width:64px;height:64px;border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;display:grid;place-items:center;background:var(--surface-2)}
 .cpw-logo-preview img{width:100%;height:100%;object-fit:contain}
 .cpw-logo-fallback{width:64px;height:64px;border-radius:var(--radius-sm);border:1px solid var(--border);display:grid;place-items:center;font-size:20px;font-weight:700;color:var(--accent);background:var(--surface-2)}
+
+/* ── Claude Code via Nexference — inline proxy panel ──
+   Renders inside the provider dialog (no second modal) so the API key and model
+   the user already entered stay on screen. */
+.px-panel{margin-top:12px;padding:13px 15px;border:1px solid var(--border);border-radius:var(--radius-lg);
+  background:var(--surface-2);display:flex;flex-direction:column;gap:10px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04)}
+/* Connected state: a green rail + green status, NOT a green flood. Tinting the
+   whole panel, the selected-model card and the pill stacked three green fills
+   and read as a garish highlight; a single left rail communicates "active"
+   while the status pill carries the actual state. */
+.px-panel{position:relative;overflow:hidden}
+.px-panel[data-state="armed"]{border-color:var(--border-strong);background:var(--surface-2)}
+.px-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* Title and provider share one line — "· local proxy" was redundant, the title
+   already says "via Nexference". */
+.px-head-main{display:flex;align-items:baseline;gap:6px;min-width:0;flex-wrap:wrap}
+.px-title{font-family:var(--display);font-size:13px;font-weight:700;color:var(--text);letter-spacing:-.1px;white-space:nowrap}
+.px-sub{font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.px-note{margin:0;font-size:11.5px;line-height:1.55;color:var(--text-2)}
+.px-note strong{color:var(--text);font-weight:600}
+.px-note code{background:var(--inset);padding:1px 4px;border-radius:4px;font-size:10.5px}
+
+/* Request-flow strip: Claude Code → Nexference → upstream. */
+.px-flow{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:5px 7px;
+  border:1px solid var(--border-faint);border-radius:999px;background:var(--surface)}
+.px-node{font-size:10.5px;font-weight:600;color:var(--text-2);padding:2px 8px;border-radius:999px;
+  background:var(--surface-2);white-space:nowrap}
+.px-node-mid{color:var(--accent);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-line)}
+.px-arrow{color:var(--text-3);font-size:10px;opacity:.6}
+
+.px-copy{flex:0 0 auto;border:1px solid var(--border);background:var(--surface-2);color:var(--text-2);
+  font-size:10px;font-weight:600;padding:1px 6px;border-radius:6px;cursor:pointer;transition:all .15s}
+.px-copy:hover{border-color:var(--accent-line);color:var(--text)}
+
+/* Status pill with a live dot, replacing the flat badge. */
+.px-status{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;padding:3px 9px;
+  border-radius:999px;font-size:11px;font-weight:600;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text-2);white-space:nowrap}
+.px-dot{width:5px;height:5px;border-radius:50%;background:var(--text-3);flex:0 0 5px}
+.px-status.is-on{border-color:var(--success);background:var(--success-soft);color:var(--success)}
+.px-status.is-on .px-dot{background:var(--success);box-shadow:0 0 0 2.5px var(--success-soft)}
+.px-status.is-off .px-dot{background:var(--text-3)}
+
+/* Definition-list meta rows — lighter than the old boxed tiles. */
+.px-meta{display:flex;flex-direction:column;gap:0;margin:0;border:1px solid var(--border-faint);
+  border-radius:var(--radius-sm);overflow:hidden}
+.px-meta-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:6px 10px;border-bottom:1px solid var(--border-faint)}
+.px-meta-row:last-child{border-bottom:none}
+.px-meta dt{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--text-3);white-space:nowrap}
+.px-meta dd{margin:0;display:flex;align-items:center;gap:7px;min-width:0;font-size:12px;
+  color:var(--text);font-weight:500;text-align:right}
+.px-meta dd>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Orphaned-proxy warning — single compact line. */
+.px-warn{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:var(--radius-sm);
+  border:1px solid var(--warning);background:var(--warning-soft)}
+.px-warn-ico{flex:0 0 auto;width:14px;height:14px;border-radius:50%;background:var(--warning);
+  color:#1a1408;font-size:10px;font-weight:800;display:grid;place-items:center;line-height:1}
+.px-warn-text{font-size:11.5px;line-height:1.4;color:var(--text-2);min-width:0}
+.px-warn-text b{font-family:var(--mono);font-size:11px;color:var(--text)}
+
+/* Always-visible "Selected model" readout, in both connected and idle states. */
+.px-selected{display:flex;flex-direction:column;gap:3px;padding:8px 11px;border-radius:var(--radius-sm);
+  border:1px solid var(--accent-line);background:var(--accent-soft);min-width:0}
+.px-selected-top{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:16px}
+.px-selected-label{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--accent)}
+.px-selected-value{font-size:12.5px;font-weight:600;color:var(--text);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.px-selected-value.is-empty{color:var(--text-3);font-weight:500;font-style:italic}
+/* Selected-model card stays neutral; when connected only the label turns green,
+   so the model text itself keeps normal contrast. */
+.px-panel[data-state="armed"] .px-selected{border-color:var(--border);background:var(--surface)}
+.px-panel[data-state="armed"] .px-selected-label{color:var(--success)}
+.px-selected{position:relative}
+
+.px-field{display:flex;flex-direction:column;gap:4px}
+.px-field-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.px-field-head .lbl{margin:0}
+/* Searchable model picker, reusing the app-wide .model-picker classes but tuned
+   tighter — this list can hold hundreds of models, so it opens as a compact
+   scrollable tray rather than dominating the dialog. */
+.px-picker{gap:5px}
+.px-picker .mp-input{padding:6px 9px;font-size:12px}
+.px-picker .mp-list{max-height:min(150px,24vh);gap:2px}
+.px-picker .mp-item{padding:4px 8px;gap:7px;border-radius:6px}
+.px-picker .mp-name{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.px-picker .mp-id{font-size:10px;max-width:150px}
+.px-picker .mp-free{font-size:9.5px;padding:1px 6px}
+.px-picker .mp-empty{padding:10px;font-size:12px}
+.px-hint{font-size:11px;color:var(--text-3)}
+.px-hint-warn{color:var(--text-2)}
+
+.px-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:0;padding-top:11px;
+  border-top:1px solid var(--border-faint)}
+.px-actions .btn{flex:0 1 auto}
+.px-actions .btn-go{box-shadow:0 1px 2px rgba(0,0,0,.10)}
+
+/* Inline "Show config" panel (curated + custom provider dialogs).
+   Rendered in place instead of stacking a second modal over the dialog, so
+   closing the provider dialog always returns to the card. */
+.px-note-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin:13px 0 7px;padding-top:12px;border-top:1px solid var(--border-faint)}
+.px-note-row .wizard-title{margin:0}
+.pc-cfg-code{max-height:230px;overflow:auto;margin:9px 0 0;font-size:11.5px;line-height:1.55}
+.pc-cfg-host-empty{display:none}
+.px-feedback:empty{display:none}
+.px-msg{margin:0;font-size:12px;color:var(--text-2)}
+.px-msg.err{color:var(--danger)}
+.px-msg.ok{color:var(--success)}
+@media (max-width:560px){
+  .px-actions .btn{flex:1 1 100%}
+  .px-flow{gap:6px}
+}
+
+/* ── Custom Provider Edit dialog (modern) ── */
+.cp-edit-head{display:flex;gap:12px;align-items:center;padding:0 0 10px;border-bottom:1px solid var(--border-faint)}
+.cp-edit-avatar{width:44px;height:44px;flex:0 0 44px;border-radius:12px;border:1px solid var(--border-strong);overflow:hidden;display:grid;place-items:center;background:var(--surface-2)}
+.cp-edit-avatar img{width:100%;height:100%;object-fit:contain}
+.cp-edit-avatar .cp-edit-avatar-fb{width:100%;height:100%;display:grid;place-items:center;font-family:var(--display);font-size:15px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
+.cp-edit-head-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.cp-edit-head-sub{font-size:12px;color:var(--text-3)}
+.cp-edit-head-sub .badge{margin-right:6px}
+.cp-edit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:12px;align-items:stretch}
+.cp-edit-grid > .cp-edit-col{min-width:0}
+.cp-edit-col{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2)}
+.cp-edit-col .wizard-title{margin:0 0 2px;letter-spacing:.2px;font-size:12px;text-transform:uppercase;color:var(--text-3)}
+.cp-edit-col-wide{grid-column:1 / -1}
+.cp-edit-col .form-row{min-width:0}
+.cp-edit-col .form-row .lbl{margin:10px 0 4px}
+.cp-edit-col .form-row .lbl:first-child{margin-top:0}
+.cp-edit-col .inp{width:100%}
+.cp-edit-logo-opts{display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1;align-content:start}
+.cp-edit-logo-opts .cpw-format-opt{padding:8px 10px}
+.cp-edit-file{display:flex;align-items:center;justify-content:space-between;gap:8px;border:1.5px dashed var(--border-strong);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer;background:var(--surface-2);transition:border-color .15s;margin-top:6px}
+.cp-edit-file:hover{border-color:var(--accent-line)}
+.cp-edit-file-hint{font-size:11px;font-weight:500;color:var(--text-3)}
+
+/* Edit dialog — responsive: the settings grid is viewport-driven, so a narrow
+   window (or a zoomed/split view) collapses to a single column before the two
+   cards get squeezed. max() on the cards keeps inputs usable at 900px, while
+   the narrow rules below pull the logo options and preview onto their own rows
+   so nothing overflows on phones. */
+@media (max-width:860px){
+  .cp-edit-grid{grid-template-columns:1fr}
+}
+@media (max-width:560px){
+  .cp-edit-head{gap:10px;padding-bottom:8px}
+  .cp-edit-avatar{width:38px;height:38px;flex:0 0 38px;border-radius:10px}
+  .cp-edit-col{padding:10px}
+  .cpw-format-grid{grid-template-columns:1fr 1fr}
+  .cp-edit-logo-opts{grid-template-columns:1fr}
+  .cpw-logo-row{flex-direction:column;gap:10px;align-items:stretch}
+  .cpw-logo-preview-wrap{align-self:flex-start}
+  .cp-edit-file{flex-direction:column;align-items:flex-start;gap:2px}
+}
 
 .cpw-models-section{margin-top:12px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
 .cpw-models-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-2);border-bottom:1px solid var(--border-faint)}
@@ -2451,7 +2696,6 @@ body.modal-open{overflow:hidden}
 
 /* Breadcrumb + search: calmer, uniform height */
 .crumb{font-weight:600;letter-spacing:.01em}
-.crumb-sep{opacity:.4}
 .gsearch{min-height:44px}
 
 /* Selects: consistent chevron (match the wizard/provider pickers) */
@@ -2471,7 +2715,6 @@ body.modal-open{overflow:hidden}
 .mp-list{max-height:min(230px,42vh)}
 .wf-preview{max-height:min(240px,40vh)}
 .palette-list{max-height:min(340px,60vh)}
-.term-body{max-height:min(240px,38vh)}
 .pg-cmp-col-body{max-height:min(340px,46vh)}
 .pg-hist{max-height:min(60vh,70vh)}
 .eco-models{max-height:min(220px,40vh)}
@@ -2559,7 +2802,6 @@ body.modal-open{overflow:hidden}
   .wf-actions .btn{flex:1 1 auto}
   .conn-grid{grid-template-columns:1fr}
   .qa-grid{grid-template-columns:1fr}
-  .stat-row{flex-direction:column}
   .inp-row{flex-wrap:wrap}
   .inp-row > *{flex-basis:100%}
   .profile-row,.backup-row{flex-wrap:wrap}
@@ -2611,12 +2853,913 @@ body.modal-open{overflow:hidden}
 .fb-tier-test-out{font-size:12px;font-weight:600;color:var(--text-2)}
 .fb-tier-test-out.ok{color:var(--success)}
 .fb-tier-test-out.err{color:var(--danger,#f87171)}
-.fb-knobs{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
-.fb-knobs label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:600;color:var(--text-2)}
-.fb-knobs .inp-sm{width:74px}
-.fb-knobs .fb-auto{flex-direction:row;align-items:center;gap:8px;font-weight:600;color:var(--text-2)}
+/* Knob row: label above a fixed-width field, so the two numeric inputs line up
+   under their labels instead of drifting to the width of the longest one. */
+.fb-knobs{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.fb-knobs label{display:flex;flex-direction:row;align-items:center;gap:7px;
+  font-size:12px;font-weight:600;color:var(--text-2);white-space:nowrap}
+  /* Single line per control. This was a column — label, then the input, then the
+     hint — so two small numeric fields cost three rows each. As one line both
+     hints stay visible (they carry the unit; dropping them would leave the
+     fields ambiguous) while saving about two text lines of height. */
+  .fb-knobs .fb-knob-hint{font-size:11.5px;font-weight:400;color:var(--text-3);
+    line-height:1.2}
+.fb-knobs .inp-sm{width:62px;text-align:center;padding:6px 4px}
+/* Native number spinners are pure noise on a field that only ever holds a small
+   integer, and they were rendering as a stray arrow inside the box. Hidden for
+   both engines, with the value still fully editable by keyboard and wheel. */
+.fb-knobs input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.fb-knobs input[type=number]::-webkit-outer-spin-button,
+.fb-knobs input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+/* Separator between the two numeric fields. They were adjacent inline-flex items
+   with only a 14px gap, which read as one connected control. This is a hairline
+   rule rather than a text dash so it cannot be mistaken for a minus sign sitting
+   between two values. */
+.fb-knob-sep{
+  align-self:stretch;flex:0 0 auto;
+  width:1px;min-height:26px;background:var(--border);
+  margin:0 2px;
+}
+
+/* Auto-revert is a behaviour, not a third number. It sat in the same row as the
+   two numeric fields, where the shared .fb-knobs label rule gave it their styling
+   and it read as a third knob. Its own row, with the label left and the switch
+   right, so the two groups stay distinct. The switch is the app's own .switch
+   component (38x22) rather than the smaller 32x17 .paid-track used by the tier
+   rows, because at that size it read as an artefact beside 12px text. */
+.fb-auto-row{
+  display:flex;flex-direction:column;align-items:flex-start;gap:1px;
+  padding:7px 0 0;margin-top:1px;
+  border-top:1px solid var(--border-faint);
+}
+/* Title and switch share one line so the switch reads as belonging to THAT label.
+   justify-content:space-between previously pushed it to the far edge of the card,
+   which detached it from the text it controls. */
+.fb-auto-head{display:flex;align-items:center;gap:8px}
+.fb-auto-head b{font-size:12px;font-weight:600;color:var(--text-2)}
+.fb-auto-row .fb-knob-hint{font-size:11.5px;font-weight:400;color:var(--text-3);line-height:1.25}
+/* The switch label is no longer inside .fb-knobs, so it no longer inherits the
+   numeric-field rule and only needs to stay un-squashed. */
+.fb-auto-row .fb-auto{flex:0 0 auto;cursor:pointer}
 .fb-acts{display:flex;gap:8px;flex-wrap:wrap}
 @media (max-width:640px){
   .fb-tier-acts{margin-left:0;width:100%}
-  .fb-knobs .inp-sm{width:100%}
+  /* Stacked, not full-width. The knob label is now a ROW (label + input + hint),
+     so width:100% on the input would stretch it past the viewport. */
+  .fb-knobs{flex-direction:column;align-items:stretch;gap:9px}
+  .fb-knob{width:100%}
+  .fb-knob .inp-sm{width:56px}
+  .fb-knob-sep{display:none}
 }
+
+/* ── Workspace topology ─────────────────────────────────────────
+   Renders the live request path as a graph. Unlike the old .ws-chain
+   flex row, this inserts the Nexference proxy as a real hop whenever it is in
+   the path, and gives every node an explicit live/empty/blocked state. The
+   horizontal flow collapses to a vertical stack below 900px — a 5-node chain
+   wraps into unreadable orphan fragments on a phone otherwise. */
+/* ══ Current Workspace — topology layout ══════════════════════════
+   The chain must stay readable from a 380px phone to a wide desktop, WITH or
+   WITHOUT the fallback ladder attached. Two problems this fixes:
+
+     1. `.topo-flow` was `flex-wrap:nowrap` with `flex:1 1 0` nodes, so five hops
+        (client, proxy, hub, model) compressed each node to ~90px and clipped every
+        value down to an ellipsis. The chain now wraps into rows instead of
+        shrinking past readability, and each node keeps a real minimum width.
+     2. The hub carries the whole ladder as a `flex:0 0 auto` sibling, which made it
+        demand ~400px and starve the nodes beside it. The hub now grows like any
+        other hop and the ladder sizes to the hub's own width, so turning fallback on
+        never distorts the chain.
+
+   Breakpoints: >=1180 full chain · 760-1180 chain wraps to two rows · <760 the flow
+   rotates to a vertical column (existing behaviour, now hub-aware). */
+.topo{padding:2px 0}
+.topo-flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;row-gap:12px}
+/* Node state is a colour-only distinction layered on the base box, so live, empty
+   and blocked hops all still read unmistakably as "boxes". Geometry lives in the
+   Current Workspace block further down; these were the older vertical-stack values. */
+.topo-click{cursor:pointer}
+.topo-click:hover{border-color:var(--accent-line);box-shadow:var(--elev-2);transform:translateY(-2px)}
+.topo-click:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* State tints the border rather than replacing it, so a live or blocked hop is
+   still clearly a box — the colour carries meaning, the edge still carries shape. */
+.topo-live{border-color:color-mix(in srgb,var(--success) 55%,var(--border-strong))}
+.topo-live .topo-dot{background:var(--success);opacity:1;box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 18%,transparent)}
+.topo-blocked{border-color:color-mix(in srgb,var(--error) 62%,var(--border-strong));
+  background:color-mix(in srgb,var(--error) 6%,var(--surface-2))}
+.topo-blocked .topo-dot{background:var(--error);opacity:1;box-shadow:0 0 0 3px color-mix(in srgb,var(--error) 20%,transparent)}
+
+/* Connector. Two hairline segments with an optional label sit between nodes, so
+   the hop reads as a directed edge rather than a decorative gap. */
+.topo-link{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:0 9px;min-width:52px;align-self:stretch}
+.topo-link-line{width:100%;height:1px;background:linear-gradient(90deg,var(--border-strong),var(--border-strong))}
+.topo-link-tag{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);
+  background:var(--surface-2);padding:1px 5px;border-radius:5px;border:1px solid var(--border-faint);white-space:nowrap}
+.topo-blocked + .topo-link .topo-link-line,
+.topo-blocked ~ .topo-link .topo-link-line{background:color-mix(in srgb,var(--error) 40%,var(--border))}
+
+.topo-alert{display:flex;align-items:flex-start;gap:8px;margin-top:11px;padding:9px 12px;border-radius:12px;
+  font-size:11.5px;line-height:1.45;color:var(--text);
+  background:color-mix(in srgb,var(--error) 9%,transparent);border:1px solid color-mix(in srgb,var(--error) 32%,transparent)}
+.topo-alert-ico{flex:0 0 auto;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;margin-top:1px;
+  font-size:10px;font-weight:800;color:#fff;background:var(--error)}
+.topo-note{margin-top:11px;padding:9px 12px;border-radius:12px;font-size:11.5px;line-height:1.45;color:var(--text-2);
+  background:var(--surface-2);border:1px solid var(--border-faint)}
+.topo-foot{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:10.5px;color:var(--text-3)}
+
+@media (max-width:760px){
+  /* Vertical flow: each edge rotates to a downward connector, and the tier spine
+     stays attached beneath the provider node inside the same single column. */
+  .topo-flow{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+  .topo-link{flex-direction:row;padding:5px 0 5px 14px;min-width:0;min-height:20px;align-items:center;justify-content:flex-start}
+  .topo-link-line{width:1px;height:100%;min-height:11px;background:var(--border-strong)}
+  .topo-node{flex:0 0 auto;width:100%}
+  .topo-hub{flex:0 0 auto;width:100%}
+  .topo-hub > .topo-node{width:100%}
+  /* The model node after the hub must sit BELOW the whole spine, so give it room
+     rather than letting it butt against the tiers. */
+  .topo-hub + .topo-link{padding-top:9px}
+}
+
+/* ── Models page: filter hierarchy ────────────────────────────────
+   The catalogue bar had 10 controls in one `flex-wrap` row — search, a type
+   segmented, provider, three toggles, four selects and Clear. Wrapping produced
+   two or three ragged rows with no hierarchy, and the three quick toggles looked
+   exactly as important as the rarely-used lifecycle/source selects.
+
+   Split into two tiers: the primary row keeps what is used constantly, and the
+   rest lives behind a "More filters" disclosure that reports how many of them
+   are active. A collapsed tier with a live count is strictly better than a
+   permanently expanded wall of selects, because the count means a filtered
+   result can never look unexplained. */
+.ml-more{position:relative;flex:0 0 auto}
+.ml-more-sum{
+  display:inline-flex;align-items:center;gap:6px;list-style:none;cursor:pointer;
+  padding:7px 11px;border:1px solid var(--border);border-radius:10px;
+  font:600 13px var(--sans);color:var(--text-2);background:var(--surface-2);
+  transition:border-color var(--fast) var(--ease),color var(--fast) var(--ease),background var(--fast) var(--ease);
+}
+.ml-more-sum::-webkit-details-marker{display:none}
+.ml-more-sum::marker{content:""}
+.ml-more-sum:hover{border-color:var(--accent-line);color:var(--text);background:var(--surface)}
+.ml-more[open] .ml-more-sum{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+.ml-more-sum:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ml-more-label{white-space:nowrap}
+.ml-more-caret{opacity:.6;transition:transform var(--fast) var(--ease)}
+.ml-more[open] .ml-more-caret{transform:rotate(180deg)}
+/* Live count of active secondary filters — the reason the tier is collapsed. */
+.ml-more-count{
+  display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;
+  border-radius:999px;background:var(--accent);color:#fff;
+  font:800 10px/1 var(--mono);letter-spacing:0;
+}
+.ml-more-count[hidden]{display:none}
+.ml-more-body{
+  display:flex;flex-wrap:wrap;align-items:center;gap:7px;
+  margin-top:7px;padding:8px 10px;
+  border:1px solid var(--border-faint);border-radius:10px;background:var(--surface-2);
+}
+/* The tier is full-width on its own line under the primary row, so on wide
+   screens the group reads as a secondary band rather than another inline item. */
+.ml-more[open]{flex:1 1 100%}
+
+@media (max-width:720px){
+  .ml-filters{gap:8px}
+  .ml-prov-sel{flex:1 1 100%}
+  .ml-more{order:3}
+  .ml-clear-filters{order:4;margin-left:auto}
+}
+
+/* ── Workspace: Environment Health ───────────────────────────────
+   The panel rendered every factor in one flat ok/bad list, so a single failing
+   check was visually indistinguishable from the passing ones and the reader had
+   to scan for it. Now: a pass-rate meter up front, failing checks grouped and
+   listed FIRST, passing checks folded underneath. */
+.ws-health-meter{display:flex;align-items:center;gap:10px;margin:2px 0 12px}
+.ws-health-meter-track{
+  position:relative;flex:1 1 auto;min-width:80px;height:6px;border-radius:999px;
+  background:var(--surface-2);border:1px solid var(--border-faint);overflow:hidden;
+}
+.ws-health-meter-fill{
+  display:block;height:100%;border-radius:999px;
+  background:linear-gradient(90deg,var(--success),color-mix(in srgb,var(--success) 70%,var(--accent)));
+  transition:width var(--med) var(--ease);
+}
+/* Amber when something needs fixing, so the meter is not reassuring at 6/6-1. */
+.ws-health.attention .ws-health-meter-fill,
+.ws-health.partial .ws-health-meter-fill{
+  background:linear-gradient(90deg,var(--warning),color-mix(in srgb,var(--warning) 70%,var(--accent)));
+}
+.ws-health.offline .ws-health-meter-fill,
+.ws-health.critical .ws-health-meter-fill{background:var(--error)}
+.ws-health-meter-label .bad-n{color:var(--error)}
+
+.ws-health-group + .ws-health-group{margin-top:11px;padding-top:11px;border-top:1px solid var(--border-faint)}
+/* Passing checks are context, not news — recede them. */
+.ws-health-group-h.ok{color:var(--text-3)}
+.ws-health-group .health-factor{opacity:.78}
+.ws-health-group .health-factor:hover{opacity:1}
+
+/* ── Models page: sort control ───────────────────────────────────
+   Sits in the primary row beside "More filters", styled to match the select it
+   is paired with so the row keeps a single alignment rhythm. */
+.ml-sort-group{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;flex:0 0 auto}
+.ml-sort-sel{
+  min-width:150px;padding:0 26px 0 11px;font-size:13px;
+  appearance:none;-webkit-appearance:none;cursor:pointer;
+  background-color:var(--surface-2);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center;background-size:11px;
+  transition:border-color var(--fast) var(--ease),background-color var(--fast) var(--ease);
+}
+.ml-sort-sel:hover{border-color:var(--accent-line);background-color:var(--surface)}
+.ml-sort-sel:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ml-sort-group .cp-reg-label{cursor:default}
+
+@media (max-width:720px){
+  .ml-sort-group{order:5;flex:1 1 100%}
+  .ml-sort-sel{flex:1 1 auto;width:100%;min-width:0}
+}
+
+/* ── Cloud Providers: sort control ───────────────────────────────
+   Sits beside the Registry filter in the same control cluster, so it reuses
+   .cp-reg-group / .cp-reg-label and needs no styles of its own beyond a width
+   that fits the longest option ("Configured first"). */
+/* 158px was sized for "Configured first" and pushed the chip row toward a wrap.
+   That label is now just "Configured", so the widest option is "Fewest models",
+   measured at ~132px including the 12px left pad, 28px chevron gap and borders.
+   140px fits every label with a little slack. `max-width:170px` on the shared
+   .cp-reg-select still caps the control. */
+.cp-sort-select{min-width:140px}
+
+/* ── Topology: fallback (auto-switch) rail ───────────────────────
+   Shown only when a fallback plan is armed. The plain chain shows the single
+   active hop; this rail makes the whole plan visible — which tier is live, what
+   each standby tier points at, and whether the client is degraded. Without it an
+   enabled fallback was invisible on the Workspace page. */
+/* ══ Current Workspace — topology nodes ═════════════════════════
+   The default diagram is three nodes: Client → Active provider → Model. It stays
+   that way unless something genuinely changes the path (an armed proxy, an armed
+   fallback plan). Nodes lay out horizontally — icon beside a two-line text block —
+   instead of a vertical stack, which roughly halved the chain height and let three
+   hops sit comfortably on one row. */
+.topo-node{
+  position:relative;flex:1 1 150px;min-width:0;max-width:100%;
+  display:flex;align-items:center;gap:9px;
+  padding:9px 11px;border-radius:12px;
+  background:var(--surface-2);
+  /* A node must read as a distinct BOX, not a tinted area. The panel behind the
+     topology is already dark, so a 1px --border hairline (alpha .07) left the card
+     edges nearly invisible and the chain looked like loose text with icons floating
+     in it. Two stacked edges fix that without resorting to a heavy outline: a
+     solid --border-strong hairline, plus a 1px inset highlight along the top that
+     catches the "lit from above" cue and separates the box from the surface. The
+     subtle drop shadow is what actually sells it as a raised card. */
+  border:1px solid var(--border-strong);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),
+             0 1px 2px rgba(0,0,0,.20);
+  transition:border-color var(--fast) var(--ease),box-shadow var(--fast) var(--ease),transform var(--fast) var(--ease);
+}
+.topo-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.topo-label{font-family:var(--mono);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);
+  line-height:1.2;white-space:nowrap}
+.topo-value{font-weight:600;font-size:13px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topo-ico{width:26px;height:26px;flex:0 0 auto;border-radius:8px;display:grid;place-items:center;
+  background:var(--accent-soft);color:var(--accent)}
+.topo-ico svg{width:15px;height:15px}
+.topo-dot{position:absolute;top:9px;right:9px;width:6px;height:6px;border-radius:50%;background:var(--text-3);opacity:.5}
+/* Slightly smaller node for the proxy hop so the provider keeps visual weight. */
+.topo-node.is-slim{flex:0 1 auto;padding:8px 10px}
+.topo-node.is-slim .topo-ico{width:22px;height:22px;border-radius:7px}
+.topo-node.is-slim .topo-ico svg{width:13px;height:13px}
+.topo-node.is-slim .topo-value{font-size:12px}
+
+/* Connector stays a thin labelled edge between nodes. */
+.topo-link{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:0 8px;min-width:38px;align-self:stretch}
+.topo-link-line{width:100%;height:1px;background:var(--border-strong)}
+.topo-link-tag{font-family:var(--mono);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);
+  background:var(--surface-2);padding:1px 5px;border-radius:5px;border:1px solid var(--border-faint);white-space:nowrap}
+
+/* ── Fallback tier spine ──────────────────────────────────────────
+   The tiers are NOT hops the request is on right now — they are where it might go.
+   So they hang off the provider node as a quiet vertical spine of single-line rows
+   (dot · kind · provider · model · route) rather than a second tier of full-size
+   nodes. It appears only when a fallback plan is armed. */
+.topo-hub{position:relative;display:flex;flex-direction:column;align-items:stretch;flex:1 1 180px;min-width:0;max-width:100%}
+.topo-hub > .topo-node{flex:0 0 auto;width:100%}
+.topo-spine{position:relative;margin:7px 0 0;padding:7px 0 0 13px}
+.topo-hub > .topo-spine::before{
+  content:"";position:absolute;top:-7px;left:50%;width:1px;height:7px;
+  background:var(--border-strong);transform:translateX(-50%);
+}
+.topo-spine-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px}
+.topo-spine-title{font:700 9px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-3)}
+.topo-spine-pill{padding:1px 7px;border-radius:999px;font:700 8.5px var(--mono);letter-spacing:.08em;
+  text-transform:uppercase;background:var(--success-soft);color:var(--success)}
+.topo-spine[data-state="degraded"] .topo-spine-pill{background:var(--error-soft);color:var(--error)}
+.topo-spine-note{font-size:10.5px;color:var(--text-3);line-height:1.3}
+.topo-tiers{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;position:relative}
+.topo-t{
+  position:relative;display:grid;grid-template-columns:7px 52px minmax(0,1.1fr) minmax(0,1.3fr) auto;
+  align-items:center;gap:7px;padding:2.5px 0;font-size:11.5px;min-width:0;
+}
+/* The spine itself: a continuous hairline the tier dots sit on. */
+.topo-tiers::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:1px;
+  background:var(--border-faint)}
+.topo-t-dot{width:7px;height:7px;border-radius:50%;background:var(--surface);border:1px solid var(--border-strong);
+  position:relative;z-index:1}
+.topo-t.is-active .topo-t-dot{background:var(--success);border-color:var(--success);
+  box-shadow:0 0 0 2.5px color-mix(in srgb,var(--success) 22%,transparent)}
+.topo-spine[data-state="degraded"] .topo-t.is-active .topo-t-dot{background:var(--error);border-color:var(--error);
+  box-shadow:0 0 0 2.5px color-mix(in srgb,var(--error) 22%,transparent)}
+.topo-t:not(.is-active){opacity:.62}
+.topo-t-kind{font:700 8.5px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topo-t.is-active .topo-t-kind{color:var(--success)}
+.topo-t-provider{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topo-t-model{color:var(--text-2);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topo-t-route{font:600 8.5px var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;
+  border-radius:4px;background:var(--surface-3);color:var(--text-3);white-space:nowrap}
+.topo-t-route.is-proxy{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)}
+.topo-badge{position:absolute;top:-6px;right:-5px;padding:1px 5px;border-radius:999px;
+  font:700 8px var(--mono);letter-spacing:.08em;text-transform:uppercase;background:var(--accent);color:#fff}
+
+@media (max-width:1180px){
+  /* Route chip is supplementary and duplicated in each row's tooltip. */
+  .topo-t-route{display:none}
+  .topo-t{grid-template-columns:7px 46px minmax(0,1fr) minmax(0,1.2fr)}
+}
+@media (max-width:760px){
+  .topo-t{grid-template-columns:7px 1fr;row-gap:0}
+  .topo-t-provider{grid-column:2}
+  .topo-t-model{display:none}
+}
+
+/* ── Health: optional ("not required") factors ───────────────────
+   Local runtime / local models are not failures on a cloud configuration. They
+   are listed so the user can see they were considered, but visually recessed so
+   they never read as something to fix. */
+.health-factor.opt{opacity:.5}
+.health-factor.opt .hf-dot{background:var(--text-3);box-shadow:none}
+.ws-health-group-h.opt{color:var(--text-3)}
+
+
+/* ══ Workspace: Environment Health ⇄ Quick Actions parity ══════════════
+   These two cards sit side by side and previously disagreed on BOTH axes:
+   the grid was 1.15fr/.85fr so the widths differed, and the health card
+   rendered every factor group (passing + optional) so it was far taller
+   than the Quick Actions grid. Equal columns + a compact health body makes
+   them read as one aligned pair. */
+.ws-grid{grid-template-columns:1fr 1fr}
+
+/* Push the action/footnote to the bottom so both cards bottom-align. */
+.ws-grid > .panel.ws-health{justify-content:flex-start}
+.ws-grid > .panel.ws-health .ws-health-action{margin-top:auto;padding-top:10px}
+
+/* Compact health body: title, one score line, failing items only. */
+.ws-health-titles{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ws-health-state{font-size:12px;color:var(--text-2);line-height:1.3}
+.ws-health-meter{margin:12px 0 0}
+.ws-health-meter-meta{display:flex;align-items:baseline;gap:7px;margin-top:7px}
+.ws-health-meter-meta b{font-size:15px;color:var(--text);font-weight:650;letter-spacing:-.01em}
+.ws-health-meter-meta span{font-size:11.5px;color:var(--text-3)}
+.ws-health-group{margin-top:10px}
+.ws-health-foot{margin:9px 0 0;font-size:11px;color:var(--text-3);line-height:1.4}
+
+/* Quick Actions: 2x2 with identical tile heights. */
+.ws-grid > .panel.ws-quick .qa-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;
+  margin-top:12px;flex:1 1 auto;align-content:start;
+}
+.qa-card{min-height:56px}
+.qa-text small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+@media (max-width:900px){.ws-grid{grid-template-columns:1fr}}
+
+/* ══ Current Workspace — card chrome ══════════════════════════════
+   The topology is the point of this card, so the chrome around it is tightened:
+   the header is a real header, and the footer pins the actions to the left with
+   the "Loaded" timestamp quietly on the right, instead of three loose stacked
+   rows that pushed the diagram down and read as unrelated fragments. */
+.ws-config{gap:12px}
+.ws-config-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding-bottom:11px;border-bottom:1px solid var(--border-faint)}
+.ws-config-head .dev-status-slot{margin-left:auto}
+.ws-config-foot{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding-top:11px;margin-top:2px;border-top:1px solid var(--border-faint);
+}
+.ws-config-foot .ws-actions-row{margin-top:0}
+.ws-config-asof{margin-top:0;margin-left:auto;font-size:11px;color:var(--text-3);
+  white-space:nowrap;order:2}
+@media (max-width:620px){
+  /* On narrow screens the timestamp would otherwise force the action buttons onto
+     their own line, so let it drop below them instead of competing. */
+  .ws-config-asof{margin-left:0;width:100%;order:3}
+}
+
+/* Keep the whole diagram clear of the card edge on small screens, where the
+   14px node padding plus card padding otherwise leaves no breathing room. */
+@media (max-width:760px){
+  .topo-node{padding:10px 12px}
+  .topo-hub > .topo-node{padding:10px 12px}
+}
+
+/* Explains that the Primary row is not a stale snapshot but tracks the applied
+   config, so users do not assume they must press "Recapture" after every change. */
+.fb-primary-note{margin:7px 0 0;font-size:11px;line-height:1.45;color:var(--text-3)}
+
+/* ── Fallback: add / remove tier ──────────────────────────────────
+   Tier count is user-controlled (2–5), so the controls sit in their own row with
+   a live "n of 5" counter rather than being buried in the tier list. */
+.fb-tier-add{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:2px;
+  padding-top:11px;border-top:1px solid var(--border-faint)}
+.fb-tier-add .muted{font-size:11px;margin-left:auto}
+.fb-add-tier{font-weight:600}
+.fb-add-tier:disabled{opacity:.42;cursor:not-allowed}
+.fb-add-tier:disabled:hover{transform:none;border-color:var(--border);box-shadow:none;background:var(--surface-2)}
+.fb-remove-tier{font-size:11.5px;padding:4px 9px}
+.fb-tier-cap{margin:4px 0 0;font-size:11px;line-height:1.4}
+
+/* ── Current Workspace: node boxes read as boxes ──────────────────
+   The hub node is the failover point, so it gets a slightly stronger edge and a
+   soft accent wash. It must still be obviously the same kind of box as its
+   neighbours — same radius, same border weight — so the eye reads one chain with
+   one emphasised node rather than two different component types. */
+.topo-hub > .topo-node{
+  border-color:color-mix(in srgb,var(--accent) 34%,var(--border-strong));
+  background:linear-gradient(180deg,
+    color-mix(in srgb,var(--accent) 5%,var(--surface-2)),
+    var(--surface-2));
+}
+.topo-hub > .topo-node.topo-live{
+  border-color:color-mix(in srgb,var(--success) 55%,var(--border-strong));
+}
+
+/* The proxy hop is a utility node, not a provider. Muted edge so the chain's
+   focal points stay the client, the provider and the model. */
+.topo-node.is-slim{
+  border-color:var(--border);
+  background:color-mix(in srgb,var(--surface-3) 60%,var(--surface-2));
+}
+.topo-node.is-slim.topo-live{
+  border-color:color-mix(in srgb,var(--success) 30%,var(--border));
+}
+
+/* An empty hop (nothing configured) reads as a dashed placeholder rather than a
+   broken box — it is a slot to fill, not an error. */
+.topo-node.topo-empty{
+  border-style:dashed;
+  border-color:var(--border);
+  background:transparent;
+}
+.topo-node.topo-empty .topo-value{color:var(--text-3);font-weight:500}
+
+/* Hover/focus must still read on top of the new heavier border. */
+.topo-click:hover{
+  border-color:var(--accent-line);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
+             0 4px 12px rgba(0,0,0,.30);
+}
+
+/* ── Backups: multi-select ────────────────────────────────────────
+   Each row carries a checkbox, and a selected row is tinted so the pending
+   deletion is obvious at a glance before the confirm dialog appears. */
+.backup-sel-bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:7px 9px;margin-bottom:8px;border:1px solid var(--border-faint);
+  border-radius:10px;background:var(--surface-2);
+}
+.backup-sel-all{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  font-size:11.5px;color:var(--text-2);user-select:none}
+.backup-sel-all input{cursor:pointer;accent-color:var(--accent)}
+.backup-sel-count{font-size:11px}
+.backup-sel-acts{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.backup-sel-acts .btn{padding:4px 10px;font-size:11px}
+.backup-sel-acts .btn:disabled{opacity:.4;cursor:not-allowed}
+.backup-sel-acts .btn:disabled:hover{transform:none;box-shadow:none}
+
+.backup-rows{display:flex;flex-direction:column;gap:6px}
+.backup-sel-box{display:inline-flex;align-items:center;flex:0 0 auto;cursor:pointer}
+.backup-sel-box input{cursor:pointer;accent-color:var(--accent);width:14px;height:14px}
+.backup-row.is-selected{
+  border-color:color-mix(in srgb,var(--accent) 45%,var(--border));
+  background:color-mix(in srgb,var(--accent) 7%,var(--surface-2));
+}
+.backup-sel-box input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.backup-more{margin-top:8px;font-size:11px}
+
+/* Select-mode header. Sits above the list as a quiet affordance; the select-mode bar
+   only appears once it is pressed, so the default list stays a plain read/restore
+   list with no checkboxes in the way. */
+.backup-head{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.backup-count-hint{font-size:11px}
+/* A `display` rule beats the UA's `[hidden]{display:none}`, so any flex/grid element
+   toggled with `hidden` needs this to actually hide. Scoped to the backup list rather
+   than a global `[hidden]` so nothing else in the app is affected. */
+.backup-list [hidden],.backup-rows [hidden],.backup-sel-bar[hidden]{display:none}
+
+/* Row-level hit target in select mode. The row is the clickable unit, so it gets a
+   pointer cursor and a hover wash — otherwise only the small checkbox looks tappable
+   and users click the name expecting it to select. */
+.backup-row{cursor:default}
+/* Select mode is toggled via a class, not a `:has()` selector, so this works in every
+   browser: the whole row becomes the hit target for ticking. */
+.backup-list.is-selecting .backup-row,.backup-rows.is-selecting .backup-row{cursor:pointer}
+.backup-list.is-selecting .backup-row:hover,.backup-rows.is-selecting .backup-row:hover{
+  border-color:var(--accent-line)}
+.backup-row.is-selected .backup-name{color:var(--text)}
+
+/* ── Command palette: search row, empty state, footer ───────────
+   The palette is a launcher, so the search field is the visual anchor and the
+   keyboard affordances are stated rather than assumed. */
+.palette{gap:0}
+.palette-search{position:relative;display:flex;align-items:center;gap:9px;
+  padding:0 2px 0 0}
+.palette-search-ico{
+  flex:0 0 auto;min-width:44px;padding:4px 8px;border-radius:8px;text-align:center;
+  font:600 10.5px var(--mono);letter-spacing:.06em;color:var(--text-2);
+  background:var(--surface-3);border:1px solid var(--border);
+}
+.palette-input{width:100%;font-size:14.5px;padding:11px 12px}
+.palette-input:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+.palette-meta{display:flex;justify-content:flex-end;padding:7px 2px 5px;
+  font:600 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.palette-list{gap:2px;max-height:min(46vh,380px);scrollbar-gutter:stable}
+.palette-item{padding:9px 12px;border-radius:9px}
+.palette-item.active{transform:translateX(2px)}
+.palette-empty{display:flex;flex-direction:column;gap:4px;align-items:center;
+  padding:26px 14px;text-align:center;font-size:13px}
+.palette-empty b{font-weight:600;color:var(--text)}
+.palette-empty .muted{font-size:11.5px}
+.palette-foot{display:flex;gap:16px;flex-wrap:wrap;padding:9px 2px 0;margin-top:8px;
+  border-top:1px solid var(--border-faint);font-size:10.5px;color:var(--text-3)}
+.palette-foot span{display:inline-flex;align-items:center;gap:4px}
+.palette-foot kbd{font:600 9.5px var(--mono);padding:1px 5px;border-radius:5px;
+  background:var(--surface-3);border:1px solid var(--border);color:var(--text-2)}
+@media (max-width:560px){
+  .palette-foot{display:none}
+  .palette-search-ico{min-width:36px;font-size:9.5px}
+}
+
+/* ── Backup selection: an explicit, always-visible tick ──────────
+   The row checkbox was a NATIVE <input type=checkbox>, so its tick was drawn by
+   the OS in a colour the app does not control. On the dark panel it read as an
+   empty box — you could not tell a selected row from an unselected one.
+
+   The native input is still there (it owns the state, the label, the keyboard
+   focus ring and the screen-reader semantics) but is visually replaced: it is made
+   transparent and the tick is our own SVG, so it renders identically in light and
+   dark themes, on macOS and Windows, regardless of OS checkbox styling. */
+.bk-check{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+.backup-sel-box,.backup-sel-all{position:relative}
+/* The drawn box. Shares the input's box so clicking the tick hits the real control
+   through the wrapping <label>. */
+.bk-tick{
+  position:relative;flex:0 0 auto;display:grid;place-items:center;
+  width:16px;height:16px;border-radius:5px;
+  background:var(--surface-3);color:transparent;
+  border:1px solid var(--border-strong);
+  transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease),color var(--fast) var(--ease);
+}
+.bk-tick-sm{width:14px;height:14px;border-radius:4px}
+.bk-tick svg{display:block;opacity:0;transform:scale(.7);
+  transition:opacity var(--fast) var(--ease),transform var(--fast) var(--ease)}
+/* Checked: filled box, visible tick. The sibling selector keys off the real input's
+   checked state, so the drawn box can never drift out of sync with it. */
+.bk-check:checked ~ .bk-tick{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+}
+.bk-check:checked ~ .bk-tick svg{opacity:1;transform:scale(1)}
+/* Indeterminate (some, not all selected) — a dash, not a tick, so it reads as
+   "partial" rather than "all selected". */
+.bk-check:indeterminate ~ .bk-tick{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+}
+.bk-check:indeterminate ~ .bk-tick svg{opacity:0}
+.bk-check:indeterminate ~ .bk-tick::after{
+  content:"";position:absolute;width:8px;height:2px;border-radius:2px;background:#fff;
+}
+/* Hover only while the row is actually selectable. */
+.backup-rows.is-selecting .bk-tick:hover,
+.backup-list.is-selecting .bk-tick:hover{border-color:var(--accent-line);background:var(--surface-2)}
+.backup-rows.is-selecting .bk-tick:hover{background:color-mix(in srgb,var(--accent) 18%,var(--surface-3))}
+/* Focus: the input is visually hidden, so its ring must be redrawn on the tick. */
+.bk-check:focus-visible ~ .bk-tick{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ══ GitHub + support links ═════════════════════════════════════
+   Three surfaces, one visual language: the navbar icon, the sidebar footer pair,
+   and the Settings "Contact & Support" panel. All external links carry
+   rel="noopener noreferrer" so a target=_blank page cannot reach back into
+   window.opener. */
+
+/* ── Navbar: GitHub mark replaces the version pill ── */
+.gh-link{color:var(--text-2);text-decoration:none}
+.gh-link:hover{color:var(--text);border-color:var(--accent-line);background:var(--surface-2)}
+.gh-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ── Sidebar footer ── */
+/* Stacked vertically so each button gets the full rail width. Side by side at
+   248px they left roughly 100px per button, which is what forced the label into
+   an ellipsis and shrank the marks to stay legible. */
+.side-links{display:flex;flex-direction:column;gap:7px;width:100%}
+/* The official badge is wider than a text link, so it gets its own line
+   under the GitHub row rather than being squeezed beside it. */
+.side-link{
+  /* `width:100%` + `box-sizing:border-box` rather than relying on the default
+     `align-self:stretch`. In a column flex container the cross axis is horizontal,
+     so stretch is implicit and easy to lose to any later `align-items` change —
+     which is what left the two buttons at different, content-driven widths. An
+     intrinsic width here also risks overflowing once a label grows. Both buttons
+     now resolve to exactly the rail's content width. `box-sizing` is already
+     border-box globally, so padding cannot push either button wider. */
+  width:100%;
+  flex:0 0 auto;align-self:stretch;min-width:0;
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border:1px solid var(--border);border-radius:10px;
+  background:var(--surface-2);color:var(--text-2);text-decoration:none;
+  font-size:12.5px;font-weight:600;white-space:nowrap;line-height:1.2;
+  /* Both labels sit against the same 28px mark box, so the text shares its
+     optical centre instead of riding low beside a taller framed mark. */
+  transition:border-color var(--fast) var(--ease),background var(--fast) var(--ease),
+             color var(--fast) var(--ease),transform var(--fast) var(--ease);
+}
+/* The label takes the leftover space, so a longer string ("Buy me a coffee")
+   truncates against the button edge instead of widening the button. */
+.side-link-tx{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+/* Marks sized up for legibility at this button height. */
+/* Sized to one shared height with the coffee badge (28px) so the two sidebar rows
+     match. The octocat is square and the wordmark is portrait (aspect 0.69), so the
+     common measure has to be height — matching widths would distort one of them. */
+
+.side-link .bmc-mark,.side-link .mark-frame{height:28px;width:28px;padding:4px;border-radius:8px}
+.side-link:hover{
+  border-color:var(--accent-line);background:var(--surface-3);color:var(--text);
+  transform:translateY(-1px);
+}
+.side-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Coffee is a warm accent so the two links are distinguishable at a glance and
+   the support route reads as an invitation rather than another utility. */
+.side-link-coffee{color:var(--warning)}
+.side-link-coffee:hover{border-color:color-mix(in srgb,var(--warning) 45%,transparent);
+  background:color-mix(in srgb,var(--warning) 10%,var(--surface-2));color:var(--warning)}
+
+/* ── Settings: support buttons ──────────────────────────────────
+   A compact button row directly under Configuration Profiles, not a panel. It
+   sits inside the same grid column as the section it supports, so it reads as
+   part of that section rather than competing with it as a card of equal weight. */
+/* Its own panel, a sibling of Configuration Profiles. The hairline divider that
+   separated it as a card footer is gone with the split, so the heading carries
+   the section identity on its own. */
+.settings-support{justify-content:flex-start}
+.settings-support h3{margin-bottom:6px}
+.support-desc{margin:0 0 12px;font-size:12px;line-height:1.65;color:var(--text-2)}
+.support-desc{font-size:11.5px;line-height:1.6;color:var(--text-3);margin:0}
+/* Side by side, splitting the card width evenly. `margin-top:auto` keeps the
+   row pinned to the bottom of the card so it sits in the same place whether the
+   description wraps to two lines or five. */
+.support-row{display:flex;flex-direction:row;gap:8px;margin-top:auto}
+.support-btn{
+  /* Equal halves rather than content width, so a long label on one side cannot
+     push the other out of line. */
+  flex:1 1 0;min-width:0;
+  display:flex;align-items:center;gap:9px;
+  padding:10px 13px;border:1px solid var(--border);border-radius:12px;
+  background:var(--surface-2);color:var(--text-2);text-decoration:none;
+  font-size:12.5px;font-weight:600;white-space:nowrap;line-height:1.2;
+  transition:border-color var(--fast) var(--ease),background var(--fast) var(--ease),
+             color var(--fast) var(--ease),transform var(--fast) var(--ease);
+}
+.support-btn:hover{
+  border-color:var(--accent-line);background:var(--surface-3);color:var(--text);
+  transform:translateY(-1px);
+}
+.support-btn:active{transform:translateY(0)}
+.support-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* 19px to match the 20px sidebar mark and the 26px coffee badge. */
+/* Official Buy Me a Coffee mark. A stacked composition (viewBox 0 0 884 1279):
+   a near-black wordmark (#0D0C22) above a brand-yellow cup (#FFDD00).
+
+   The yellow drink must stay yellow on BOTH surfaces, and only the wordmark
+   changes. A CSS filter cannot express that — no filter lifts one path of a
+   two-colour SVG while leaving the other — so the mark ships as two assets whose
+   yellow path is byte-identical:
+     buy-me-a-coffee.svg       wordmark #0D0C22   (light surface)
+     buy-me-a-coffee-dark.svg  wordmark #FFFFFF   (dark surface)
+   That gives white-on-yellow in dark mode and black-on-yellow in light mode,
+   with the drink unchanged.
+
+   The swap is keyed to [data-theme] because that is what ui/core/theme.js writes
+   — it RESOLVES 'system' to a concrete light/dark, so it always reflects the
+   palette actually on screen. prefers-color-scheme would follow the OS instead and
+   disagree whenever the user pinned the theme in Appearance.
+
+   Only the requested img is rendered; the other is display:none, so only one asset
+   is ever fetched. */
+/* Shared mark frame. The GitHub octocat is a bare square glyph while the coffee
+   badge is a framed portrait, so without a common box the two buttons came out
+   different heights and the labels sat on different baselines. Both marks now use
+   this one frame, so a mark pair is pixel-identical apart from the artwork. */
+.bmc-mark,
+.mark-frame{
+  display:inline-flex;align-items:center;justify-content:center;
+  flex:0 0 auto;position:relative;
+  height:26px;width:26px;padding:3px;box-sizing:border-box;
+  background:transparent;
+  border:1px solid var(--border-strong);
+  border-radius:7px;
+  transition:border-color var(--fast) var(--ease);
+}
+/* The badge is portrait (aspect 0.69) and sizes itself to its own content; the
+   octocat is square and takes the frame's fixed box. */
+.mark-frame>svg{width:100%;height:100%}
+.bmc-mark>img{
+  display:block;height:100%;width:auto;object-fit:contain;
+}
+/* Dark is the default palette, so the WHITE wordmark is the unlabelled case and
+   the light-surface asset is the one that is suppressed. */
+.bmc-mark .bmc-light{display:none}
+[data-theme="light"] .bmc-mark .bmc-dark{display:none}
+[data-theme="light"] .bmc-mark .bmc-light{display:block}
+/* Warm accent so the support route reads as an invitation, matching the sidebar. */
+.support-btn-coffee{color:var(--warning);
+  border-color:color-mix(in srgb,var(--warning) 26%,var(--border))}
+.support-btn-coffee:hover{
+  border-color:color-mix(in srgb,var(--warning) 50%,transparent);
+  background:color-mix(in srgb,var(--warning) 10%,var(--surface-2));
+  color:var(--warning);
+}
+
+/* Collapsed sidebar: the version and both support links are hidden entirely, so
+   the rail shows navigation only. At 68-74px wide there is no room for a labelled
+   button, and two unlabelled icons stacked under a hidden version read as
+   decoration rather than links. Both are one click away in Settings. */
+
+/* ══ Settings → Appearance ═══════════════════════════════════════
+   Label/control rows rather than a bare segmented control, so each preference
+   reads on its own. Everything is driven by attributes on <html>
+   (data-density, data-motion, .reduce-motion) so a rule is edited in one place
+   instead of threading a modifier class through every component. */
+.settings-appearance .muted{margin:2px 0 14px}
+.ap-row{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:11px 0;border-top:1px solid var(--border-faint)}
+.ap-row:first-of-type{border-top:0}
+.ap-row-stack{flex-direction:column;align-items:flex-start;gap:9px}
+.ap-label{display:flex;flex-direction:column;gap:2px;font-size:12.5px;
+  font-weight:600;color:var(--text);flex:0 0 auto}
+  /* Theme / density control, scoped to its own class.
+     The shared `.seg` / `.seg-btn` carry three competing base rules and two
+     different active-state names, so neither is used here. The container is sized
+     to its CONTENT and right-aligned by the row rather than stretching: as a
+     full-width pill it left a large empty area with the options crammed against
+     the right edge, which read as a broken control. */
+  .ap-seg{
+    display:inline-flex;flex:0 0 auto;align-items:center;gap:2px;
+    /* No margin-left:auto here. The row already uses justify-content:space-between,
+       so an auto left margin pushed the control a second time and opened a
+       variable gap that shifted the pill depending on the label length. */
+    padding:3px;border-radius:999px;
+    background:var(--surface-2);border:1px solid var(--border);
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.22);
+  }
+  .ap-seg-sm{padding:2px}
+  .ap-theme-btn{
+    border:0;background:transparent;cursor:pointer;
+    padding:7px 17px;border-radius:999px;font:inherit;
+    font-size:12.5px;font-weight:600;line-height:1.45;white-space:nowrap;
+    /* Uses the design system's own three-step text scale rather than layering
+       `opacity` on top of it. Opacity dims the whole element — background and
+       box-shadow included — and creates a stacking context that renders the
+       focus ring and the active chip's glow inconsistently. The scale already
+       encodes the hierarchy predictably in both palettes:
+         unselected -> --text-3  (dimmest, clearly secondary)
+         hover      -> --text-2
+         selected   -> --text    (full contrast on the filled accent chip)   */
+    color:var(--text-3);
+    transition:background var(--fast) var(--ease),color var(--fast) var(--ease),
+               box-shadow var(--fast) var(--ease);
+  }
+  .ap-seg-sm .ap-theme-btn{padding:5px 12px;font-size:11.5px}
+  .ap-theme-btn:hover:not(.is-on){background:var(--surface-3);color:var(--text-2)}
+  .ap-theme-btn.is-on{
+    background:var(--accent);color:var(--text-on-accent,#fff);
+    font-weight:700;
+    box-shadow:0 2px 8px var(--accent-glow);
+  }
+  .ap-theme-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* In the light palette the accent is bright enough that white text on it fails
+     contrast, so the filled state uses dark ink instead. */
+  [data-theme="light"] .ap-theme-btn.is-on{color:#06101f}
+
+/* Accent swatches: the dot is the colour itself, the ring marks the selection. */
+.ap-accents{display:flex;gap:8px;flex-wrap:wrap}
+.ap-swatch{
+  width:26px;height:26px;border-radius:50%;cursor:pointer;padding:0;
+  background:var(--sw);border:2px solid transparent;
+  box-shadow:0 0 0 1px var(--border);
+  transition:transform var(--fast) var(--ease),box-shadow var(--fast) var(--ease);
+}
+.ap-swatch:hover{transform:scale(1.1)}
+.ap-swatch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ap-swatch.is-on{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--sw);transform:scale(1.06)}
+
+/* Switch */
+.ap-row-end{align-items:center}
+.switch{display:inline-flex;align-items:center;cursor:pointer;flex:0 0 auto}
+.switch input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.switch-track{width:38px;height:22px;border-radius:999px;background:var(--surface-3);
+  border:1px solid var(--border-strong);position:relative;display:block;
+  transition:background var(--fast) var(--ease),border-color var(--fast) var(--ease)}
+.switch-thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+  background:var(--text-2);transition:transform var(--fast) var(--ease),background var(--fast) var(--ease)}
+.switch input:checked ~ .switch-track{background:var(--accent);border-color:var(--accent)}
+.switch input:checked ~ .switch-track .switch-thumb{transform:translateX(16px);background:#fff}
+.switch input:focus-visible ~ .switch-track{outline:2px solid var(--accent);outline-offset:2px}
+
+.ap-reset{margin-top:13px;padding-top:12px;border-top:1px solid var(--border-faint)}
+
+/* ══ Preference effects ══════════════════════════════════════════
+   Density and motion are the only global appearance toggles. A root font-size
+   scale was tried and removed: the stylesheet is authored entirely in px, so it
+   changed nothing while appearing to be a working control. */
+
+/* Compact density, applied across the whole dashboard.
+   Scoped to the shared surface primitives rather than to individual pages, so
+   every grid, card, list row and control tightens together. Padding and gap
+   values are ~25-35% smaller than the comfortable defaults (e.g. .panel 18px
+   -> 12px, .ws-kpi 16px/18px -> 11px/13px); font sizes and control heights are
+   deliberately left alone so a dense layout stays legible rather than becoming
+   a cramped one. */
+
+/* Panels and page gutter */
+html[data-density="compact"] .panel{padding:12px}
+html[data-density="compact"] .panel h3{margin-bottom:7px}
+html[data-density="compact"] .content{padding:14px 18px 28px}
+
+/* Grids */
+html[data-density="compact"] .settings-grid,
+html[data-density="compact"] .ws-grid{gap:11px}
+html[data-density="compact"] .settings-col{gap:11px}
+html[data-density="compact"] .provider-grid,
+html[data-density="compact"] .rt-grid,
+html[data-density="compact"] .client-grid{gap:10px}
+html[data-density="compact"] .cfg-wrap{gap:11px}
+
+/* KPI tiles on the workspace */
+html[data-density="compact"] .ws-kpi{padding:11px 13px}
+html[data-density="compact"] .ws-hero{gap:10px}
+
+/* Topology */
+html[data-density="compact"] .topo-node{padding:7px 9px}
+html[data-density="compact"] .topo-link{padding:0 6px;min-width:30px}
+html[data-density="compact"] .topo-spine{margin-top:5px;padding-top:5px}
+html[data-density="compact"] .topo-t{padding:1.5px 0}
+
+/* Quick Actions */
+html[data-density="compact"] .qa-card{min-height:44px;padding:7px 9px}
+html[data-density="compact"] .ws-quick .qa-grid{gap:7px}
+
+/* List rows: backups, profiles, models */
+html[data-density="compact"] .backup-row{padding:5px 8px}
+html[data-density="compact"] .profile-row{padding:7px 10px}
+html[data-density="compact"] .ml-row{padding:6px 11px;gap:11px}
+html[data-density="compact"] .ws-next-item{padding:6px 0 6px 20px}
+
+/* Card internals */
+html[data-density="compact"] .client-card{gap:8px}
+html[data-density="compact"] .rt-models{margin-bottom:7px}
+
+/* Appearance section rows */
+html[data-density="compact"] .ap-row{padding:8px 0}
+html[data-density="compact"] .ap-reset{margin-top:9px;padding-top:9px}
+
+/* Footer actions */
+html[data-density="compact"] .ws-actions-row{gap:7px}
+html[data-density="compact"] .ws-config-foot{padding-top:8px}
+
+/* Reduced motion: honoured for BOTH the explicit setting and the OS preference
+   (the boot script sets the class for either). Transitions and the status pulse
+   are what trigger motion discomfort, so both are disabled. */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after{
+  animation-duration:.001ms !important;
+  animation-iteration-count:1 !important;
+  transition-duration:.001ms !important;
+  scroll-behavior:auto !important;
+}
+
+/* Privacy card — a normal settings panel, so it sits in the grid beside Provider
+   Intelligence rather than as a full-width strip under everything. */
+.security-note .sec-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.security-note .sec-head h3{margin:0}
+.security-note .lock{font-size:15px;line-height:1}
+.security-note .sec-body{margin:0;font-size:12.5px;line-height:1.65;color:var(--text-2)}
+.security-note .sec-body code{
+  font-family:var(--mono);font-size:11.5px;padding:1px 5px;border-radius:5px;
+  background:var(--surface-3);color:var(--text);
+}
+/* Sit level with the Provider Intelligence card it is paired with. */
+.security-note{display:flex;flex-direction:column;justify-content:flex-start}

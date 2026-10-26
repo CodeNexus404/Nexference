@@ -9,6 +9,12 @@ export class ConfigurationEngine {
   // Mirrors the original buildClaudeSettings: uses the custom card's selected
   // format, otherwise the provider's native format. OpenRouter is dual-compatible
   // but always emitted in Anthropic (Claude Code) format.
+  //
+  // TokenRouter is deliberately NOT in that list: it is an OpenAI-native
+  // gateway, so it shows a copyable OpenAI config ("Show config") rather than
+  // writing Claude Code settings. Routing it into Claude Code is the explicit
+  // job of the "Use with Claude Code (via Nexference)" proxy action, which keeps
+  // a single, unambiguous path instead of two competing apply buttons.
   buildClaudeSettings(provider, baseUrl, model, apiKey) {
     let fmt = provider.id === 'custom' ? workspace.customFormat : provider.format;
     if (provider.id === 'openrouter') fmt = 'anthropic';

@@ -12,20 +12,11 @@
 //   GET  /api/ecosystem/logo?url=...        (safe, validated image proxy)
 import { Router } from 'express';
 import {
-  getSources, discoverEcosystem, listEcosystemProviders, getEcosystemProvider,
+  getSources, startDiscovery, getDiscoveryStatus, listEcosystemProviders, getEcosystemProvider,
   validateProvider, adoptProvider, ignoreProvider, restoreProvider, markForReview, getEcosystemSummary,
   deactivateProvider, reactivateProvider, deleteProvider, getProviderEvidence, fetchProviderModels,
 } from '../providers/ecosystem/ecosystemDiscoveryService.js';
 import { proxyLogo, validateLogoUrl } from '../providers/ecosystem/logoResolver.js';
-
-const DISCOVER_TIMEOUT_MS = 120000;
-
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error('discover_timeout')), ms)),
-  ]);
-}
 
 export function registerEcosystemRoutes(app) {
   const router = Router();
@@ -56,28 +47,39 @@ export function registerEcosystemRoutes(app) {
     } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
   });
 
-  router.post('/ecosystem/discover', async (req, res) => {
+  // Discovery is a background job: the request returns immediately with 202 and
+  // the client polls /ecosystem/discover/status. This keeps the button honest for
+  // long runs and avoids a 504 while work keeps happening server-side.
+  router.post('/ecosystem/discover', (req, res) => {
     try {
-      const result = await withTimeout(discoverEcosystem({ force: req.body?.force !== false }), DISCOVER_TIMEOUT_MS);
-      if (result && result.ok === false && result.error === 'already_running') {
-        return res.status(429).json({ error: 'already_running', message: 'A discovery run is already in progress.' });
+      const out = startDiscovery({ force: req.body?.force === true });
+      if (!out.started) {
+        return res.status(202).json({ ok: true, running: true, alreadyRunning: true, ...out.status });
       }
-      res.json(result);
+      res.status(202).json({ ok: true, running: true, startedAt: out.status.startedAt });
     } catch (e) {
-      res.status(504).json({ error: 'discover_failed', message: String(e.message || e) });
+      res.status(500).json({ error: 'discover_failed', message: String(e.message || e) });
     }
   });
 
-  router.post('/ecosystem/sources/:id/refresh', async (req, res) => {
+  router.get('/ecosystem/discover/status', (req, res) => {
+    try { res.json(getDiscoveryStatus()); }
+    catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  router.post('/ecosystem/sources/:id/refresh', (req, res) => {
     // Sources are few and the store is shared; a source refresh runs a full
     // discovery pass (other enabled sources simply re-report their candidates).
     try {
       const sources = getSources();
       const src = sources.find((s) => s.id === req.params.id);
       if (!src) return res.status(404).json({ error: 'Unknown source' });
-      const result = await withTimeout(discoverEcosystem({ force: true }), DISCOVER_TIMEOUT_MS);
-      res.json(result);
-    } catch (e) { res.status(504).json({ error: 'refresh_failed', message: String(e.message || e) }); }
+      const out = startDiscovery({ force: true });
+      if (!out.started) {
+        return res.status(202).json({ ok: true, running: true, alreadyRunning: true, sourceId: src.id, ...out.status });
+      }
+      res.status(202).json({ ok: true, running: true, sourceId: src.id, startedAt: out.status.startedAt });
+    } catch (e) { res.status(500).json({ error: 'refresh_failed', message: String(e.message || e) }); }
   });
 
   const providerAction = (fn) => async (req, res) => {

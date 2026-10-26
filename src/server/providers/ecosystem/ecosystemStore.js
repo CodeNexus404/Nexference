@@ -29,7 +29,8 @@ export function safeRead(file) {
     if (!existsSync(file)) return null;
     const raw = readFileSync(file, 'utf8');
     if (!raw.trim()) return null;
-    return JSON.parse(raw);
+    // Tolerate a UTF-8 BOM (files copied/edited on Windows).
+    return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
   } catch {
     // Corrupted or unreadable → treat as empty rather than crashing boot.
     return null;
@@ -63,7 +64,7 @@ export function loadDiscovered() {
 }
 
 export function saveDiscovered(map) {
-  atomicWrite(DISCOVERED_FILE, map || {});
+  return atomicWrite(DISCOVERED_FILE, map || {});
 }
 
 // ── Discovery history ──
@@ -75,7 +76,7 @@ export function loadHistory() {
 export function appendHistory(entry) {
   const list = loadHistory();
   list.unshift(entry);
-  atomicWrite(HISTORY_FILE, list.slice(0, MAX_HISTORY));
+  return atomicWrite(HISTORY_FILE, list.slice(0, MAX_HISTORY));
 }
 
 // ── Source state ──
@@ -85,5 +86,5 @@ export function loadSourceState() {
 }
 
 export function saveSourceState(state) {
-  atomicWrite(SOURCE_STATE_FILE, state || {});
+  return atomicWrite(SOURCE_STATE_FILE, state || {});
 }

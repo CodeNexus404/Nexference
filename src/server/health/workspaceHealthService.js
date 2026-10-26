@@ -63,9 +63,13 @@ function buildClients(env) {
   const items = clients.map((c) => ({
     label: `${c.name || c.id} detected`,
     ok: !!c.installed,
+    // Having Gemini CLI and Cursor installed is not a health requirement. Marking
+    // every absent client as a failure made a working Claude Code setup look
+    // broken and dragged the score down for no actionable reason.
+    optional: !c.installed && detected.length > 0,
     detail: c.installed
       ? (c.launchSupported ? 'Installed and can be launched.' : 'Installed on this device.')
-      : 'Not detected on this device.',
+      : (detected.length ? 'Not detected \u2014 not required.' : 'Not detected on this device.'),
   }));
 
   return {
@@ -81,19 +85,35 @@ function buildRuntimes(env) {
   const runtimes = Array.isArray(env?.runtimes) ? env.runtimes : [];
   const running = runtimes.filter((r) => r.running);
   const installed = runtimes.filter((r) => r.installed);
+  // Not-installed runtimes are informational, never failures. A cloud-only user
+  // deliberately leaves Ollama and friends closed to keep RAM/CPU free, and
+  // reporting each as FAIL is exactly the "fix this" noise they objected to.
+  // Installed-but-offline only becomes a real problem when the active
+  // configuration actually targets a local server.
+  const cfgBase = String(env?.configuration?.file?.baseUrl || '');
+  const LOCAL_PORTS = new Set(['11434', '1234', '8080', '30000', '8000', '5000', '1337', '1338']);
+  const portM = cfgBase.match(/:(\d{2,5})(?=\/|$)/);
+  const configIsLocal = /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\])/i.test(cfgBase)
+    && LOCAL_PORTS.has(portM ? portM[1] : '');
+
   let state = HEALTH.HEALTHY;
   if (runtimes.length === 0) state = HEALTH.UNKNOWN;
-  else if (running.length === 0 && installed.length > 0) state = HEALTH.ATTENTION;
-  else if (installed.length === 0) state = HEALTH.PARTIAL;
+  else if (configIsLocal && running.length === 0) state = HEALTH.ATTENTION;
+  // A cloud configuration with nothing installed locally is simply healthy, not
+  // "partial" -- there is nothing half-finished about it.
+  else if (installed.length === 0 && !configIsLocal) state = HEALTH.HEALTHY;
 
   const items = runtimes.map((r) => ({
     label: `${r.name || r.id}: ${r.running ? 'running' : r.installed ? 'installed (not running)' : 'not installed'}`,
     ok: !!r.running,
+    optional: !r.installed || (!r.running && !configIsLocal),
     detail: r.running
       ? `Responding at ${r.baseUrl || 'local endpoint'}.`
       : r.installed
-        ? 'Installed but not currently responding. Start it to enable local execution.'
-        : 'Not installed on this device.',
+        ? (configIsLocal
+            ? 'Installed but not responding — this configuration points at a local server, so it must be running.'
+            : 'Installed but not running — not required unless you switch to a local provider.')
+        : 'Not installed — not required for a cloud provider.',
   }));
 
   return {
@@ -189,9 +209,16 @@ export async function getWorkspaceHealth() {
     }
   }
 
-  const score = Math.round(
-    Object.values(categories).reduce((sum, c) => sum + scoreState(c.state), 0) / Object.keys(categories).length
-  );
+  // Score from the REQUIRED checks only. Optional items (absent clients,
+  // uninstalled runtimes) are excluded, so a fully valid cloud setup scores 100
+  // instead of being penalised for capabilities the user never asked for.
+  const requiredScores = Object.values(categories).map((c) => {
+    const req = (c.items || []).filter((i) => !i.optional);
+    return req.length ? Math.round((req.filter((i) => i.ok).length / req.length) * 100) : null;
+  }).filter((v) => v !== null);
+  const score = requiredScores.length
+    ? Math.round(requiredScores.reduce((a, b) => a + b, 0) / requiredScores.length)
+    : scoreState(overall);
 
   return { overall, score, categories, issues, recommendations, generatedAt: new Date().toISOString() };
 }

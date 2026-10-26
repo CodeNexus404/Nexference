@@ -1,4 +1,4 @@
-import { PROVIDERS, getProvider, STATIC_MODELS } from '../providers/registry.js';
+import { PROVIDERS, getProvider } from '../providers/registry.js';
 import { modelCache } from '../providers/modelCache.js';
 import { fetchModelsForProvider } from '../providers/modelService.js';
 import { discoverModels } from '../runtimes/modelDiscoveryService.js';
@@ -30,8 +30,15 @@ import { getHardwareProfileDetailed, getHardwareCapabilities } from '../environm
 // that must be excluded from the "chat" capability. This is the same allowlist
 // the rest of the app uses for free-model filtering — kept here as the single
 // source of truth so we don't duplicate the regex in three places.
+// Providers whose catalogue mixes chat and non-chat models. For these, a model
+// that does NOT match NON_CHAT_RE is treated as a chat model (NVIDIA NIM and
+// friends host most chat models free), rather than defaulting every unknown
+// provider to "free".
 const NON_CHAT_PROVIDERS = ['nvidia', 'huggingface', 'chutes', 'orcarouter'];
-const NON_CHAT_RE = /embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma/i;
+// `deplot`, `ising`/`calibration` and `video-detector` were missing here, so those
+// non-chat models were classified as free chat models and could be selected for
+// Claude Code — where they fail, since they expose no /chat/completions route.
+const NON_CHAT_RE = /embed|rerank|reranker|ocr|parse|nemoretriever|asr|tts|whisper|canary|parakeet|riva|magpie|conformer|megatron-1b-nmt|voicechat|studio.?voice|noise|guard|safety|jailbreak|content.?safety|gliner|topic-control|vista|molmim|genmol|diffdock|rfdiffusion|proteinmpnn|esm|alphafold|openfold|boltz|evo2|fourcastnet|cosmos|flux|stable-diffusion|sdxl|qwen-image|paligemma|trellis|bge|paddleocr|yolox|page-elements|table-structure|graphic-elements|eyecontact|lipsync|speaker|streampetr|bevformer|sparsedrive|cuopt|fastpitch|relight|synthetic-video|diffusiongemma|\bdeplot\b|ising|calibration|video-detector/i;
 
 export function isNonChatModel(providerId, id) {
   if (!NON_CHAT_PROVIDERS.includes(providerId)) return false;
@@ -203,17 +210,19 @@ function normalizeLocalModels(models) {
 }
 
 // ─── Aggregation ───
+// Only genuinely fetched models reach the catalogue. A curated STATIC_MODELS
+// entry is never promoted into a list: those ids are hand-maintained, drift from
+// what gateways actually serve, and are indistinguishable from live rows once
+// rendered — so a provider with no live source contributes nothing rather than
+// invented models. STATIC_MODELS stays usable ONLY as a free/paid overlay on
+// models that were really fetched (see modelService), where it corrects
+// classification without introducing a name.
 export function getCloudModels() {
   const all = [];
   for (const p of PROVIDERS) {
     const entry = modelCache[p.id];
     if (entry && Array.isArray(entry.models) && entry.models.length) {
       all.push(...normalizeCloudModels(p.id, entry));
-    } else if (STATIC_MODELS[p.id]) {
-      // A provider with a curated fallback but no live cache yet — surface the
-      // static list honestly as a fallback so the catalogue is never empty.
-      const pseudo = { models: STATIC_MODELS[p.id].map((e) => (typeof e === 'string' ? { id: e } : { id: e.id, paid: e.paid })), fetchedAt: null, total: STATIC_MODELS[p.id].length, source: 'static' };
-      all.push(...normalizeCloudModels(p.id, pseudo));
     }
   }
   return all;
@@ -331,7 +340,7 @@ export async function refreshProviderModels(providerId, key = '') {
   _inflight.add(providerId);
   try {
     const result = await fetchModelsForProvider(p, key || '');
-    if (result.ok) modelCache[providerId].source = 'manual';
+    if (result.ok && result.source !== 'static') modelCache[providerId].source = 'manual';
     return { ...result, provider: providerId };
   } finally {
     _inflight.delete(providerId);

@@ -3,7 +3,7 @@ import { Storage } from '../core/storage.js';
 import { notify } from '../core/notifications.js';
 import { recordActivity } from '../core/activityStore.js';
 import { openModal } from '../components/modal.js';
-import { esc, logoHtml, maskKey, highlightJSON, clientLogoHtml } from '../components/util.js';
+import { esc, logoHtml, maskKey, highlightJSON, clientLogoHtml, cpField } from '../components/util.js';
 import { renderModelPickerUnified } from '../components/modelLibrary.js';
 import { configEngine } from './engine.js';
 import { LocalSettingsRuntime, CopyableRuntime } from './runtimeAdapter.js';
@@ -425,7 +425,7 @@ export function openWorkflow(opts = {}) {
         const model = wf.model;
         if (!provider || !model) { notify.toast('Select a model first', 'warning'); return; }
         let url = provider.baseUrl || '';
-        if (provider.hasCustomUrl) url = document.querySelector(`.base-url-${wf.provider}`)?.value || url;
+        if (provider.hasCustomUrl) url = cpField(document, 'base-url', wf.provider)?.value || url;
         if (!url) { notify.toast('No base URL known for this provider — check its settings.', 'warning'); return; }
         const key = Storage.getKey(wf.provider);
         if (!key) { notify.toast('No API key stored for this provider yet — add it in Cloud Providers.', 'warning'); return; }
@@ -698,11 +698,20 @@ export function openWorkflow(opts = {}) {
       appliedAt: new Date().toISOString(),
       status,
     };
-    workspace.applied = rec;
-    workspace.unsaved = false;
-    workspace.appliedRecorded = true;
-    Storage.setApplied(rec);
-  }
+      workspace.applied = rec;
+      workspace.unsaved = false;
+      workspace.appliedRecorded = true;
+      Storage.setApplied(rec);
+      // Applying a config for a client is a deliberate change of its PRIMARY, so an
+      // armed fallback plan must follow it. Without this the plan kept the provider
+      // captured when it was created, the Settings panel showed a stale primary, and
+      // the monitor's "revert to primary" would have undone this very apply.
+      // Never called from the monitor's own tier switch — that must not move primary.
+      if (fallbackStore.syncPrimaryFromApplied(wf.client, rec)) {
+        window.dispatchEvent(new CustomEvent('nx-fallback', { detail: { client: wf.client, changed: true, reason: 'primary-applied' } }));
+      }
+    }
+
 
   // Produce the config (or instructions) for the current selection. The Claude
   // Code path delegates to the proven engine — output is unchanged.

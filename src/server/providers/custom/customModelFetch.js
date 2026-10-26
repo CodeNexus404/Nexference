@@ -16,6 +16,12 @@
 //       so it over-counts live models. When a live catalogue exists
 //       (tiers 1-2) it wins; the sitemap fills in when nothing else
 //       does (bot-challenged storefronts with no pricing endpoint).
+//    2.6. Storefront embedded pricing overlay — when only the sitemap
+//       is available, many storefronts still embed the REAL per-model
+//       prices/free flags in their Next.js RSC payload ("surface"/
+//       "priceIn"/"priceOut"/"isFree"). Overlay that onto the sitemap
+//       ids so free/paid is gateway truth, not a paid-by-default guess
+//       (Token Harbour lists ~3 free ·:free· surfaces this way).
 //    3. Strict website scraping — only tokens that start with a
 //       known model-family prefix; never asset hashes or version
 //       fragments.
@@ -23,7 +29,7 @@
 //  No secrets are persisted anywhere — keys are request-scoped.
 // ═══════════════════════════════════════════════════════════════
 
-import { FREE_NAME_RE } from '../modelClassifier.js';
+import { FREE_NAME_RE, normalizePricing } from '../modelClassifier.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
@@ -67,17 +73,31 @@ async function tryOfficialApi(rec, key) {
     const list = data?.data || data?.models || data?.results || data?.model_list || (Array.isArray(data) ? data : []);
     // Some gateways (Kira AI…) mark free models with an explicit is_free/free
     // flag and return no pricing object — synthesize a zero pricing from it so
-    // free models aren't misclassified as paid by the no-signal default.
+    // free models aren't misclassified as paid by the no-signal default. Pricing
+    // also arrives as an array of volume tiers on some gateways (Requesty) —
+    // normalizePricing flattens it to { input, output } so the client badge and
+    // the server classifier see the same free/paid truth.
     const flagFree = (m) => m.is_free === true || m.is_free === 1 || m.free === true || m.free === 1 || m.isFree === true;
     const models = list
       .filter((m) => m && (m.id || m.model_name || m.name))
-      .map((m) => ({
-        id: m.id || m.model_name || m.name,
-        name: m.display_name || m.displayName || m.name || m.id,
-        pricing: m.pricing || (flagFree(m) ? { input: 0, output: 0 } : null),
-        context_length: m.context_length || m.contextLength || m.max_context_tokens || null,
-        capabilities: m.capabilities || null,
-      }));
+        .map((m) => ({
+          id: m.id || m.model_name || m.name,
+          name: m.display_name || m.displayName || m.name || m.id,
+          pricing: normalizePricing(m.pricing) || (flagFree(m) ? { input: 0, output: 0 } : null),
+          context_length: m.context_length || m.contextLength || m.max_context_tokens || null,
+          capabilities: m.capabilities || null,
+          // Some gateways publish per-model capability flags that decide whether
+          // the model can work AT ALL for a given client. Requesty, for example,
+          // serves 719 models but flags 32 as supports_tool_calling=false and 22
+          // as image-generation only — Claude Code needs tool calling, so those
+          // entries can only ever fail. Dropping the flags here meant the picker
+          // offered models that could not possibly run, and the user got a bare
+          // 404 "please check the model you provided" with nothing to act on.
+          // Preserve them so the Claude Code surface can filter and explain.
+          api: m.api || m.api_type || m.apiType || null,
+          supports_tool_calling: m.supports_tool_calling ?? m.supportsToolCalling ?? null,
+          supports_image_generation: m.supports_image_generation ?? m.supportsImageGeneration ?? null,
+        }));
     return models.length ? { models, source: 'official-api' } : null;
   } catch { return null; }
 }
@@ -229,6 +249,70 @@ async function trySitemapCatalog(rec) {
   }
 }
 
+// ── 2.6 Storefront embedded pricing overlay ──
+// Modern storefronts (Next.js / RSC) embed the live model catalogue — surface
+// id, priceIn, priceOut, and an explicit isFree flag — directly in the page's
+// serialized payload as `\"surface\":\"…\",…,\"priceIn\":4,…,\"isFree\":false`
+// (backslash-escaped quotes). A sitemap gives us the broad id list but no
+// pricing; this overlay restores the REAL free/paid truth when the site embeds
+// it, so sitemap-only providers are never guessed as all-paid.
+function parseStorefrontRows(html) {
+  const rows = [];
+  // Normalize the RSC/JS-string quoting so both `{\"surface\"…}` (escaped) and
+  // plain `{"surface"…}` payloads parse the same way.
+  const src = html.replace(/\\(["\\/bfnrtu])/g, '$1');
+  const st = /\{\s*"surface"\s*:\s*"([^"]+)"/g;
+  let m;
+  while ((m = st.exec(src)) !== null) {
+    const open = src.lastIndexOf('{', m.index);
+    if (open === -1) continue;
+    let depth = 0;
+    let end = -1;
+    for (let j = open; j < src.length; j++) {
+      const c = src[j];
+      if (c === '{') depth += 1;
+      else if (c === '}') { depth -= 1; if (depth === 0) { end = j; break; } }
+    }
+    if (end === -1) continue;
+    let obj;
+    try { obj = JSON.parse(src.slice(open, end + 1)); } catch { continue; }
+    const surf = obj?.surface;
+    if (typeof surf !== 'string' || !surf || !('isFree' in obj)) continue;
+    rows.push({
+      surface: surf,
+      priceIn: obj.priceIn,
+      priceOut: obj.priceOut,
+      isFree: obj.isFree === true || obj.isFree === 1,
+    });
+  }
+  return rows;
+}
+
+async function tryStorefrontPricing(rec) {
+  const website = rec.identity?.website;
+  if (!website) return null;
+  try {
+    const origin = new URL(website).origin;
+    const candidates = [`${origin}/models`, `${origin}/`, `${origin}/models?free=true`];
+    for (const url of candidates) {
+      try {
+        const resp = await timeoutFetch(url, { headers: { 'user-agent': UA }, ms: 10000 });
+        if (!resp.ok) continue;
+        const html = await resp.text();
+        if (!html || html.length > 15_000_000) continue;
+        const rows = parseStorefrontRows(html);
+        // One row is never a catalogue signal (could be a hero/product snippet) —
+        // require real breadth or an explicit free row so we act on actual data.
+        if (rows.length >= 2) {
+          const priced = rows.filter((r) => r.priceIn != null || r.priceOut != null);
+          if (priced.length >= 2 || rows.some((r) => r.isFree)) return rows;
+        }
+      } catch { /* try next candidate */ }
+    }
+  } catch { /* no usable storefront */ }
+  return null;
+}
+
 // ── 3. Strict website scraping (never produce junk tokens) ──
 async function tryWebsiteScrape(rec) {
   if (!rec.identity?.website) return null;
@@ -251,16 +335,26 @@ async function tryWebsiteScrape(rec) {
       if (VENDOR_PREFIX.test(m) && !JUNK.test(m) && !FILE_EXT.test(m)) models.add(m);
     }
 
-    // Pattern B: plain-text vendor model names (rendered HTML text only)
-    const textContent = html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ');
-    const textModelPattern = /\b(gpt-[\w.-]+|claude-[\w.-]+|gemini-[\w.-]+|deepseek-[\w.-]+|qwen[\w.-]*|mistral-[\w.-]+|kimi-[\w.-]+|grok-[\w.-]+|glm-[\w.-]+|minimax-[\w.-]+|agnes-[\w.-]+|muse-[\w.-]+|llama[\w.-]*|o[134]-[\w.-]+)\b/gi;
-    while ((match = textModelPattern.exec(textContent)) !== null) {
-      const m = match[1].toLowerCase();
-      if (!JUNK.test(m) && !FILE_EXT.test(m) && m.length < 60) models.add(m);
-    }
+      // Pattern B: plain-text vendor model names (rendered HTML text only).
+      //
+      // A candidate is kept only if it contains a DIGIT somewhere. A marketing
+      // page that merely says "Qwen" or "Llama" is naming a model FAMILY, not a
+      // model, and the resulting bare id ("qwen") 404s on a real /chat/completions
+      // endpoint. This bit Cavoti: its homepage just mentions Qwen, so the card
+      // shipped with exactly one fake model and nothing usable. Genuine ids always
+      // carry a version or a parameter count (Qwen2.5, llama-3.3-70b, o3-mini),
+      // so a digit anywhere in the token is the reliable test — requiring the digit
+      // *after* the dash would wrongly drop o1/o3/o4-mini, where it comes first.
+      const textContent = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ');
+      const textModelPattern = /\b(gpt-[\w.-]+|claude-[\w.-]+|gemini-[\w.-]+|deepseek-[\w.-]+|qwen[\w.-]*|mistral-[\w.-]+|kimi-[\w.-]+|grok-[\w.-]+|glm-[\w.-]+|minimax-[\w.-]+|agnes-[\w.-]+|muse-[\w.-]+|llama[\w.-]*|o[134]-[\w.-]+)\b/gi;
+      while ((match = textModelPattern.exec(textContent)) !== null) {
+        const m = match[1].toLowerCase();
+        if (!/\d/.test(m)) continue;                 // bare family label — not a model
+        if (!JUNK.test(m) && !FILE_EXT.test(m) && m.length < 60) models.add(m);
+      }
 
     // Pattern C: <option value="…"> lists
     const optionPattern = /<option[^>]*value="([a-zA-Z][\w./-]{3,60})"[^>]*>/gi;
@@ -355,12 +449,55 @@ export async function fetchCustomProviderModelsList(rec, key = '') {
   // the gateway is serving RIGHT NOW (the site's own live free count).
   if (pricing) return { ok: true, models: pricing.models.map(m => ({ ...m, source: 'fetched' })), source: 'pricing-api' };
 
-  // Tier 3 — storefront sitemap enumeration, then strict website scrape.
-  // Both are honest-default fallbacks: no live pricing signal, so `:free` ids
-  // are free and everything else defaults to paid.
-  if (sitemap) return { ok: true, models: sitemap.models.map(m => ({ ...m, source: 'fetched' })), source: 'sitemap' };
+  // Tier 3 — storefront sitemap enumeration, overlaid with the storefront's
+  // embedded pricing when present, then strict website scrape. Without a live
+  // pricing signal these are honest-default fallbacks: `:free` ids are free and
+  // everything else defaults to paid — the storefront overlay is the one way a
+  // sitemap-only provider still surfaces its real free/paid truth (Token
+  // Harbour embeds `surface`/`priceIn`/`priceOut`/`isFree` rows in its /models
+  // payload, so 3 free models no longer read as all-paid).
+  if (sitemap) {
+    const st = await tryStorefrontPricing(rec);
+    if (st) {
+      const bySurface = new Map(st.map((r) => [r.surface, r]));
+      const seen = new Set();
+      const source = 'sitemap+pricing';
+      const out = sitemap.models.map((m) => {
+        seen.add(m.id);
+        const row = bySurface.get(m.id) || bySurface.get(m.id.replace(/:free$/i, ''));
+        if (!row) return m;
+        return {
+          ...m,
+          // Storefront truth wins: isFree → free; otherwise the real price.
+          pricing: row.isFree
+            ? { input: 0, output: 0 }
+            : { input: row.priceIn ?? 1, output: row.priceOut ?? row.priceIn ?? 1 },
+        };
+      });
+      // Free-tier variants the storefront lists but the sitemap omits
+      // (`<vendor>/<model>:free`) are genuinely servable free models — add them.
+      for (const r of st) {
+        if (r.isFree && !seen.has(r.surface)) {
+          out.push({ id: r.surface, name: r.surface, pricing: { input: 0, output: 0 }, context_length: null });
+          seen.add(r.surface);
+        }
+      }
+      return { ok: true, models: out.map((m) => ({ ...m, source: 'fetched' })), source };
+    }
+    return { ok: true, models: sitemap.models.map((m) => ({ ...m, source: 'fetched' })), source: 'sitemap' };
+  }
+  const storefront = await tryStorefrontPricing(rec);
+  if (storefront) {
+    const models = storefront.map((r) => ({
+      id: r.surface,
+      name: r.surface,
+      pricing: r.isFree ? { input: 0, output: 0 } : { input: r.priceIn ?? 1, output: r.priceOut ?? r.priceIn ?? 1 },
+      context_length: null,
+    }));
+    return { ok: true, models: models.map((m) => ({ ...m, source: 'fetched' })), source: 'storefront' };
+  }
   const tier3 = await tryWebsiteScrape(rec);
-  if (tier3) return { ok: true, models: tier3.models.map(m => ({ ...m, source: 'fetched' })), source: tier3.source };
+  if (tier3) return { ok: true, models: tier3.models.map((m) => ({ ...m, source: 'fetched' })), source: tier3.source };
 
   return { ok: false, models: [], reason: 'No models could be fetched (API needs a key, no pricing endpoint, and the website has no model list).' };
 }

@@ -36,9 +36,11 @@ export class ThemeManager {
     const root = (typeof document !== 'undefined') ? document.documentElement : null;
     if (!root) return;
     root.setAttribute('data-theme', this.resolved());
-    root.style.setProperty('--accent', this.tokens.accent);
+    // --accent / --accent-soft are owned by ui/appearance.js, which applies the
+    // swatch the user picked. Writing them here meant every theme change — the
+    // navbar toggle included — silently reset the accent to the token default.
+    // Only --accent-2 (the secondary tone) stays with the token set.
     root.style.setProperty('--accent-2', this.tokens.accent2);
-    root.style.setProperty('--accent-soft', this.tokens.accentSoft);
   }
 }
 

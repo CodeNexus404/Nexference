@@ -1,18 +1,32 @@
 // Custom Provider UI (v2.1.0) — renders custom provider cards, onboarding wizard,
 // and detail modals. Uses existing design system and modal architecture.
 import { esc, svgLogo } from '../components/util.js';
+import { fallbackStore } from '../config/fallbackStore.js';
 import { notify } from '../core/notifications.js';
 import { openModal, confirmModal } from '../components/modal.js';
 import { workspace, getFreeModels, getModels } from '../core/state.js';
+import { claudeCodeCompatibility } from '../providers/registry.js';
 import { Storage } from '../core/storage.js';
-import { CopyableRuntime, LocalSettingsRuntime } from '../config/runtimeAdapter.js';
+import { LocalSettingsRuntime, configClientMeta } from '../config/runtimeAdapter.js';
 import { configEngine } from '../config/engine.js';
 import * as cpService from '../providers/customProviderService.js';
+import { localProxyStatus, armLocalProxy, disarmLocalProxy } from '../localProxy.js';
 
 const ORIGIN_BADGE = '<span class="badge browse">Custom</span>';
 
 // Re-pull the adopted (dyn:) provider index so the Cloud Providers grid reflects
 // edits/deletes immediately instead of holding a stale workspace.dynamicProviders.
+
+// Mirror a deliberate primary apply into any armed fallback plan for that client.
+// Centralised so every apply path behaves identically, and dispatched only when the
+// stored primary actually moved, so listeners do no redundant work.
+function syncFallbackPrimary(applied) {
+  try {
+    if (!fallbackStore.syncPrimaryFromApplied(applied.client, applied)) return;
+    window.dispatchEvent(new CustomEvent('nx-fallback', { detail: { client: applied.client, changed: true, reason: 'primary-applied' } }));
+  } catch { /* fallback store unavailable — never block an apply on it */ }
+}
+
 export async function refreshDynamicIndex() {
   try {
     const res = await fetch('/api/providers?origin=ecosystem').then((r) => r.json()).catch(() => ({ providers: null }));
@@ -22,7 +36,10 @@ export async function refreshDynamicIndex() {
 }
 
 function relTime(iso) {
+  if (!iso) return '';
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  // "0s ago" / "just now" reads like a glitch on a session armed seconds ago.
+  if (s < 10) return 'just now';
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
@@ -67,12 +84,82 @@ function freeNameMarker(m) {
   return (typeof m?.id === 'string' && FREE_NAME_RE.test(m.id)) ||
     (typeof m?.name === 'string' && FREE_NAME_RE.test(m.name));
 }
+// Some gateways (e.g. Requesty /v1/models) return pricing as an array of
+// volume-tier objects instead of one flat price — free only when no tier is paid.
+function pricingArrayIsFree(p) {
+  if (!Array.isArray(p)) return false;
+  const tiers = p.filter((t) => t && typeof t === 'object');
+  if (!tiers.length) return false;
+  return !tiers.some((t) => (Number(t.input_price ?? t.input ?? t.prompt) || 0) > 0 || (Number(t.output_price ?? t.output ?? t.completion) || 0) > 0);
+}
 function isFreeModel(m) {
   const p = m?.pricing;
   const isZero = (v) => v !== null && v !== undefined && v !== '' && Number(v) === 0;
+  if (pricingArrayIsFree(p)) return true;
   if (isZero(p?.input) || isZero(p?.output)) return true;
   if (m?.accessType === 'free') return true;
   return freeNameMarker(m);
+}
+
+// Upstream failures arrive as raw JSON/HTML and differ per gateway, so surface
+// the most specific human-readable field instead of dumping the whole body at
+// the user. e.g. NVIDIA returns {"status":403,"detail":"Authorization failed"}.
+function describeProbeFailure(j) {
+  const pick = (body) => {
+    if (!body) return '';
+    if (typeof body === 'string') {
+      const t = body.trim();
+      // Never surface markup — a reverse proxy's HTML error page is noise.
+      if (t.startsWith('<')) {
+        const m = /<title[^>]*>([\s\S]{0,120}?)<\/title>/i.exec(t) || /<h1[^>]*>([\s\S]{0,120}?)<\/h1>/i.exec(t);
+        return (m ? m[1] : 'upstream returned an HTML error page').replace(/\s+/g, ' ').trim();
+      }
+      try { return pick(JSON.parse(t)); } catch { return t.slice(0, 160); }
+    }
+    return body.detail || body.message || body.error?.message || body.error || body.title || '';
+  };
+  // The server already wrote a clear sentence for a timed-out probe; prefixing
+  // "no response —" onto it just reads as a stutter.
+  if (j.timedOut) return String(j.error || 'The provider did not respond in time.').slice(0, 200);
+  // Cloudflare / WAF challenge pages arrive as HTML with a 403 and say nothing
+  // useful about the key — JustDoWork (api.justwoker.icu) blocks every POST to
+  // chat/completions this way. Reporting "invalid API key" there would be a lie,
+  // and dumping the raw challenge markup is unreadable, so name the real cause
+  // and make clear the request never reached the API.
+  //
+  // Require actual Cloudflare markers rather than "any HTML": an upstream reverse
+  // proxy returning a plain "502 Bad Gateway" page is a different failure and
+  // must keep its own message.
+  const rawBody = String(j.body || '');
+  if (/cf-ray|cf-error-code|cf_chl|challenge-platform|cloudflare|attention required|just a moment|checking your browser/i.test(rawBody)) {
+    return 'Blocked by the provider\'s edge firewall (Cloudflare challenge) — not a key problem. '
+      + 'The request never reached the API; this host filters automated clients on this path.';
+  }
+  const detail = pick(j.body) || pick(j);
+  const status = j.status ? `HTTP ${j.status}` : 'no response';
+  const text = String(detail || j.error || '').trim();
+  if (!text) return status;
+  // "Authorization failed", "Unauthorized", "Invalid API Key", "Forbidden",
+  // "authentication_error" … Note "Authorization" does not contain
+  // "unauthor" (unauthor-ized vs author-ization), so match the "authoriz" stem.
+  // The adjective may lead ("Incorrect API key") or trail ("API key invalid"),
+  // so match both orders.
+  if (/authoriz|unauthor|forbidden|authenticat|permission/i.test(text)
+    || /invalid|incorrect|expired|revoked|malformed/.test(text) && /key/i.test(text)
+    || /api.{0,10}key/i.test(text) && /invalid|incorrect|expired|revoked/i.test(text)) {
+    return `${status} — the provider rejected this API key.`;
+  }
+    if (/not found|does not exist|unknown model|no such model|model.{0,20}not|check the model/i.test(text)) {
+      // Gateways word this many ways; Requesty in particular answers
+      // "please check the model you provided", which tells the user nothing about
+      // whether the key is fine, the id is wrong, or their plan excludes it.
+      return `${status} — that model ID was rejected. The key was accepted, so either the ID is `
+        + `not spelled the way this gateway expects, or it isn't available on your plan. `
+        + `Pick another model from the list.`;
+    }
+  if (/rate|quota|429|too many requests/i.test(text)) return `${status} — rate limited or out of quota. Try again shortly.`;
+  if (/<[a-z]/i.test(text)) return `${status} — the upstream returned an HTML error page.`;
+  return `${status} — ${text.slice(0, 140)}`;
 }
 
 export function customProviderCard(p) {
@@ -550,7 +637,10 @@ export async function openCustomProviderDetail(id) {
   const fmt = FORMAT_LABELS[p.api?.format] || 'Unknown';
   const key = Storage.getKey(p.id);
   const model = Storage.getModel(p.id);
-  const anthropicSupported = p.api?.format === 'anthropic';
+  // One shared decision for custom (cst:) and adopted (dyn:) cards, identical to
+  // the curated cards — an Anthropic-compatible provider is configured directly
+  // and is never offered the local proxy as a second route.
+  const { anthropic: anthropicSupported, proxy: showProxy } = claudeCodeCompatibility(p);
   const website = p.identity?.website || '';
   const sub = website ? (() => { try { return new URL(website).hostname; } catch { return website; } })() : '';
   // The raw record stores logo as {url, source, status}; the unified shape uses
@@ -722,10 +812,14 @@ export async function openCustomProviderDetail(id) {
 
       <div class="modal-actions">
         <button class="btn btn2" data-act="test" type="button">Test Connection</button>
+        ${showProxy ? '<button class="btn btn2" data-act="proxy" type="button">Use with Claude Code (via Nexference)</button>' : ''}
         <button class="btn btn-go" data-act="apply" type="button">${anthropicSupported ? 'Apply to Claude Code' : 'Show config'}</button>
       </div>
 
-      <details class="intg-details">
+        <div data-cfg-host hidden></div>
+        <div data-proxy-host hidden></div>
+
+        <details class="intg-details">
         <summary>Provider Integration</summary>
         <div data-intg-host class="intg-section">Loading integration…</div>
       </details>
@@ -876,21 +970,20 @@ export async function openCustomProviderDetail(id) {
           btn.disabled = false;
           btn.textContent = `${label} (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`;
         };
-        try {
-          const qs = new URLSearchParams({ url: baseUrl, key: apiKey, format: fmt });
-          if (modelVal) qs.set('model', modelVal);
-          const res = await fetch(`/api/test?${qs.toString()}`);
-          const result = await res.json();
-          if (result.status && result.status >= 200 && result.status < 300) {
-            notify.toast('Connection successful!', 'success');
-            done('Connection OK');
-          } else {
-            const raw = (result.body || result.error || 'Unknown error').toString();
-            notify.toast(`Failed: ${raw.slice(0, 120)}`, 'error');
-            done('Failed');
-          }
-        } catch (err) { notify.toast(`Error: ${err.message}`, 'error'); done('Error'); }
-      });
+          try {
+            const qs = new URLSearchParams({ url: baseUrl, key: apiKey, format: fmt });
+            if (modelVal) qs.set('model', modelVal);
+            const res = await fetch(`/api/test?${qs.toString()}`);
+            const result = await res.json();
+            if (result.status && result.status >= 200 && result.status < 300) {
+              notify.toast('Connection successful!', 'success');
+              done('Connection OK');
+            } else {
+              notify.toast(`Failed: ${describeProbeFailure(result)}`, 'error');
+              done('Failed');
+            }
+          } catch (err) { notify.toast(`Error: ${err.message}`, 'error'); done('Error'); }
+        });
 
       // Apply / show config
       body.querySelector('[data-act="apply"]')?.addEventListener('click', async () => {
@@ -923,10 +1016,83 @@ export async function openCustomProviderDetail(id) {
             if (window.updateShellStatus) window.updateShellStatus();
             if (window.syncAppliedHighlights) window.syncAppliedHighlights();
           }
-        } else {
-          CopyableRuntime.show(cfg, `${p.identity?.name || id} config`);
-        }
+          } else {
+            // Render inline rather than CopyableRuntime.show(), which calls
+            // openModal() and APPENDS an overlay — that stacked a second dialog on
+            // top of this one, so dismissing the config view revealed the provider
+            // dialog again instead of the card.
+            const cfgHost = body.querySelector('[data-cfg-host]');
+            const cfgText = JSON.stringify(cfg, null, 2);
+            const meta = configClientMeta(cfg);
+            const fmt = p.api?.format || 'openai';
+            if (cfgHost) {
+              cfgHost.hidden = false;
+              cfgHost.innerHTML = `
+                <div class="px-note-row">
+                  <span class="wizard-title">${esc(meta.title)}</span>
+                  <button class="btn btn2 sm" data-cp-cfg-close type="button">Hide</button>
+                </div>
+                <p class="px-note">${esc(meta.sub)}</p>
+                <p class="px-hint px-hint-warn">Claude Code only reads <code>ANTHROPIC_*</code> variables, so this config has no effect on it. Use the Nexference local proxy to route Claude Code through ${esc(p.identity?.name || id)}.</p>
+                <pre class="code config-code pc-cfg-code">${esc(cfgText)}</pre>
+                <div class="px-actions">
+                  <button class="btn btn2" data-cp-cfg-copy type="button">Copy config</button>
+                  ${fmt === 'openai' ? '<button class="btn btn-go" data-cp-cfg-to-proxy type="button">Set up Claude Code instead</button>' : ''}
+                </div>`;
+              cfgHost.querySelector('[data-cp-cfg-close]')?.addEventListener('click', () => {
+                cfgHost.hidden = true; cfgHost.innerHTML = '';
+              });
+              cfgHost.querySelector('[data-cp-cfg-copy]')?.addEventListener('click', () => {
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(cfgText)
+                    .then(() => notify.toast('Config copied to clipboard', 'success'))
+                    .catch(() => notify.toast('Copy failed — select the text manually', 'error'));
+                } else {
+                  const ta = document.createElement('textarea');
+                  ta.value = cfgText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                  document.body.appendChild(ta); ta.select();
+                  try { document.execCommand('copy'); notify.toast('Config copied to clipboard', 'success'); }
+                  catch { notify.toast('Copy failed — select the text manually', 'error'); }
+                  ta.remove();
+                }
+              });
+              cfgHost.querySelector('[data-cp-cfg-to-proxy]')?.addEventListener('click', () => {
+                cfgHost.hidden = true; cfgHost.innerHTML = '';
+                const pxHost = body.querySelector('[data-proxy-host]');
+                const pxBtn = body.querySelector('[data-act="proxy"], [data-cp-proxy-toggle]');
+                if (pxHost) pxHost.hidden = false;
+                if (pxBtn) pxBtn.textContent = 'Hide Claude Code setup';
+                pxHost?.querySelector('[data-px-verify]')?.focus();
+              });
+            }
+          }
       });
+
+      // Use with Claude Code (via Nexference) — OpenAI-compatible providers only.
+      // Expands the proxy panel INSIDE this dialog (no second modal), and passes
+      // this dialog's live key field so the connect uses what the user just typed
+      // rather than a possibly stale stored key.
+      const proxyHost = body.querySelector('[data-proxy-host]');
+      const proxyBtn = body.querySelector('[data-act="proxy"]');
+      proxyBtn?.addEventListener('click', async () => {
+        if (!proxyHost) return;
+        const opening = proxyHost.hidden;
+        if (!opening) { proxyHost.hidden = true; proxyBtn.textContent = 'Use with Claude Code (via Nexference)'; return; }
+        proxyHost.hidden = false;
+        proxyBtn.textContent = 'Hide Claude Code setup';
+        await renderProxyPanel(proxyHost, p, id, { getApiKey: () => keyInput?.value || '' });
+      });
+      // If the proxy is already armed for THIS provider, show the panel up front
+      // so the connection state is visible without an extra click.
+      if (proxyHost) {
+        localProxyStatus().then(async (s) => {
+          if (s?.ok && s.data?.armed && s.data.providerId === id) {
+            proxyHost.hidden = false;
+            if (proxyBtn) proxyBtn.textContent = 'Hide Claude Code setup';
+            await renderProxyPanel(proxyHost, p, id, { getApiKey: () => keyInput?.value || '' });
+          }
+        }).catch(() => {});
+      }
 
       // Provider Integration section — the custom ID contains a colon ("cst:…")
       // which is invalid inside a CSS ID selector (parsed as a pseudo-class,
@@ -943,6 +1109,454 @@ export async function openCustomProviderDetail(id) {
       });
     },
   });
+}
+
+// ─── Claude Code via Nexference (inline panel) ───
+//
+// This renders INSIDE the provider's own configuration dialog instead of opening
+// a second modal. The old flow was: open the provider dialog → click "Use with
+// Claude Code (via Nexference)" → a whole new dialog replaced it, so the key and
+// model you had just typed were no longer on screen and the extra step read as
+// two separate tasks. Curated, custom (cst:) and adopted (dyn:) cards all mount
+// this same panel, so they behave identically.
+//
+// `getApiKey` lets the host dialog hand over its live key field, which is more
+// reliable than re-reading Storage — the old code only knew about the custom
+// dialog's `#cpDetailApiKey` and silently fell back to a stale stored key for
+// every other card type.
+
+function proxyDisplayUrl() {
+  return `http://127.0.0.1:${window.location.port || 3000}/v1/messages`;
+}
+
+// Resolve the provider's REAL model list for the proxy picker. The workspace
+// cache is often empty for a freshly keyed provider (the startup fetch runs
+// keyless and most gateways 401 without a key), which would leave the panel
+// with an empty dropdown and force the user to type a model id by hand. The key
+// is passed transiently to the server for this one fetch and is never stored
+// here. Returns [] when nothing can be resolved so the caller can fall back to
+// manual entry.
+  const isCustomId = (id) => typeof id === 'string' && id.startsWith('cst:');
+
+  // The server classifies free/paid with provider-specific rules (NVIDIA's
+  // keyless catalogue, Mistral's servable-only filter, TokenRouter's pricing API)
+  // and returns the result as a SEPARATE `freeModels` array. Individual model
+  // objects carry `pricing: null` and no free flag, so recomputing it here with
+  // isFreeModel() found 0 free models for providers that genuinely have many —
+  // NVIDIA reported "82 available" with no free count despite 59 free models.
+  // Tag the server's free set onto the models instead, so the badge, the picker's
+  // per-row "free" tag, and the free/paid filter all read the same authority.
+  function tagFreeModels(models, freeModels) {
+    if (!Array.isArray(freeModels) || !freeModels.length) return models;
+    const freeIds = new Set(freeModels.map((m) => m?.id || m?.modelId || m?.name).filter(Boolean));
+    if (!freeIds.size) return models;
+    return models.map((m) => (freeIds.has(m?.id) ? { ...m, accessType: 'free', isFree: true } : m));
+  }
+
+  async function resolveProxyModels(id, apiKey) {
+    const cached = workspace.liveModels[id]?.models || [];
+    if (cached.length) return cached;
+    if (!apiKey && !isCustomId(id)) return [];
+    try {
+      // Custom (cst:) providers must use their OWN endpoint. /api/refresh-models
+      // only resolves curated ids, so calling it with a cst: id returned
+      // 404 "Unknown provider" for every custom card — which is why the proxy
+      // panel always fell through to the "enter a model ID" fallback and never
+      // showed a real model list, even when the provider had hundreds of models.
+      const url = isCustomId(id)
+        ? `/api/custom-providers/${encodeURIComponent(id)}/fetch-models${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`
+        : '/api/refresh-models';
+      const opts = { method: isCustomId(id) ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json' } };
+      if (!isCustomId(id)) opts.body = JSON.stringify({ providerId: id, key: apiKey });
+      const r = await fetch(url, opts);
+      const j = await r.json().catch(() => ({}));
+      if (!j?.ok) return [];
+      const models = tagFreeModels(
+        (j.models || []).filter((m) => m && (m.id || m.name)),
+        j.freeModels
+      );
+      if (models.length) {
+        // Cache client-side so the picker/other views agree on this list.
+        workspace.liveModels[id] = {
+          models: models.map((m) => ({ ...m, source: 'fetched' })),
+          freeModels: models.filter(isFreeModel).map((m) => ({ ...m, source: 'fetched' })),
+          source: { type: 'custom-api', fetchedAt: new Date().toISOString() },
+        };
+      }
+      return models;
+    } catch { return []; }
+  }
+
+// Pre-flight check of the provider key/model BEFORE arming the proxy. Arming
+// rewrites ~/.claude/settings.json, so connecting with a bad key leaves Claude
+// Code pointed at a proxy that can only ever return auth errors — and the user
+// has to arm, restart, fail, then diagnose. This hits the same /api/test probe
+// the provider dialog's Test Connection button uses, so the answer is the same
+// one they'd get manually.
+async function verifyProxyUpstream(p, id, apiKey, model) {
+  const baseUrl = p?.api?.baseUrl || p?.baseUrl || Storage.getBaseUrl(id) || '';
+  if (!baseUrl || !apiKey) return { ok: false, reason: 'missing url or key' };
+  // Always send a concrete model. Omitting it made the server probe with a
+  // hardcoded gpt-4o-mini, which doesn't exist on NVIDIA/Groq/Together/
+  // TokenRouter — so "Verify key" reported a bogus "model not found" failure on
+  // a perfectly good key. Pick a real model from this provider's own catalogue.
+  let chosen = String(model || '').trim();
+  if (!chosen) {
+    try {
+      const list = await resolveProxyModels(id, apiKey);
+      chosen = list.find((m) => m.id)?.id || list[0]?.id || '';
+    } catch { /* fall through to the stored/typed model */ }
+    if (!chosen) chosen = String(Storage.getModel(id) || '').trim();
+  }
+  try {
+    const qs = new URLSearchParams({ url: baseUrl, key: apiKey, format: p?.api?.format || p?.format || 'openai' });
+    if (chosen) qs.set('model', chosen);
+      const res = await fetch(`/api/test?${qs.toString()}`);
+      const j = await res.json().catch(() => ({}));
+      if (j.status >= 200 && j.status < 300) return { ok: true };
+      return { ok: false, reason: describeProbeFailure(j) };
+    } catch (err) {
+      return { ok: false, reason: err?.message || 'unreachable' };
+    }
+  }
+
+
+
+  // The badge sat silent when a provider had 0 free models, so "12 available"
+  // read as "some of these are free" to anyone hunting for a free tier — which is
+  // exactly the question the badge exists to answer. State the free count
+  // either way, and surface a paid warning so the free-only intent is explicit.
+  // Claude Code drives the model through tool calls, so a model that reports no
+  // tool-calling support — or that only generates images — can never work here,
+  // no matter how many tokens it is willing to spend. Offering them produced a
+  // bare 404 ("please check the model you provided") with nothing to act on, so
+  // the proxy picker now hides them and says how many it hid.
+  function claudeCodeUsableModels(models) {
+    if (!Array.isArray(models) || !models.length) return { usable: models || [], hidden: 0 };
+    const usable = [], hidden = [];
+    for (const m of models) {
+      const noTools = m.supports_tool_calling === false;
+      const imageOnly = m.supports_image_generation === true && m.supports_tool_calling !== true;
+      (noTools || imageOnly) ? hidden.push(m) : usable.push(m);
+    }
+    // Only narrow the list when the gateway actually told us something. If no
+    // model carries the flags (most providers), the catalogue is unchanged —
+    // assuming "no tool support" from a missing field would empty every picker.
+    return { usable, hidden: usable.length ? hidden.length : 0 };
+  }
+
+  function modelsBadge(models, freeCount) {
+    const total = models.length;
+    if (!total) return 'no list yet';
+    if (freeCount > 0) return `${total} available · ${freeCount} free`;
+    return `${total} available · none free`;
+  }
+
+  // Renders the panel into `host` and binds its actions. Re-invoked after every
+// state change (connect / disconnect / refresh) so it always reflects the real
+// proxy session.
+export async function renderProxyPanel(host, p, id, { getApiKey } = {}) {
+  if (!host) return;
+  const readKey = () => {
+    const live = typeof getApiKey === 'function' ? getApiKey() : '';
+    return (live && live.trim()) || Storage.getKey(id) || '';
+  };
+
+  const st = await localProxyStatus();
+  const status = st.ok && st.data ? st.data : null;
+  const armed = !!(status && status.armed);
+  // Only this provider's session counts — another card may be armed.
+  const armedHere = armed && status.providerId === id;
+  const allModels = await resolveProxyModels(id, readKey());
+  // Hide models that cannot run under Claude Code (no tool calling / image-only)
+  // so the picker can't hand the user a model that is guaranteed to 404.
+  const { usable: models, hidden: hiddenModels } = claudeCodeUsableModels(allModels);
+  const currentModel = Storage.getModel(id) || models[0]?.id || '';
+  const providerName = p?.identity?.name || p?.name || id;
+  const proxyUrl = armedHere ? (status.proxyUrl || proxyDisplayUrl()) : proxyDisplayUrl();
+  const freeCount = models.filter(isFreeModel).length;
+  // Preserved across the re-render that follows connect/disconnect/refresh, so
+  // the search box does not reset to empty every time the panel re-renders.
+  let modelQuery = '';
+  // Claude Code is configured to talk to the proxy but we hold no session — the
+  // state a Nexference restart leaves behind, since the upstream key is never
+  // persisted and so the session cannot be restored silently.
+  const orphaned = !armed && !!status?.settingsOrphaned;
+
+  host.hidden = false;
+  host.innerHTML = `
+    <div class="px-panel" data-state="${armedHere ? 'armed' : 'idle'}">
+      ${orphaned ? `
+        <div class="px-warn">
+          <span class="px-warn-ico" aria-hidden="true">!</span>
+          <span class="px-warn-text">Proxy not armed, but Claude Code still points at it${status.orphanedModel ? ` (<b class="mono">${esc(status.orphanedModel)}</b>)` : ''} — reconnect below.</span>
+        </div>` : ''}
+      <div class="px-head">
+        <div class="px-head-main">
+          <span class="px-title">Claude Code via Nexference</span>
+          <span class="px-sub">${esc(providerName)}</span>
+        </div>
+        <span class="px-status ${armedHere ? 'is-on' : 'is-off'}"><i class="px-dot"></i>${armedHere ? 'Connected' : 'Not connected'}</span>
+      </div>
+
+      <div class="px-flow" aria-hidden="true">
+        <span class="px-node">Claude Code</span>
+        <span class="px-arrow">→</span>
+        <span class="px-node px-node-mid">Nexference proxy</span>
+        <span class="px-arrow">→</span>
+        <span class="px-node">${esc(providerName)}</span>
+      </div>
+
+      <!-- The model Claude Code will actually run on. Always visible, in BOTH
+           states: when connected it is the live session's model, and before
+           connecting it is the row highlighted in the picker below, so the
+           choice is never hidden behind a scrollable list. This replaces the
+           old duplicated "Model" tile. -->
+      <div class="px-selected" data-pd="selectedRow">
+        <div class="px-selected-top">
+          <span class="px-selected-label">Selected model</span>
+          <button class="px-copy" data-pd="copyModel" type="button" title="Copy model id">Copy</button>
+        </div>
+        <b class="mono px-selected-value" data-pd="selectedModel">${esc(armedHere ? (status.model || '—') : (currentModel || 'none selected'))}</b>
+      </div>
+
+      <dl class="px-meta">
+        <div class="px-meta-row">
+          <dt>Proxy URL</dt>
+          <dd>
+            <span class="mono" title="${esc(proxyUrl)}">${esc(proxyUrl)}</span>
+            <button class="px-copy" data-pd="copyUrl" type="button" title="Copy proxy URL">Copy</button>
+          </dd>
+        </div>
+        ${armedHere ? `<div class="px-meta-row"><dt>Connected</dt><dd>${esc(relTime(status.armedAt) || 'just now')}</dd></div>` : ''}
+        ${armedHere ? `<div class="px-meta-row"><dt>Upstream key</dt><dd>held in memory only</dd></div>` : ''}
+      </dl>
+
+      ${armedHere ? `
+        <p class="px-note"><strong>Connected.</strong> Requests are translated to ${esc(providerName)} behind the scenes. <code>~/.claude/settings.json</code> holds only a random Nexference token — your ${esc(providerName)} key never leaves memory. <strong>Restart Claude Code</strong> to apply.</p>
+      ` : `
+        <p class="px-note">Point Claude Code at this OpenAI-compatible provider. Nexference takes Anthropic requests on the local proxy and translates them to ${esc(providerName)}; the upstream key stays in memory and is never written to disk.</p>
+      `}
+
+      ${armedHere ? '' : `
+        <div class="px-field">
+          <div class="px-field-head">
+            <label class="lbl">Model</label>
+            ${models.length ? `<span class="px-hint">${modelsBadge(models, freeCount)}${hiddenModels ? ` · ${hiddenModels} hidden (no tool calling)` : ''}</span>` : '<span class="px-hint">no list yet</span>'}
+          </div>
+        ${models.length ? `
+          <div class="model-picker px-picker" data-pd="picker">
+            <input class="inp mp-input" data-pd="modelSearch" type="text" placeholder="Search ${models.length} models…" aria-label="Search models" value="${esc(modelQuery)}" />
+            <div class="mp-list" data-pd="modelList" role="listbox"></div>
+          </div>` : `
+          <input class="inp" data-pd="modelInput" type="text" value="${esc(currentModel)}" placeholder="Enter model ID (e.g. gpt-4o)" />`}
+        ${models.length ? '' : '<span class="px-hint px-hint-warn">No model list available — enter an exact model ID. Adding a key usually populates this list.</span>'}
+      </div>`}
+
+      <div class="px-actions">
+        ${armedHere
+          ? `<button class="btn btn2" data-pd="disconnect" type="button">Disconnect</button>
+             <button class="btn btn2" data-pd="refresh" type="button">Refresh status</button>`
+          : `<button class="btn btn-go" data-pd="connect" type="button">Connect &amp; configure Claude Code</button>
+             <button class="btn btn2" data-pd="verify" type="button">Verify key</button>
+             <button class="btn btn2" data-pd="refresh" type="button">Refresh status</button>`}
+      </div>
+      <div data-pd="note" class="px-feedback"></div>
+    </div>`;
+
+  const note = host.querySelector('[data-pd="note"]');
+  const setNote = (msg, kind = '') => {
+    if (note) note.innerHTML = msg ? `<p class="px-msg ${kind}">${esc(msg)}</p>` : '';
+  };
+
+  // ── Model selection ──
+  // A native <select> was unusable here: OpenRouter alone has 458 models, with no
+  // search and no type-to-jump, and the two big gateways (OpenRouter, TokenRouter)
+  // use namespaced ids, so the visible label rarely matched what you needed. This
+  // reuses the app's existing .model-picker classes so it looks and behaves like
+  // every other model list in the product. The selection is held in `chosen` and
+  // written straight to Storage, so it survives the re-render that follows a
+  // connect/disconnect/refresh instead of snapping back to the first model.
+  let chosen = currentModel;
+  const listEl = host.querySelector('[data-pd="modelList"]');
+  const searchEl = host.querySelector('[data-pd="modelSearch"]');
+  const selectedEl = host.querySelector('[data-pd="selectedModel"]');
+
+  // Keep the "Selected model" row in step with the picker and the free-text
+  // fallback, so the model Claude Code will use is always on screen.
+  const paintSelected = (val) => {
+    if (!selectedEl) return;
+    const text = val || 'none selected';
+    selectedEl.textContent = text;
+    selectedEl.title = text;
+    selectedEl.classList.toggle('is-empty', !val);
+  };
+  paintSelected(armedHere ? (status.model || '') : chosen);
+
+  const drawList = () => {
+    if (!listEl) return;
+    const q = (searchEl?.value || modelQuery || '').trim().toLowerCase();
+    const matches = q
+      ? models.filter((m) => `${m.name || ''} ${m.id}`.toLowerCase().includes(q))
+      : models;
+    if (!matches.length) {
+      listEl.innerHTML = `<div class="mp-empty">No model matches “${esc(q)}”.</div>`;
+      return;
+    }
+    listEl.innerHTML = matches.slice(0, 400).map((m) => `
+      <button type="button" class="mp-item ${chosen === m.id ? 'sel' : ''}" data-id="${esc(m.id)}" role="option" aria-selected="${chosen === m.id}">
+        <span class="mp-name">${esc(m.name || m.id)}</span>
+        ${isFreeModel(m) ? '<span class="mp-free">free</span>' : ''}
+        <span class="mp-id">${esc(m.id)}</span>
+      </button>`).join('')
+      + (matches.length > 400 ? `<div class="mp-empty">…and ${matches.length - 400} more — refine your search</div>` : '');
+    listEl.querySelectorAll('.mp-item').forEach((b) => b.addEventListener('click', () => {
+      chosen = b.dataset.id;
+      Storage.setModel(id, chosen);
+      paintSelected(chosen);
+      drawList();
+    }));
+  };
+  if (listEl) drawList();
+  searchEl?.addEventListener('input', () => { modelQuery = searchEl.value; drawList(); });
+  // Free-text path (no model list resolved) updates the row as you type.
+  host.querySelector('[data-pd="modelInput"]')?.addEventListener('input', (e) => {
+    chosen = e.currentTarget.value.trim();
+    paintSelected(chosen);
+  });
+
+  const readModel = () => (
+    host.querySelector('[data-pd="modelInput"]')?.value
+    || chosen
+    || Storage.getModel(id)
+    || ''
+  ).trim();
+
+  // Standalone key check, so the user can confirm credentials BEFORE letting the
+  // panel rewrite settings.json.
+  host.querySelector('[data-pd="verify"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const model = readModel();
+    const apiKey = readKey();
+    if (!apiKey) { setNote('Enter an API key for this provider first.', 'err'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Verifying…';
+    setNote(`Checking the key against ${providerName}…`);
+    const v = await verifyProxyUpstream(p, id, apiKey, model);
+    if (v.ok) {
+      setNote(`Key works — ${providerName} accepted it${model ? ` for ${model}` : ''}.`, 'ok');
+      notify.toast('Key verified', 'success');
+    } else {
+      setNote(`Key rejected: ${v.reason}`, 'err');
+      notify.toast('Key verification failed', 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Verify key';
+  });
+
+  // Clipboard: the async Clipboard API only exists in a SECURE context. It works
+  // on http://localhost, but not when the dashboard is opened over a LAN address
+  // (http://192.168.x.x:3000) — a common way to reach it from another machine,
+  // notably on Windows. So guard on the API's existence and fall back to the
+  // legacy execCommand path, matching copyConfigText() in app.js.
+  const legacyCopy = (text) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  };
+  const copyText = async (text, btn, label) => {
+    if (!text) { notify.toast(`No ${label} to copy`, 'warning'); return; }
+    let ok = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); ok = true; } catch { ok = false; }
+    }
+    if (!ok) ok = legacyCopy(text);
+    btn.textContent = ok ? 'Copied' : 'Copy failed';
+    if (ok) notify.toast(`${label} copied`, 'success');
+    else notify.toast('Copy failed — select the text manually', 'error');
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  };
+  host.querySelector('[data-pd="copyUrl"]')?.addEventListener('click', (e) => copyText(proxyUrl, e.currentTarget, 'Proxy URL'));
+  host.querySelector('[data-pd="copyModel"]')?.addEventListener('click', (e) => {
+    const val = selectedEl?.textContent?.trim();
+    copyText(val && val !== 'none selected' ? val : '', e.currentTarget, 'Model id');
+  });
+
+  host.querySelector('[data-pd="connect"]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const model = readModel();
+    if (!model) { setNote('Select or enter a model first.', 'err'); return; }
+    const apiKey = readKey();
+    if (!apiKey) { setNote('Enter an API key for this provider first.', 'err'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Checking key…';
+    // Pre-flight before touching settings.json: arming with a bad key leaves
+    // Claude Code aimed at a proxy that can only return auth errors.
+    setNote(`Verifying the key against ${providerName}…`);
+    const v = await verifyProxyUpstream(p, id, apiKey, model);
+    if (!v.ok) {
+      setNote(`Key check failed: ${v.reason}. Fix the key or model, then try again — nothing was changed.`, 'err');
+      notify.toast('Key check failed — not connected', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Connect & configure Claude Code';
+      return;
+    }
+    btn.textContent = 'Connecting…';
+    setNote('Key verified. Connecting and updating Claude Code settings…');
+    const r = await armLocalProxy({ providerId: id, model, apiKey });
+    if (r.ok) {
+      // The proxy rewrites ANTHROPIC_BASE_URL to the local proxy address, so the
+      // base-URL match in loadConfig can never resolve this card on its own. Set
+      // the active id here (and mirror it into the persisted record) so the
+      // "active" highlight survives a reload.
+      workspace.appliedProviderId = id;
+      workspace.applied = {
+        client: 'claude-code', connectionType: 'proxy', provider: id,
+        runtime: null, model, appliedAt: new Date().toISOString(), status: 'configured',
+      };
+      Storage.setApplied(workspace.applied);
+      Storage.setModel(id, model);
+        // Deliberate primary apply — keep an armed fallback plan in step.
+        syncFallbackPrimary(workspace.applied);
+      window.syncAppliedHighlights?.();
+      notify.toast(`Claude Code now runs on ${providerName} via Nexference — restart Claude Code to apply`, 'success');
+    } else {
+      const msg = r.data?.error || (r.status ? `HTTP ${r.status}` : 'Nexference server unreachable');
+      setNote(`Could not connect: ${msg}`, 'err');
+      notify.toast(`Failed to connect: ${msg}`, 'error');
+    }
+    await renderProxyPanel(host, p, id, { getApiKey });
+  });
+
+  host.querySelector('[data-pd="disconnect"]')?.addEventListener('click', async () => {
+    const r = await disarmLocalProxy();
+    if (r.ok) {
+      const msg = (r.data?.hadPrevious && r.data?.restored)
+        ? 'Disconnected. Previous Claude Code configuration restored.'
+        : (r.data?.hadPrevious ? `Disconnected. Restore incomplete: ${r.data.error || 'unknown'}` : 'Disconnected. No previous configuration to restore.');
+      notify.toast(msg, 'success');
+      // Disconnecting drops the proxy from settings.json, so the card is no
+      // longer the active one — clear the highlight instead of leaving a stale glow.
+      if (workspace.applied?.connectionType === 'proxy') {
+        workspace.applied = null;
+        workspace.appliedProviderId = null;
+        Storage.setApplied(null);
+        window.syncAppliedHighlights?.();
+      }
+    } else {
+      setNote(`Disconnect failed: ${r.data?.error || `HTTP ${r.status}`}`, 'err');
+    }
+    await renderProxyPanel(host, p, id, { getApiKey });
+  });
+
+  host.querySelector('[data-pd="refresh"]')?.addEventListener('click', () => renderProxyPanel(host, p, id, { getApiKey }));
 }
 
 // ─── Global action dispatcher ───
@@ -973,28 +1587,180 @@ async function editCustomProviderFlow(id) {
   const data = await cpService.getCustomProvider(id);
   if (!data?.provider) { notify.toast('Provider not found', 'error'); return; }
   const p = data.provider;
+  const isCustom = String(id).startsWith('cst:');
+  // cst records store logo as { url, source, status }; adopted shapes carry a
+  // plain URL string. Normalise to a displayable URL.
+  const curLogo = (p.logo && typeof p.logo === 'object' && p.logo.url) ? p.logo.url : (typeof p.logo === 'string' ? p.logo : null);
+  const curFmt = p.api?.format || 'unknown';
+  const website = p.identity?.website || '';
+  const websiteHost = (() => { try { return new URL(website).hostname; } catch { return website.replace(/^https?:\/\//, ''); } })();
+
+  // Logo editor state (only used for cst: custom providers).
+  let logoChoice = 'keep';       // keep | website | file | initials
+  let logoDataUrl = null;        // staged data: URL for website/file choices
+
+  const nameOf = () => (p.identity?.name || p.name || '?');
+  const initialsOf = (name) => `${esc(initials(name))}`;
+  const avatarFallback = (name) => `<span class="cp-edit-avatar-fb">${initialsOf(name)}</span>`;
+  const previewFallback = (name) => `<div class="cpw-logo-preview cpw-logo-fallback">${initialsOf(name)}</div>`;
+
+  // Renders the current/selected logo into the header avatar AND the preview
+  // wrap. The avatar is a compact tile; the preview is the larger square. Remote
+  // http(s) URLs render through the ecosystem logo proxy with a graceful
+  // initials fallback when the image fails to load. A data: URL is inlined.
+  function renderLogo(avatar, wrap, { busy = false } = {}) {
+    const name = nameOf();
+    if (wrap) {
+      if (busy) { wrap.innerHTML = '<span class="muted">Fetching favicon…</span>'; }
+      else {
+        const url = logoDataUrl || (logoChoice === 'keep' ? curLogo : null);
+        if (url && url.startsWith('data:')) {
+          wrap.innerHTML = `<div class="cpw-logo-preview"><img src="${url}" alt="Logo preview" onerror="this.parentElement.innerHTML='${previewFallback(name).replace(/"/g, '&quot;')}'" /></div>`;
+        } else if (url) {
+          const fb = previewFallback(name).replace(/"/g, '&quot;');
+          wrap.innerHTML = `<div class="cpw-logo-preview"><img src="/api/ecosystem/logo?url=${encodeURIComponent(url)}" alt="Logo preview" loading="lazy" onerror="this.parentElement.innerHTML='${fb}'" /></div>`;
+        } else {
+          wrap.innerHTML = previewFallback(name);
+        }
+      }
+    }
+    if (avatar) {
+      const url = logoDataUrl || (logoChoice === 'keep' ? curLogo : null);
+      if (url && url.startsWith('data:')) {
+        avatar.innerHTML = `<img src="${url}" alt="Logo" onerror="this.outerHTML='${avatarFallback(name).replace(/"/g, '&quot;')}'" />`;
+      } else if (url) {
+        avatar.innerHTML = `<img src="/api/ecosystem/logo?url=${encodeURIComponent(url)}" alt="Logo" loading="lazy" onerror="this.outerHTML='${avatarFallback(name).replace(/"/g, '&quot;')}'" />`;
+      } else {
+        avatar.innerHTML = avatarFallback(name);
+      }
+    }
+  }
+
+  function highlightOpts(el, name) {
+    el.querySelectorAll(`input[name="${name}"]`).forEach((r) => {
+      r.closest('.cpw-format-opt')?.classList.toggle('selected', r.checked);
+    });
+  }
+
+  // Auto-scrape the website favicon (website first, then base URL) into logoDataUrl.
+  async function fetchLogoFromUrl(websiteVal, baseUrlVal, avatar, wrap) {
+    const url = websiteVal || baseUrlVal;
+    if (!url || url.length < 8) { notify.toast('Enter a Website or Base URL first', 'warning'); return; }
+    renderLogo(avatar, wrap, { busy: true });
+    const result = await cpService.scrapeFavicon(url);
+    if (result?.ok && result.url) logoDataUrl = result.url;
+    renderLogo(avatar, wrap);
+  }
+
+  const formats = [
+    { value: 'openai', label: 'OpenAI', desc: '/v1/chat/completions' },
+    { value: 'anthropic', label: 'Anthropic', desc: '/v1/messages' },
+    { value: 'gemini', label: 'Gemini', desc: 'Google Generative AI' },
+    { value: 'unknown', label: 'Skip', desc: 'No format selected' },
+  ];
+
   openModal({
     title: 'Edit Custom Provider', subtitle: null,
     bodyHTML: `<div class="wizard-body">
-      <div class="form-row"><label class="lbl">Name *</label>
-        <input class="inp" id="cpEditName" value="${esc(p.identity?.name || '')}" maxlength="100" /></div>
-      <div class="form-row"><label class="lbl">Website</label>
-        <input class="inp" id="cpEditWebsite" value="${esc(p.identity?.website || '')}" placeholder="https://example.com" /></div>
-      <div class="form-row"><label class="lbl">Description</label>
-        <input class="inp" id="cpEditDesc" value="${esc(p.identity?.description || '')}" maxlength="200" /></div>
-      <div class="form-row"><label class="lbl">Base URL</label>
-        <input class="inp" id="cpEditBaseUrl" value="${esc(p.api?.baseUrl || '')}" placeholder="https://api.example.com/v1/" /></div>
-      <div class="form-row"><label class="lbl">Format</label>
-        <select class="inp" id="cpEditFormat">
-          <option value="openai" ${p.api?.format === 'openai' ? 'selected' : ''}>OpenAI</option>
-          <option value="anthropic" ${p.api?.format === 'anthropic' ? 'selected' : ''}>Anthropic</option>
-          <option value="gemini" ${p.api?.format === 'gemini' ? 'selected' : ''}>Gemini</option>
-          <option value="unknown" ${p.api?.format === 'unknown' ? 'selected' : ''}>Skip</option>
-        </select></div>
-      <div class="wizard-nav"><button class="btn btn2" data-act="cancel">Cancel</button><button class="btn btn-go" data-act="save">Save</button></div>
+      <div class="cp-edit-head">
+        <div class="cp-edit-avatar" id="cpEditAvatar"></div>
+        <div class="cp-edit-head-main">
+          <label class="lbl" style="margin:0">Provider Name *</label>
+          <input class="inp" id="cpEditName" value="${esc(p.identity?.name || '')}" maxlength="100" />
+          <div class="cp-edit-head-sub">${websiteHost ? `<span class="badge fmt">${esc(websiteHost)}</span>` : ''}<span class="badge fmt">${esc(FORMAT_LABELS[curFmt] || 'Unknown')} format</span></div>
+        </div>
+      </div>
+
+      <div class="cp-edit-grid">
+        <div class="cp-edit-col">
+          <h4 class="wizard-title">Identity</h4>
+          <div class="form-row"><label class="lbl">Website</label>
+            <input class="inp" id="cpEditWebsite" value="${esc(p.identity?.website || '')}" placeholder="https://example.com" /></div>
+          <div class="form-row"><label class="lbl">Description</label>
+            <input class="inp" id="cpEditDesc" value="${esc(p.identity?.description || '')}" maxlength="200" /></div>
+        </div>
+
+        <div class="cp-edit-col">
+          <h4 class="wizard-title">API</h4>
+          <div class="form-row"><label class="lbl">Base URL</label>
+            <input class="inp" id="cpEditBaseUrl" value="${esc(p.api?.baseUrl || '')}" placeholder="https://api.example.com/v1/" /></div>
+          <div class="form-row"><label class="lbl">Format</label>
+            <div class="cpw-format-grid">${formats.map((f) =>
+              `<label class="cpw-format-opt ${curFmt === f.value ? 'selected' : ''}">
+                <input type="radio" name="cpEditFormat" value="${f.value}" ${curFmt === f.value ? 'checked' : ''} />
+                <span class="cpw-format-label">${f.label}</span>
+                <span class="cpw-format-desc">${f.desc}</span>
+              </label>`).join('')}
+            </div></div>
+        </div>
+
+        ${isCustom ? `<div class="cp-edit-col cp-edit-col-wide">
+          <h4 class="wizard-title">Logo</h4>
+          <div class="cpw-logo-row">
+            <div class="cp-edit-logo-opts" id="cpEditLogoOpts">
+              <label class="cpw-format-opt selected"><input type="radio" name="cpEditLogo" value="keep" checked /><span class="cpw-format-label">Keep current</span><span class="cpw-format-desc">Leave logo unchanged</span></label>
+              <label class="cpw-format-opt"><input type="radio" name="cpEditLogo" value="website" /><span class="cpw-format-label">Fetch from URL</span><span class="cpw-format-desc">Scrape favicon</span></label>
+              <label class="cpw-format-opt"><input type="radio" name="cpEditLogo" value="file" /><span class="cpw-format-label">Upload file</span><span class="cpw-format-desc">SVG, PNG, ICO</span></label>
+              <label class="cpw-format-opt"><input type="radio" name="cpEditLogo" value="initials" /><span class="cpw-format-label">Use initials</span><span class="cpw-format-desc">Auto monogram</span></label>
+            </div>
+            <div class="cpw-logo-preview-wrap" id="cpEditLogoPreview"></div>
+          </div>
+          <div id="cpEditLogoFileRow" style="display:none">
+            <label class="cp-edit-file" for="cpEditLogoFile">Choose an image… <span class="cp-edit-file-hint">SVG, PNG, ICO · max 500KB</span></label>
+            <input id="cpEditLogoFile" type="file" accept=".svg,.png,.ico,.jpeg,.jpg,.gif,.webp,image/*" style="display:none" />
+          </div>
+        </div>` : ''}
+      </div>
+
+      <div class="wizard-nav"><button class="btn btn2" data-act="cancel">Cancel</button><button class="btn btn-go" data-act="save">Save changes</button></div>
     </div>`,
     onMount: (el, ctrl) => {
       el.querySelector('[data-act="cancel"]')?.addEventListener('click', () => ctrl.close());
+      const avatar = el.querySelector('#cpEditAvatar');
+      const previewWrap = el.querySelector('#cpEditLogoPreview');
+
+      if (avatar) {
+        renderLogo(avatar, previewWrap);
+        el.querySelector('#cpEditName')?.addEventListener('input', () => renderLogo(avatar, previewWrap));
+      }
+
+      // Format card radios → highlight the selected option.
+      el.querySelectorAll('input[name="cpEditFormat"]').forEach((r) =>
+        r.addEventListener('change', () => highlightOpts(el, 'cpEditFormat')));
+
+      if (isCustom && previewWrap) {
+        el.querySelectorAll('#cpEditLogoOpts input[name="cpEditLogo"]').forEach((r) => {
+          r.addEventListener('change', async () => {
+            highlightOpts(el, 'cpEditLogo');
+            logoChoice = r.value;
+            const fileRow = el.querySelector('#cpEditLogoFileRow');
+            if (fileRow) {
+              fileRow.style.display = logoChoice === 'file' ? '' : 'none';
+            }
+            if (logoChoice === 'website') {
+              logoDataUrl = null;
+              await fetchLogoFromUrl(el.querySelector('#cpEditWebsite')?.value || '', el.querySelector('#cpEditBaseUrl')?.value || '', avatar, previewWrap);
+            } else if (logoChoice === 'initials') {
+              logoDataUrl = null;
+              renderLogo(avatar, previewWrap);
+            } else {
+              renderLogo(avatar, previewWrap);
+            }
+          });
+        });
+
+        const fileInput = el.querySelector('#cpEditLogoFile');
+        if (fileInput) {
+          fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            if (file.size > 500 * 1024) { notify.toast('File too large (max 500KB)', 'warning'); return; }
+            const dataUrl = await fileToDataUrl(file);
+            if (dataUrl) { logoDataUrl = dataUrl; logoChoice = 'file'; renderLogo(avatar, previewWrap); }
+          });
+        }
+      }
+
       const saveBtn = el.querySelector('[data-act="save"]');
       saveBtn?.addEventListener('click', async () => {
         const name = el.querySelector('#cpEditName')?.value || '';
@@ -1004,11 +1770,24 @@ async function editCustomProviderFlow(id) {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
         try {
-          const r = await cpService.updateCustomProvider(id, {
+          const payload = {
             name, website: el.querySelector('#cpEditWebsite')?.value || '',
             description: el.querySelector('#cpEditDesc')?.value || '',
-            baseUrl, format: el.querySelector('#cpEditFormat')?.value || 'unknown',
-          });
+            baseUrl, format: el.querySelector('input[name="cpEditFormat"]:checked')?.value || 'unknown',
+          };
+          // Send an explicit logo only when the user changed it. "keep" omits the
+          // field so the server keeps the current logo (and still auto-resolves
+          // when only the URLs changed).
+          if (isCustom) {
+            if (logoChoice === 'file' && logoDataUrl) {
+              payload.logo = { url: logoDataUrl, source: 'upload', status: 'resolved' };
+            } else if (logoChoice === 'website' && logoDataUrl) {
+              payload.logo = { url: logoDataUrl, source: 'website', status: 'resolved' };
+            } else if (logoChoice === 'initials') {
+              payload.logo = { url: null, source: 'generated', status: 'available' };
+            }
+          }
+          const r = await cpService.updateCustomProvider(id, payload);
           if (r?.ok) {
             ctrl.close();
             if (id.startsWith('dyn:')) await refreshDynamicIndex();
@@ -1017,12 +1796,12 @@ async function editCustomProviderFlow(id) {
             if (window.renderGateways) window.renderGateways();
           } else {
             saveBtn.disabled = false;
-            saveBtn.textContent = 'Save';
+            saveBtn.textContent = 'Save changes';
           }
         } catch (e) {
           notify.toast('Update failed: ' + (e?.message || e), 'error');
           saveBtn.disabled = false;
-          saveBtn.textContent = 'Save';
+          saveBtn.textContent = 'Save changes';
         }
       });
     },
