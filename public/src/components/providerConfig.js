@@ -41,9 +41,45 @@ export function openProviderConfig(providerId) {
   //               to directly.
   const { anthropic: anthropicSupported, proxy: showProxy, proxyBaseUrl, proxyFormat } = claudeCodeCompatibility(provider);
 
+  // For Custom Gateway (id 'custom'), if it's configured for OpenAI-compatible, offer proxy
+  const isCustomGateway = provider.id === 'custom';
+  const gwFormat = (workspace.customFormat || provider.format || 'anthropic').toLowerCase();
+  const effectiveProxy = showProxy || (isCustomGateway && (gwFormat === 'openai' || gwFormat === 'openai-compatible'));
+
   const key = Storage.getKey(providerId) || '';
   const model = Storage.getModel(providerId) || '';
-  const baseVal = provider.hasCustomUrl ? (workspace.customUrl || '') : (provider.baseUrl || '');
+  const baseVal = provider.hasCustomUrl ? (workspace.customUrl || provider.baseUrl || '') : (provider.baseUrl || '');
+
+  const HISTORY_KEY = 'nexference_custom_gateway_history_v1';
+  const readHistory = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; } };
+  const writeHistory = (arr) => { try { localStorage.setItem(HISTORY_KEY, JSON.stringify((arr || []).slice(0, 20))); } catch {} };
+  const pushHistory = (entry) => {
+    if (!isCustomGateway) return;
+    const arr = readHistory();
+    const normv = (v) => String(v || '').trim();
+    const sig = `${normv(entry.format)}|${normv(entry.baseUrl)}|${normv(entry.model)}`;
+    const filtered = arr.filter(x => `${normv(x.format)}|${normv(x.baseUrl)}|${normv(x.model)}` !== sig);
+    filtered.unshift({ ...entry, ts: Date.now() });
+    writeHistory(filtered);
+  };
+
+  const gwHistory = isCustomGateway ? readHistory() : [];
+  const historyHtml = isCustomGateway ? `
+      <details class="intg-details" style="margin-top:10px">
+        <summary>Gateway History</summary>
+        <div class="gw-history-list" data-gw-history>
+          ${gwHistory.length ? gwHistory.map((h, i) => `
+            <div class="gw-hist-row" data-hidx="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:600">${esc(h.format === 'openai' || h.format === 'openai-compatible' ? 'OpenAI-compatible' : 'Anthropic')}</div>
+                <div class="muted" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.baseUrl || '—')}${h.model ? ' · ' + esc(h.model) : ''}</div>
+              </div>
+              <button class="btn btn2 sm" type="button" data-gw-restore="${i}">Restore</button>
+              <button class="btn btn2 sm" type="button" data-gw-delete="${i}" style="color:var(--danger,#ef4444)">Delete</button>
+            </div>
+          `).join('') : '<div class="muted" style="padding:8px 0;font-size:12px">No saved history yet. Apply or test to save entries.</div>'}
+        </div>
+      </details>` : '';
 
   const body = `
     <div class="pc">
@@ -57,9 +93,17 @@ export function openProviderConfig(providerId) {
       </div>
       <p class="pc-desc">${esc(provider.desc)}</p>
 
+      ${isCustomGateway ? `
+        <label class="lbl">Provider Type</label>
+        <div class="gw-type-row" style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button type="button" class="btn btn2 gw-type-btn ${gwFormat !== 'openai' && gwFormat !== 'openai-compatible' ? 'is-on' : ''}" data-gw-type="anthropic">Anthropic</button>
+          <button type="button" class="btn btn2 gw-type-btn ${gwFormat === 'openai' || gwFormat === 'openai-compatible' ? 'is-on' : ''}" data-gw-type="openai">OpenAI-compatible</button>
+        </div>
+        <div class="muted" style="font-size:11px;margin:-4px 0 10px">OpenAI-compatible routes through the Nexference proxy for Claude Code.</div>` : ''}
+
       ${provider.hasCustomUrl ? `
         <label class="lbl">Base URL</label>
-        <input class="inp base-url-${providerId}" type="text" value="${esc(baseVal)}" placeholder="https://your-gateway.com/v1/" />` : ''}
+        <input class="inp base-url-${providerId}" type="text" value="${esc(baseVal)}" placeholder="${isCustomGateway ? 'https://your-gateway.com/v1/' : 'Gateway base URL'}" />` : ''}
 
       <label class="lbl">API Key</label>
       <div class="key-row">
@@ -74,17 +118,19 @@ export function openProviderConfig(providerId) {
 
       <div class="modal-actions">
           <button class="btn btn2" data-act="test" type="button">Test Connection</button>
-          ${showProxy ? '<button class="btn btn2" data-act="proxy" type="button">Use with Claude Code (via Nexference)</button>' : ''}
-          <button class="btn btn-go" data-act="apply" type="button">${anthropicSupported ? 'Apply to Claude Code' : 'Show config'}</button>
+          ${(isCustomGateway || effectiveProxy) ? `<button class="btn btn2" data-act="proxy" type="button" ${isCustomGateway && !(gwFormat === 'openai' || gwFormat === 'openai-compatible') ? 'style="display:none"' : ''}>Use with Claude Code (via Nexference)</button>` : ''}
+          <button class="btn btn-go" data-act="apply" type="button">${(isCustomGateway && (gwFormat === 'openai' || gwFormat === 'openai-compatible')) ? 'Show config / Use via Proxy' : (anthropicSupported ? 'Apply to Claude Code' : 'Show config')}</button>
         </div>
 
         <div data-cfg-host hidden></div>
         <div data-proxy-host hidden></div>
 
-      <details class="intg-details">
+      ${historyHtml}
+
+      ${( (provider.hasCustomUrl ? (baseVal || '').trim() : true) || (key || '').trim() || (model || '').trim() ) ? `<details class="intg-details">
         <summary>Provider Integration</summary>
         <div id="intgHost-${providerId}" class="intg-section">Loading integration…</div>
-      </details>
+      </details>` : ''}
     </div>`;
 
   const { close } = openModal({
@@ -133,6 +179,89 @@ export function openProviderConfig(providerId) {
         }
       }
 
+      // Custom Gateway: type selector, base URL persistence, history
+      if (isCustomGateway) {
+        let currentGwFormat = (workspace.customFormat || 'anthropic').toLowerCase();
+        const baseUrlInput = cpField(b, 'base-url', providerId);
+        const syncGwState = () => {
+          workspace.customFormat = currentGwFormat;
+          if (baseUrlInput) workspace.customUrl = baseUrlInput.value;
+          Storage.setModel(providerId, (cpField(b, 'model', providerId)?.value || '').trim());
+          Storage.setKey(providerId, keyInput.value || '');
+        };
+        baseUrlInput?.addEventListener('input', () => { workspace.customUrl = baseUrlInput.value; });
+        b.querySelectorAll('[data-gw-type]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            currentGwFormat = btn.dataset.gwType === 'openai' ? 'openai' : 'anthropic';
+            workspace.customFormat = currentGwFormat;
+            b.querySelectorAll('[data-gw-type]').forEach(x => x.classList.toggle('is-on', x === btn));
+            const pbtn = b.querySelector('[data-act="proxy"]');
+            const abtn = b.querySelector('[data-act="apply"]');
+            const isOpenAI = currentGwFormat === 'openai';
+            if (pbtn) pbtn.style.display = isOpenAI ? '' : 'none';
+            if (abtn) abtn.textContent = isOpenAI ? 'Show config / Use via Proxy' : 'Apply to Claude Code';
+            // proxy panel reads current state on open; if open, re-render
+            if (proxyHost && !proxyHost.hidden) openPanel().catch(() => {});
+          });
+        });
+        const rerenderHistory = () => {
+          const host = b.querySelector('[data-gw-history]');
+          if (!host) return;
+          const arr = readHistory();
+          host.innerHTML = arr.length ? arr.map((h, i) => `
+            <div class="gw-hist-row" data-hidx="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:600">${esc(h.format === 'openai' || h.format === 'openai-compatible' ? 'OpenAI-compatible' : 'Anthropic')}</div>
+                <div class="muted" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.baseUrl || '—')}${h.model ? ' · ' + esc(h.model) : ''}</div>
+              </div>
+              <button class="btn btn2 sm" type="button" data-gw-restore="${i}">Restore</button>
+              <button class="btn btn2 sm" type="button" data-gw-delete="${i}" style="color:var(--danger,#ef4444)">Delete</button>
+            </div>
+          `).join('') : '<div class="muted" style="padding:8px 0;font-size:12px">No saved history yet. Apply or test to save entries.</div>';
+        };
+        b.addEventListener('click', (e) => {
+          const restore = e.target.closest('[data-gw-restore]');
+          const del = e.target.closest('[data-gw-delete]');
+          if (restore) {
+            const idx = parseInt(restore.dataset.gwRestore, 10);
+            const arr = readHistory();
+            const h = arr[idx];
+            if (!h) return;
+            currentGwFormat = (h.format === 'openai' || h.format === 'openai-compatible') ? 'openai' : 'anthropic';
+            workspace.customFormat = currentGwFormat;
+            if (baseUrlInput) { baseUrlInput.value = h.baseUrl || ''; workspace.customUrl = baseUrlInput.value; }
+            if (h.model) { Storage.setModel(providerId, h.model); const m = cpField(b, 'model', providerId); if (m) m.value = h.model; }
+            b.querySelectorAll('[data-gw-type]').forEach(x => x.classList.toggle('is-on', x.dataset.gwType === currentGwFormat));
+            const pbtn = b.querySelector('[data-act="proxy"]');
+            const abtn = b.querySelector('[data-act="apply"]');
+            const isOpenAI = currentGwFormat === 'openai';
+            if (pbtn) pbtn.style.display = isOpenAI ? '' : 'none';
+            if (abtn) abtn.textContent = isOpenAI ? 'Show config / Use via Proxy' : 'Apply to Claude Code';
+            notify.toast('Custom Gateway settings restored', 'success');
+          }
+          if (del) {
+            const idx = parseInt(del.dataset.gwDelete, 10);
+            const arr = readHistory();
+            arr.splice(idx, 1);
+            writeHistory(arr);
+            rerenderHistory();
+            notify.toast('History entry deleted', 'success');
+          }
+        });
+        // Save history on test/apply interactions (best-effort)
+        const saveGwHistoryNow = () => {
+          syncGwState();
+          pushHistory({
+            format: workspace.customFormat || currentGwFormat,
+            baseUrl: (baseUrlInput?.value || workspace.customUrl || '').trim(),
+            model: (cpField(b, 'model', providerId)?.value || '').trim(),
+          });
+          rerenderHistory();
+        };
+        b.querySelector('[data-act="test"]')?.addEventListener('click', () => setTimeout(saveGwHistoryNow, 0), true);
+        b.querySelector('[data-act="apply"]')?.addEventListener('click', () => setTimeout(saveGwHistoryNow, 0), true);
+      }
+
       b.querySelector('[data-act="test"]').addEventListener('click', () => {
         // Reuse the proven global testConnection (reads the .api-key-* / .model-* /
         // .base-url-* selectors this modal renders). No behaviour change.
@@ -159,15 +288,18 @@ export function openProviderConfig(providerId) {
         // verifying and listing models against it would probe a `contents` API
         // with OpenAI payloads and always fail. Fall back to the native
         // baseUrl/format for ordinary single-surface OpenAI providers.
-        const proxyProvider = {
-          identity: { name: provider.name },
-          name: provider.name,
-          api: { baseUrl: proxyBaseUrl || provider.baseUrl, format: proxyFormat || provider.format },
+        const getProxyProvider = () => {
+          if (isCustomGateway) {
+            const fmt = (workspace.customFormat || 'anthropic').toLowerCase() === 'openai' ? 'openai' : 'anthropic';
+            const baseUrl = (cpField(b, 'base-url', providerId)?.value || workspace.customUrl || '').trim();
+            return { identity: { name: provider.name }, name: provider.name, api: { baseUrl, format: fmt } };
+          }
+          return { identity: { name: provider.name }, name: provider.name, api: { baseUrl: proxyBaseUrl || provider.baseUrl, format: proxyFormat || provider.format } };
         };
-      const openPanel = async () => {
-        const { renderProxyPanel } = await import('../ui/customProvider.js');
-        await renderProxyPanel(proxyHost, proxyProvider, providerId, { getApiKey: () => keyInput.value });
-      };
+        const openPanel = async () => {
+          const { renderProxyPanel } = await import('../ui/customProvider.js');
+          await renderProxyPanel(proxyHost, getProxyProvider(), providerId, { getApiKey: () => keyInput.value });
+        };
       proxyBtn?.addEventListener('click', async () => {
         if (!proxyHost) return;
         if (!proxyHost.hidden) {
@@ -219,9 +351,36 @@ export function openProviderConfig(providerId) {
         const baseUrl = provider.hasCustomUrl
           ? (cpField(b, 'base-url', providerId)?.value || baseVal)
           : (provider.baseUrl || '');
-        const cfg = configEngine.buildClaudeSettings(provider, baseUrl, model, key);
+        // Persist custom gateway state
+        if (isCustomGateway) {
+          workspace.customUrl = (cpField(b, 'base-url', providerId)?.value || '').trim();
+          // save history snapshot
+          try {
+            pushHistory({ format: workspace.customFormat || 'anthropic', baseUrl: workspace.customUrl, model });
+            const hHost = b.querySelector('[data-gw-history]');
+            if (hHost) {
+              const arr = readHistory();
+              hHost.innerHTML = arr.length ? arr.map((h, i) => `
+                <div class="gw-hist-row" data-hidx="${i}" style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600">${esc(h.format === 'openai' || h.format === 'openai-compatible' ? 'OpenAI-compatible' : 'Anthropic')}</div>
+                    <div class="muted" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(h.baseUrl || '—')}${h.model ? ' · ' + esc(h.model) : ''}</div>
+                  </div>
+                  <button class="btn btn2 sm" type="button" data-gw-restore="${i}">Restore</button>
+                  <button class="btn btn2 sm" type="button" data-gw-delete="${i}" style="color:var(--danger,#ef4444)">Delete</button>
+                </div>
+              `).join('') : '<div class="muted" style="padding:8px 0;font-size:12px">No saved history yet. Apply or test to save entries.</div>';
+            }
+          } catch {}
+        }
+        const gwIsOpenAI = isCustomGateway && ((workspace.customFormat || 'anthropic').toLowerCase() === 'openai');
+        const cfgProvider = gwIsOpenAI ? { ...provider, format: 'openai', claudeCode: false } : provider;
+        const cfg = configEngine.buildClaudeSettings(cfgProvider, baseUrl, model, key);
 
-        if (anthropicSupported) {
+        const effectiveAnthropic = isCustomGateway ? !gwIsOpenAI : anthropicSupported;
+        const effectiveProxyNow = showProxy || gwIsOpenAI;
+
+        if (effectiveAnthropic) {
           const ok = await LocalSettingsRuntime.write(cfg);
           if (ok) {
             Storage.setKey(providerId, key);
@@ -278,11 +437,11 @@ export function openProviderConfig(providerId) {
                 <button class="btn btn2 sm" data-act="cfg-close" type="button">Hide</button>
               </div>
               <p class="px-note">${esc(sub)}</p>
-              <p class="px-hint px-hint-warn">Claude Code only reads <code>ANTHROPIC_*</code> variables, so this config has no effect on it. To use ${esc(provider.name)} with Claude Code, use the Nexference local proxy, which translates the request for you.</p>
+              <p class="px-hint px-hint-warn">${gwIsOpenAI ? `This Custom Gateway is set to <strong>OpenAI-compatible</strong>. Use the Nexference proxy to connect it to Claude Code.` : `Claude Code only reads <code>ANTHROPIC_*</code> variables, so this config has no effect on it. To use ${esc(provider.name)} with Claude Code, use the Nexference local proxy, which translates the request for you.`}</p>
               <pre class="code config-code pc-cfg-code">${esc(JSON.stringify(config, null, 2))}</pre>
               <div class="px-actions">
                 <button class="btn btn2" data-act="cfg-copy" type="button">Copy config</button>
-                ${showProxy ? '<button class="btn btn-go" data-act="cfg-to-proxy" type="button">Set up Claude Code instead</button>' : ''}
+                ${effectiveProxyNow ? '<button class="btn btn-go" data-act="cfg-to-proxy" type="button">Set up Claude Code instead</button>' : ''}
               </div>`;
             cfgHost.querySelector('[data-act="cfg-copy"]')?.addEventListener('click', async () => {
               const text = JSON.stringify(config, null, 2);

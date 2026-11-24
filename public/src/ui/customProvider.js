@@ -194,6 +194,11 @@ export function customProviderCard(p) {
   // scrape endpoint before ceding to the initial monogram. `data:` logos render
   // directly.
   const site = p.website || p.sub || '';
+  let subDom = '';
+  if (p.sub) subDom = p.sub;
+  else if (site) {
+    try { const u = site.startsWith('http') ? new URL(site) : new URL('https://' + site); subDom = u.hostname; } catch {}
+  }
   const logoImg = (src, fbUrl) => `<img src="${src}" alt="" loading="lazy" onerror="if(!this.hu){this.hu=1;fetch('${fbUrl}').then(r=>r.json()).then(d=>{if(d&&d.ok&&d.url){this.src=d.url}else{this.style.display='none';this.nextElementSibling.style.display=''}}).catch(()=>{this.style.display='none';this.nextElementSibling.style.display=''})}else{this.style.display='none';this.nextElementSibling.style.display=''}" /><span class="mono-fallback" style="display:none">${svgLogo(p)}</span>`;
   const favSrc = p.logo
     ? (p.logo.startsWith('data:')
@@ -201,10 +206,11 @@ export function customProviderCard(p) {
       : logoImg(`/api/ecosystem/logo?url=${encodeURIComponent(p.logo)}`, site ? `/api/custom-providers/favicon?url=${encodeURIComponent(site)}&format=data` : ''))
     : `<span class="mono-fallback">${svgLogo(p)}</span>`;
 
+  const isCustomGateway = p.id === 'custom' || id === 'custom' || name.toLowerCase().includes('custom gateway');
   return `<div class="panel provider-card cp-card${active ? ' applied' : ''}" data-id="${id}" data-origin="custom" role="button" tabindex="0">
     <div class="pc-head">
       <div class="pc-logo-sm">${favSrc}</div>
-      <div class="provider-meta"><b>${name}</b><span class="provider-compat">${compat}</span></div>
+      <div class="provider-meta"><b>${name}</b>${!isCustomGateway && subDom ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" data-sub="${esc(subDom)}" title="Open ${esc(subDom)}">${esc(subDom)}</div>` : ''}<span class="provider-compat">${compat}</span></div>
       ${dot}
     </div>
     <div class="pc-card-foot">
@@ -788,7 +794,7 @@ export async function openCustomProviderDetail(id) {
         }</div>
         <div class="pc-meta">
           <div class="pc-name">${esc(p.identity?.name || id)}</div>
-          ${sub ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" title="Open ${esc(sub)}">${esc(sub)}</div>` : ''}
+          ${(id === 'custom' || p.id === 'custom') ? '' : (sub ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" title="Open ${esc(sub)}">${esc(sub)}</div>` : '')}
         </div>
         <span class="badge ${anthropicSupported ? 'cc' : 'browse'}">${anthropicSupported ? 'Claude Code' : 'Browse · API'}</span>
       </div>
@@ -902,8 +908,13 @@ export async function openCustomProviderDetail(id) {
       // the integration section / edit dialog / config path all stay in sync.
       const baseUrlInput = body.querySelector('#cpDetailBaseUrl');
       if (baseUrlInput) {
+        // Update value from latest provider data if available
+        const latestBase = p.api?.baseUrl || Storage.getBaseUrl(id) || '';
+        if (latestBase && baseUrlInput.value !== latestBase) {
+          baseUrlInput.value = latestBase;
+        }
         let baseUrlTimer = null;
-        let savedBaseUrl = p.api?.baseUrl || '';
+        let savedBaseUrl = p.api?.baseUrl || latestBase || '';
         baseUrlInput.addEventListener('input', () => {
           const val = baseUrlInput.value.trim();
           Storage.setBaseUrl(id, val);
@@ -1586,7 +1597,7 @@ export function initCustomProviderActions() {
 async function editCustomProviderFlow(id) {
   const data = await cpService.getCustomProvider(id);
   if (!data?.provider) { notify.toast('Provider not found', 'error'); return; }
-  const p = data.provider;
+  let p = data.provider;
   const isCustom = String(id).startsWith('cst:');
   // cst records store logo as { url, source, status }; adopted shapes carry a
   // plain URL string. Normalise to a displayable URL.
@@ -1790,6 +1801,10 @@ async function editCustomProviderFlow(id) {
           const r = await cpService.updateCustomProvider(id, payload);
           if (r?.ok) {
             ctrl.close();
+            // Update local reference so the detail modal sees new values if reopened
+            if (r.provider) p = r.provider;
+            // Persist baseUrl to storage as well
+            if (payload.baseUrl) Storage.setBaseUrl(id, payload.baseUrl);
             if (id.startsWith('dyn:')) await refreshDynamicIndex();
             notify.toast('Updated', 'success');
             if (window.renderCloudProviders) window.renderCloudProviders();

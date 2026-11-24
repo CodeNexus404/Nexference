@@ -84,25 +84,13 @@ export async function integrationSectionHTML(providerId) {
     intg.getExecutionStatus(providerId).catch(() => null),
   ]);
   if (!rec && !execStatus) {
-    return `<div class="intg-stats"><div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico intg-unk">?</span>Unknown</span></div></div>
-      <div class="eco-detail-actions"><button class="btn btn-sm" data-intg-action="assess" data-id="${esc(providerId)}">Assess Integration</button></div>`;
+    return `<div class="intg-stats"><div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico intg-unk">?</span>Unknown</span></div></div>`;
   }
   const m = rec ? statusMeta(rec.integrationStatus) : STATUS_META.unknown;
   const st = statusIcon(rec?.integrationStatus);
   const adapter = rec ? (ADAPTER_LABEL[rec.adapterType] || rec.adapterType || 'Unknown') : 'Unknown';
   const cap = rec?.configuration || {};
   const exec = rec?.execution || {};
-  const evidence = Array.isArray(rec?.evidence) ? rec.evidence : [];
-  const evidenceRows = evidence.length
-    ? evidence.map((e) => `<li>${esc(e.claim || '—')} <span class="muted">· ${esc(e.sourceType || 'unknown')} · ${esc(e.confidence || 'unknown')}</span></li>`).join('')
-    : '<li class="muted">No integration evidence recorded yet.</li>';
-
-  const actions = actionButtons(rec || { providerId, integrationStatus: 'unknown' });
-
-  // Execution routing (v2.0.0)
-  const execMeta = execStatus ? (EXEC_STATUS_META[execStatus.status] || EXEC_STATUS_META.unsupported) : null;
-  const execIcon = execStatus ? statusIcon(execStatus.status) : STATUS_ICON.unknown;
-  const routeLabel = execStatus?.route ? (ROUTE_LABEL[execStatus.route] || execStatus.route) : null;
 
   return `
     <div class="intg-stats">
@@ -115,22 +103,7 @@ export async function integrationSectionHTML(providerId) {
       <div class="intg-col"><span class="intg-col-title">Configuration</span>${capRow('API key', cap.supportsApiKey)}${capRow('Base URL', cap.supportsBaseUrl)}${capRow('Model selection', cap.supportsModelSelection)}${capRow('Custom headers', cap.supportsCustomHeaders)}${capRow('Env variables', cap.supportsEnvironmentVariables)}</div>
       <div class="intg-col"><span class="intg-col-title">Execution</span>${capRow('Chat', exec.supportsChat)}${capRow('Streaming', exec.supportsStreaming)}${capRow('Model listing', exec.supportsModelListing)}${capRow('Connection test', exec.supportsConnectionTest)}</div>
     </div>
-    ${execMeta ? `<div class="intg-exec-routing">
-      <span class="intg-col-title">Execution routing</span>
-      <div class="intg-stats intg-stats-3">
-        <div class="intg-stat"><span class="intg-stat-label">Status</span><span class="intg-stat-val"><span class="intg-ico ${execIcon.cls}">${execIcon.ch}</span>${esc(execMeta.label)}</span></div>
-        ${routeLabel ? `<div class="intg-stat"><span class="intg-stat-label">Route</span><span class="intg-stat-val">${esc(routeLabel)}</span></div>` : ''}
-        ${execStatus?.adapterType ? `<div class="intg-stat"><span class="intg-stat-label">Adapter</span><span class="intg-stat-val">${esc(execStatus.adapterType)}</span></div>` : ''}
-        ${execStatus?.statusReason ? `<div class="intg-stat"><span class="intg-stat-label">Reason</span><span class="intg-stat-val" title="${esc(execStatus.statusReason)}">${esc(execStatus.statusReason)}</span></div>` : ''}
-      </div>
-    </div>` : ''}
-    ${rec?.warnings && rec.warnings.length ? `<div class="intg-alerts">${rec.warnings.map((w) => `<div>• ${esc(w)}</div>`).join('')}</div>` : ''}
-    <div id="intgEvidence-${esc(providerId)}" class="intg-evidence">
-      <span class="intg-col-title">Evidence</span>
-      <ul>${evidenceRows}</ul>
-    </div>
-    <div id="intgModels-${esc(providerId)}" class="intg-models"></div>
-    <div class="eco-detail-actions">${actions}</div>`;
+    ${rec?.warnings && rec.warnings.length ? `<div class="intg-alerts">${rec.warnings.map((w) => `<div>• ${esc(w)}</div>`).join('')}</div>` : ''}`;
 }
 
 function actionButtons(rec) {

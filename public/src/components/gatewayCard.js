@@ -18,7 +18,11 @@ export function createGatewayCard(provider) {
   card.className = 'card';
   card.dataset.id = provider.id;
   card.style.setProperty('--card-accent', provider.accent);
-  card.onclick = () => pick(provider.id);
+  card.onclick = (e) => {
+    if (e.target.closest('button,a,select,input,textarea,.modal,[role="button"][data-no-config]')) return;
+    pick(provider.id);
+    if (window.openProviderConfig) window.openProviderConfig(provider.id);
+  };
 
   const key = Storage.getKey(provider.id);
   const model = Storage.getModel(provider.id);

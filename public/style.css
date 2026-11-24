@@ -3763,3 +3763,13 @@ html.reduce-motion *::after{
 }
 /* Sit level with the Provider Intelligence card it is paired with. */
 .security-note{display:flex;flex-direction:column;justify-content:flex-start}
+
+/* Custom Gateway provider type toggle */
+.gw-type-btn.is-on,.gw-type-btn.on{
+  background:var(--accent-soft, rgba(99,102,241,.12));
+  color:var(--accent, #6366f1);
+  border-color:color-mix(in srgb, var(--accent, #6366f1) 45%, var(--border));
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--accent, #6366f1) 18%, transparent) inset;
+  font-weight:600;
+}
+.gw-type-btn{transition:background .15s var(--ease),color .15s var(--ease),border-color .15s var(--ease),box-shadow .15s var(--ease)}

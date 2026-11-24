@@ -3290,6 +3290,47 @@ function fillProviderIntelSettings() {
 export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) {
   updateCrumb('Cloud Providers');
   const grid = document.getElementById('cpGrid');
+  if (grid && !grid.dataset.clickBound) {
+    grid.dataset.clickBound = '1';
+    grid.addEventListener('click', (e) => {
+      if (e.target.closest('.pc-sub-link')) return;
+      if (e.target.closest('button,a,select,input,.modal')) return;
+      const card = e.target.closest('.provider-card.cp-card, .provider-card.eco-cp-card');
+      if (!card) return;
+      const id = card.dataset.id;
+      if (!id) return;
+      if (card.classList.contains('custom-gateway-card') || id === 'custom') {
+        if (window.openProviderConfig) { openProviderConfig(id); return; }
+      }
+      if (card.dataset.origin === 'custom' || id.startsWith('cst:')) {
+        if (window.openCustomProvider) { window.openCustomProvider(id); return; }
+      }
+      if (id.startsWith('dyn:')) {
+        if (window.openDynamicProvider) { window.openDynamicProvider(id); return; }
+      }
+      if (window.openProviderConfig) { openProviderConfig(id); }
+    });
+    grid.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.provider-card.cp-card, .provider-card.eco-cp-card');
+      if (!card) return;
+      if (e.target.closest('.pc-sub-link')) return;
+      if (e.target.closest('button,a,select,input')) return;
+      e.preventDefault();
+      const id = card.dataset.id;
+      if (!id) return;
+      if (card.classList.contains('custom-gateway-card') || id === 'custom') {
+        if (window.openProviderConfig) { openProviderConfig(id); return; }
+      }
+      if (card.dataset.origin === 'custom' || id.startsWith('cst:')) {
+        if (window.openCustomProvider) { window.openCustomProvider(id); return; }
+      }
+      if (id.startsWith('dyn:')) {
+        if (window.openDynamicProvider) { window.openDynamicProvider(id); return; }
+      }
+      if (window.openProviderConfig) { openProviderConfig(id); }
+    });
+  }
   const filtersEl = document.getElementById('cpFilters');
   if (!grid || !filtersEl) return;
 
@@ -3375,9 +3416,6 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
               .map(([v, l]) => `<option value="${v}" ${cardSort === v ? "selected" : ""}>${l}</option>`).join("")}
           </select></div>` +
       `<button class="btn btn2 cp-refresh-all-btn" title="Refresh models for every provider card" data-act="refresh-all" aria-label="Refresh all provider models">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
-        </svg>
         <span class="cp-refresh-all-label">Refresh</span>
       </button>`;
     filtersEl.querySelectorAll('.chip-filter[data-cat]').forEach(b => b.addEventListener('click', () => {
@@ -3571,7 +3609,16 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       return;
     }
 
-    const curatedHtml = curatedCards.map(p => {
+    // Add website/signup fallbacks for curated providers with API hostnames
+  const curatedWithSites = curatedCards.map(p => {
+    if (p.website || p.signup) return p;
+    if (p.id === 'aerolink') return { ...p, website: 'https://aerolink.lat' };
+    if (p.id === 'freemodel') return { ...p, website: 'https://freemodel.dev' };
+    if (p.id === 'chutes') return { ...p, website: 'https://chutes.ai' };
+    return p;
+  });
+
+  const curatedHtml = curatedWithSites.map(p => {
       const key = Storage.getKey(p.id);
       const free = getFreeModels(p.id).length;
       const total = getModels(p.id).length;
@@ -3592,7 +3639,7 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       return `<div class="panel provider-card cp-card${applied ? ' applied' : ''}" data-id="${p.id}" role="button" tabindex="0">
         <div class="pc-head">
           <div class="pc-logo-sm">${logoHtml(p)}</div>
-          <div class="provider-meta"><b>${esc(p.name)}</b><span class="provider-compat">${esc(compat)}</span></div>
+          <div class="provider-meta"><b>${esc(p.name)}</b>${(p.website || p.signup) ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" data-website="${esc(p.website || p.signup)}" title="Open ${esc((p.website||p.signup).replace(/^https?:\/\//,''))}">${esc((p.website||p.signup).replace(/^https?:\/\//,''))}</div>` : p.sub ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" data-sub="${esc(p.sub)}" title="Open ${esc(p.sub)}">${esc(p.sub)}</div>` : ''}<span class="provider-compat">${esc(compat)}</span></div>
           ${dot}
         </div>
         <div class="pc-card-foot">
@@ -3634,12 +3681,32 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
         : () => openProviderConfig(cid);
       c.addEventListener('click', open);
       c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      // Hide subdomain link for Custom Gateway card
+      const isCustomGatewayCard = c.classList.contains('custom-gateway-card') || cid === 'custom';
+      if (isCustomGatewayCard) {
+        c.querySelectorAll('.pc-sub-link').forEach(subEl => { subEl.style.display = 'none'; });
+      } else {
+        c.querySelectorAll('.pc-sub-link').forEach(subEl => {
+          const go = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const url = subEl.dataset.website || (subEl.dataset.sub ? 'https://' + subEl.dataset.sub : null);
+            if (url) window.open(url.startsWith('http') ? url : 'https://' + url, '_blank', 'noopener');
+          };
+          subEl.addEventListener('click', go);
+          subEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { go(e); } });
+        });
+      }
       const det = c.querySelector('.pi-details');
       if (det) det.addEventListener('click', (e) => { e.stopPropagation(); openProviderIntelligence(cid); });
-      const ref = c.querySelector('.pi-refresh');
-      if (ref) ref.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(cid); });
+      const refBtn = c.querySelector('.pi-refresh');
+      if (refBtn) refBtn.addEventListener('click', (e) => { e.stopPropagation(); refreshProviderIntelligence(cid); }); else {
+        // Add refresh button behavior if missing
+      }
       const detailsBtn = c.querySelector('.cp-details-btn');
-      if (detailsBtn) detailsBtn.addEventListener('click', (e) => { e.stopPropagation(); if (window.openCustomProvider) window.openCustomProvider(cid); });
+      if (detailsBtn) detailsBtn.addEventListener('click', (e) => { e.stopPropagation(); if (isCustom) { if (window.openCustomProvider) window.openCustomProvider(cid); } else { openProviderConfig(cid); } }); else {
+        // For curated cards that don't have details button, ensure click still works - already handled above
+      }
       const refreshBtn = c.querySelector('.cp-refresh-btn');
       if (refreshBtn) refreshBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -3706,6 +3773,17 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
       const id = c.dataset.id;
       const open = () => { if (id.startsWith('dyn:')) { if (window.openDynamicProvider) window.openDynamicProvider(id); } else if (id.startsWith('cst:')) { if (window.openCustomProvider) window.openCustomProvider(id); } else if (window.openEcosystemProvider) window.openEcosystemProvider(id); };
       c.addEventListener('click', open);
+      c.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      c.querySelectorAll('.pc-sub-link').forEach(subEl => {
+        const go = (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const url = subEl.dataset.website || (subEl.dataset.sub ? 'https://' + subEl.dataset.sub : null);
+          if (url) window.open(url.startsWith('http') ? url : 'https://' + url, '_blank', 'noopener');
+        };
+        subEl.addEventListener('click', go);
+        subEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { go(e); } });
+      });
     });
   };
 
@@ -3724,7 +3802,7 @@ export function renderCloudProviders({ registryFilter: initialRegFilter } = {}) 
     return `<div class="panel provider-card eco-cp-card${appliedCls}" data-id="${esc(e.id)}" role="button" tabindex="0">
       <div class="pc-head">
         <div class="pc-logo-sm">${logo}</div>
-        <div class="provider-meta"><b>${esc(e.name)}</b><span class="provider-compat">${esc(e.category || 'unknown')}</span></div>
+        <div class="provider-meta"><b>${esc(e.name)}</b>${e.website ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" data-website="${esc(e.website)}" title="Open ${esc(e.website.replace(/^https?:\/\//,''))}">${esc(e.website.replace(/^https?:\/\//,''))}</div>` : e.homepage ? `<div class="pc-sub pc-sub-link" role="link" tabindex="0" data-website="${esc(e.homepage)}" title="Open ${esc(e.homepage.replace(/^https?:\/\//,''))}">${esc(e.homepage.replace(/^https?:\/\//,''))}</div>` : ''}<span class="provider-compat">${esc(e.category || 'unknown')}</span></div>
       </div>
       <div class="pc-card-foot">
         <span class="badge pi-src">ecosystem</span>${stateBadge}${cfgBadge}${appliedBadge}
